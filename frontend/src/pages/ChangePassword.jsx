@@ -33,7 +33,7 @@ export default function ChangePassword() {
     <div className="login-page">
       <div className="login-card" style={{ width: 420 }}>
         <div className="login-logo" style={{ marginBottom: 20 }}>
-          <img src="/logo-login.png" alt="VaultNexus" style={{ width: '100%', maxWidth: 240, height: 'auto', objectFit: 'contain' }} />
+          <img src="/logo-login.png" alt="NexusVault" style={{ width: '100%', maxWidth: 360, height: 'auto', objectFit: 'contain' }} />
         </div>
         <div className="alert alert-warn" style={{ marginBottom: 16 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>

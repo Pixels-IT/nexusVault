@@ -685,7 +685,7 @@ export default function Backups() {
       <div className="page-header">
         <div>
           <div className="page-title">Backups de configuration</div>
-          <div className="page-sub">Versionning des fichiers des équipements réseau</div>
+          <div className="page-sub">Versionning des fichiers des équipements</div>
         </div>
         <div className="page-actions">
           {compareMode ? (

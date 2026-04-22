@@ -1,15 +1,23 @@
-# VaultNexus — Backup de configurations réseau
+# nexusVault — New EXperience for USer Vault — Environnement de Coffre-Fort ITNexusVault
 
-Interface web de versionning et backup des fichiers de configuration de switchs réseau. Inspiré de Nginx Proxy Manager, basé sur le thème Tabler.
+Interface de versionning des configurations des équipements réseaux et de suivi d'activité IT
+
+## Pourquoi nexusVault ?
+
+Certains documents, fichier de backups des équipements voire le suivi d'activités IT sont des éléments critiques qui ne doivent pas être stockée sur un simple serveur de fichiers ou un NAS.
+En cas de compromission, les attaquants ont tout sous la main ! 
 
 ## Fonctionnalités
 
-- **Backup & versionning** des configurations réseau (Cisco, HP Aruba, Juniper…)
+- **Backup & versionning** des configurations réseau (Switch, Pare-Feu, NAS, etc…) avec filtrage
+- **Importation de backup manuel et automatique
 - **Diff visuel** entre deux versions (ajouts en vert, suppressions en rouge)
-- **Chiffrement AES-256** de toutes les données sensibles en base SQLite
 - **Gestion des sites**, équipements et modèles d'équipements
+- **Suivi d'activité des équipes IT par TAG avec filtrage
+- **Chiffrement AES-256** de toutes les données sensibles en base SQLite
+- **Gestion des droits d'accès par rôle
+- **Audit complet des activités : Connexion OK/NOK, Ajout/Suppresion/Consultation/Modification
 - **Mode sombre / clair** avec persistance
-- **Compte admin** avec changement de mot de passe obligatoire à la première connexion
 
 ## Démarrage rapide
 
@@ -22,7 +30,7 @@ Interface web de versionning et backup des fichiers de configuration de switchs 
 
 ```bash
 # Cloner ou copier le projet
-git clone <repo> vaultnexus && cd vaultnexus
+git clone <repo> nexusvault && cd nexusvault
 
 # Créer le fichier de configuration
 cp .env.example .env
@@ -71,7 +79,7 @@ docker compose down -v
 ## Architecture
 
 ```
-vaultnexus/
+nexusvault/
 ├── docker-compose.yml
 ├── .env.example
 ├── backend/                  # Node.js + Express + SQLite
@@ -92,17 +100,17 @@ vaultnexus/
 **2 conteneurs Docker :**
 | Conteneur | Rôle | Port exposé |
 |---|---|---|
-| `vaultnexus-frontend` | React + Nginx (reverse proxy) | `APP_PORT` → 80 |
-| `vaultnexus-backend` | Node.js API + SQLite | interne (3001) |
+| `nexusvault-frontend` | React + Nginx (reverse proxy) | `APP_PORT` → 80 |
+| `nexusvault-backend` | Node.js API + SQLite | interne (3001) |
 
 Le backend n'est **jamais exposé directement** — tout le trafic passe par Nginx.
 
 ## Chiffrement des données
 
-VaultNexus utilise un **double chiffrement** à partir d'une seule clé (`ENCRYPTION_KEY`) :
+NexusVault utilise un **double chiffrement** à partir d'une seule clé (`ENCRYPTION_KEY`) :
 
 ### Niveau 1 — Fichier SQLite (SQLCipher)
-Le fichier `vaultnexus.db` est entièrement chiffré par **SQLCipher** (AES-256 + PBKDF2-HMAC-SHA512, 256 000 itérations). Ouvert avec un éditeur hex ou SQLite Browser sans la clé, le fichier est illisible — il n'affiche que des octets aléatoires.
+Le fichier `nexusvault.db` est entièrement chiffré par **SQLCipher** (AES-256 + PBKDF2-HMAC-SHA512, 256 000 itérations). Ouvert avec un éditeur hex ou SQLite Browser sans la clé, le fichier est illisible — il n'affiche que des octets aléatoires.
 
 ### Niveau 2 — Colonnes sensibles (AES-256-CBC)
 En plus du chiffrement du fichier, chaque valeur sensible est individuellement chiffrée avant d'être écrite :
@@ -125,9 +133,9 @@ docker compose up -d
 
 ## Sauvegarde des données
 
-Les données SQLite sont stockées dans le volume Docker `vaultnexus-data`. Pour sauvegarder :
+Les données SQLite sont stockées dans le volume Docker `nexusvault-data`. Pour sauvegarder :
 
 ```bash
-docker run --rm -v vaultnexus_vaultnexus-data:/data -v $(pwd):/backup alpine \
-  tar czf /backup/vaultnexus-backup-$(date +%Y%m%d).tar.gz /data
+docker run --rm -v nexusvault-data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/nexusvault-backup-$(date +%Y%m%d).tar.gz /data
 ```

@@ -5,7 +5,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: vaultnexus-backend
+    container_name: nexusvault-backend
     restart: unless-stopped
     environment:
       # Clé de chiffrement AES-256 pour les données sensibles en base SQLite.
@@ -17,7 +17,9 @@ services:
       # Générer : openssl rand -hex 32
       JWT_SECRET: ${JWT_SECRET:-CHANGEZ-CE-SECRET-JWT-AVANT-PROD!!}
 
-      DB_PATH: /data/vaultnexus.db
+      DB_PATH: /data/nexusvault.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      APP_URL: ${APP_URL:-http://localhost:8080}
       PORT: 3001
       NODE_ENV: production
 
@@ -26,9 +28,9 @@ services:
       TZ: ${TZ:-Europe/Paris}
 
     volumes:
-      - vaultnexus-data:/data
+      - nexusvault-data:/data
     networks:
-      - vaultnexus-net
+      - nexusvault-net
     expose:
       - "3001"
     healthcheck:
@@ -42,8 +44,10 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        CACHEBUST: 20260422211543
       dockerfile: Dockerfile
-    container_name: vaultnexus-frontend
+    container_name: nexusvault-frontend
     restart: unless-stopped
     ports:
       # Modifiez APP_PORT dans le fichier .env pour changer le port d'écoute.
@@ -54,14 +58,14 @@ services:
       backend:
         condition: service_healthy
     networks:
-      - vaultnexus-net
+      - nexusvault-net
 
 # ── VOLUMES ──────────────────────────────────────────────────────────────────
 volumes:
-  vaultnexus-data:
+  nexusvault-data:
     driver: local
 
 # ── RÉSEAU INTERNE ───────────────────────────────────────────────────────────
 networks:
-  vaultnexus-net:
+  nexusvault-net:
     driver: bridge

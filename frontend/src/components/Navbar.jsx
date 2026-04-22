@@ -94,7 +94,7 @@ export default function Navbar() {
 
         {/* GAUCHE — logo */}
         <div className="nav-brand">
-          <img src="/logo-nav.png" alt="VaultNexus" />
+          <img src="/logo-nav.png" alt="NexusVault" />
         </div>
 
         {/* CENTRE — liens */}

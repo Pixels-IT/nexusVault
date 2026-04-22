@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
-const DB_PATH = process.env.DB_PATH || '/data/vaultnexus.db';
+const DB_PATH = process.env.DB_PATH || '/data/nexusvault.db';
 
 // Clé maître : chiffrement SQLite (niveau fichier) ET chiffrement AES-256 des colonnes sensibles
 const ENC_KEY = process.env.ENCRYPTION_KEY || 'default-insecure-key-change-me!!';
@@ -110,6 +110,35 @@ function initSchema() {
       FOREIGN KEY(device_id) REFERENCES devices(id)
     );
 
+
+
+
+    CREATE TABLE IF NOT EXISTS activity_entry_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL,  -- created | updated | tag_changed | preview_changed
+      detail TEXT,
+      changed_by INTEGER,
+      changed_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS audit_archives (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      entry_count INTEGER NOT NULL DEFAULT 0,
+      data_json TEXT NOT NULL,
+      archived_at TEXT NOT NULL,
+      archived_by TEXT DEFAULT 'cron',
+      UNIQUE(year, month)
+    );
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
@@ -158,6 +187,7 @@ function initSchema() {
   // Migrations: ajouter colonnes si absentes
   try { db.exec("ALTER TABLE users ADD COLUMN last_login_at TEXT"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN email TEXT"); } catch {}
+  try { db.exec("ALTER TABLE activity_entries ADD COLUMN is_preview INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE backups ADD COLUMN pinned INTEGER DEFAULT 0"); } catch {}
 
   // Admin par défaut

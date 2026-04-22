@@ -79,7 +79,7 @@ a { color: var(--acc); text-decoration: none; }
 }
 
 .nav-brand svg { width: 28px; height: 28px; }
-.nav-brand img { height: 38px; width: auto; object-fit: contain; }
+.nav-brand img { height: 28px; width: auto; object-fit: contain; max-height: 28px; }
 
 .nav-items { display: flex; align-items: center; gap: 2px; justify-content: center; height: 100%; }
 

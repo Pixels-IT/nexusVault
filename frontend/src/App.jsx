@@ -6,13 +6,14 @@ import { useSessionTimeout } from './hooks/useSessionTimeout.js';
 import Navbar from './components/Navbar.jsx';
 import Login from './pages/Login.jsx';
 import ChangePassword from './pages/ChangePassword.jsx';
+import ResetPassword from './pages/ResetPassword.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Backups from './pages/Backups.jsx';
 import Admin from './pages/Admin.jsx';
 import Activity from './pages/Activity.jsx';
 import './index.css';
 
-const APP_VERSION = '2026-04-22_b3.8';
+const APP_VERSION = '2026-04-22_b34.95';
 
 // ── Banner avertissement session ───────────────────────────────────────────────
 function SessionWarning({ seconds, onDismiss }) {
@@ -41,7 +42,7 @@ function SessionWarning({ seconds, onDismiss }) {
 function Footer() {
   return (
     <footer className="footer-bar">
-      <span>© 2026 VaultNexus — AGPL-3.0 — v{APP_VERSION}</span>
+      <span>© 2026 NexusVault — AGPL-3.0 — v{APP_VERSION}</span>
     </footer>
   );
 }
@@ -81,6 +82,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login"           element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/reset-password"  element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
       <Route path="/change-password" element={<ChangePassword />} />
       <Route path="/*" element={
         <ProtectedLayout>

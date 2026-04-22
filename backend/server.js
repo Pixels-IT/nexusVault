@@ -192,16 +192,325 @@ app.delete('/api/whitelist/:id', authMiddleware, requireRole('admin'), (req, res
   res.json({ success: true });
 });
 
+
+
+// ── LOGGER ─────────────────────────────────────────────────────────────────────
+const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+const LOG_LEVEL_NUM = LEVELS[LOG_LEVEL] ?? 1;
+
+function log(level, ...args) {
+  if ((LEVELS[level] ?? 1) < LOG_LEVEL_NUM) return;
+  const ts = nowLocal(); // heure locale (respecte TZ du conteneur)
+  const prefix = `[${ts}] [${level.toUpperCase().padEnd(5)}]`;
+  if (level === 'error') console.error(prefix, ...args);
+  else console.log(prefix, ...args);
+}
+
+const logger = {
+  debug: (...a) => log('debug', ...a),
+  info:  (...a) => log('info',  ...a),
+  warn:  (...a) => log('warn',  ...a),
+  error: (...a) => log('error', ...a),
+};
+
+
+// ── SMTP CONFIGURATION ────────────────────────────────────────────────────────
+app.get('/api/smtp/config', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM settings WHERE key='smtp_config'").get();
+  if (!row) return res.json({ host: '', port: 587, secure: false, user: '', from: '', app_url: '' });
+  try { res.json(JSON.parse(row.value)); } catch { res.json({}); }
+});
+
+app.put('/api/smtp/config', authMiddleware, requireRole('admin'), (req, res) => {
+  const { host, port, secure, user, pass, from, app_url } = req.body;
+  const db = getDb();
+  const ip = getClientIp(req);
+  const cfg = { host: host || '', port: parseInt(port) || 587, secure: !!secure, user: user || '', pass: pass || '', from: from || '', app_url: app_url || '' };
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('smtp_config', ?)").run(JSON.stringify(cfg));
+  // Mettre à jour les variables d'environnement en mémoire
+  if (host) { process.env.SMTP_HOST = host; process.env.SMTP_PORT = String(cfg.port); process.env.SMTP_SECURE = String(cfg.secure); process.env.SMTP_USER = user || ''; process.env.SMTP_PASS = pass || ''; process.env.SMTP_FROM = cfg.from || 'NexusVault <no-reply@nexusvault.local>'; }
+  if (app_url) process.env.APP_URL = app_url;
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SMTP_CONFIG_MODIFIÉ', category: 'admin', severity: 'info', detail: `SMTP host: ${host || '(vide)'}`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+app.post('/api/smtp/test', authMiddleware, requireRole('admin'), (req, res) => {
+  const transport = getMailTransport();
+  if (!transport) return res.status(400).json({ error: 'SMTP non configuré' });
+  const db = getDb();
+  const user = db.prepare('SELECT email FROM users WHERE id=?').get(req.user.id);
+  if (!user?.email) return res.status(400).json({ error: 'Aucun email sur votre compte pour le test' });
+  const from = process.env.SMTP_FROM || 'NexusVault <no-reply@nexusvault.local>';
+  transport.sendMail({
+    from, to: user.email,
+    subject: 'NexusVault — Test SMTP',
+    html: '<p>Test de configuration SMTP réussi !</p>',
+  }).then(() => res.json({ success: true, to: user.email }))
+    .catch(err => res.status(500).json({ error: err.message }));
+});
+
+// ── RESET MOT DE PASSE PAR EMAIL ──────────────────────────────────────────────
+const nodemailer = require('nodemailer');
+const crypto     = require('crypto');
+
+function getMailTransport() {
+  const host = process.env.SMTP_HOST;
+  if (!host) return null;
+  return nodemailer.createTransport({
+    host,
+    port:   parseInt(process.env.SMTP_PORT   || '587'),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: process.env.SMTP_USER ? {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS || '',
+    } : undefined,
+  });
+}
+
+// POST /api/auth/forgot-password — demande de reset
+app.post('/api/auth/forgot-password', (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.status(400).json({ error: 'Identifiant requis' });
+  const db   = getDb();
+  const user = db.prepare("SELECT id, username, email FROM users WHERE username = ? AND enabled = 1").get(username);
+
+  // Toujours répondre OK (sécurité — ne pas révéler si le compte existe)
+  if (!user) return res.json({ success: true });
+
+  // Générer le token même si pas d'email (log dans les conteneur)
+
+  const token   = crypto.randomBytes(32).toString('hex');
+  // Calculer l'expiration en heure locale (nowLocal + 1h)
+  const nowStr  = nowLocal(); // "YYYY-MM-DD HH:MM:SS" en heure locale
+  const nowMs   = new Date(nowStr.replace(' ', 'T') + 'Z').getTime() || Date.now();
+  // Utiliser directement une date locale : prendre nowLocal et ajouter 3600s
+  const localNow = new Date();
+  const localExp = new Date(localNow.getTime() + 10 * 60 * 1000); // 10 minutes
+  // Formater en heure locale via la même méthode que nowLocal()
+  const pad = n => String(n).padStart(2, '0');
+  const expStr = `${localExp.getFullYear()}-${pad(localExp.getMonth()+1)}-${pad(localExp.getDate())} ${pad(localExp.getHours())}:${pad(localExp.getMinutes())}:${pad(localExp.getSeconds())}`;
+  db.prepare("INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at) VALUES (?,?,?,0,?)")
+    .run(user.id, token, expStr, nowLocal());
+
+  const appUrl  = (process.env.APP_URL || 'http://localhost:8080').replace(/\/$/, '');
+  const resetUrl = `${appUrl}/reset-password?token=${token}`;
+
+  const transport = getMailTransport();
+  // Toujours logger le lien (utile pour debug et pour comptes sans email)
+  logger.info(`[RESET] Lien de réinitialisation pour "${username}": ${resetUrl}`);
+
+  if (!transport || !user.email) {
+    if (!transport) logger.warn('[RESET] SMTP non configuré — lien disponible dans les logs ci-dessus');
+    if (!user.email) logger.warn(`[RESET] Aucun email configuré pour "${username}" — lien disponible dans les logs ci-dessus`);
+    audit(db, {
+      username: user.username, action: 'RESET_DEMANDÉ', category: 'auth', severity: 'info',
+      detail: `Demande de réinitialisation — identifiant: ${user.username} — email: ${user.email || 'non renseigné'} — lien dans les logs`,
+      ip: getClientIp(req), success: 1
+    });
+    return res.json({ success: true });
+  }
+
+  const from = process.env.SMTP_FROM || 'NexusVault <no-reply@nexusvault.local>';
+  transport.sendMail({
+    from, to: user.email,
+    subject: 'NexusVault — Réinitialisation de votre mot de passe',
+    html: `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head><body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:32px">
+<div style="max-width:480px;margin:0 auto;background:white;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)">
+  <div style="background:linear-gradient(135deg,#0d47a1,#26c6da);padding:28px 32px">
+    <div style="color:white;font-size:22px;font-weight:800;letter-spacing:1px">NEXUS<span style="opacity:.7">VAULT</span></div>
+  </div>
+  <div style="padding:28px 32px">
+    <h2 style="color:#1e293b;margin:0 0 12px;font-size:18px">Réinitialisation du mot de passe</h2>
+    <p style="color:#64748b;font-size:13px;margin:0 0 20px">Bonjour <strong>${user.username}</strong>,<br><br>
+    Vous avez demandé la réinitialisation de votre mot de passe NexusVault. Cliquez sur le bouton ci-dessous.</p>
+    <a href="${resetUrl}" style="display:inline-block;background:#1976d2;color:white;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:13px">Réinitialiser mon mot de passe</a>
+    <p style="color:#94a3b8;font-size:11px;margin:20px 0 0">Ce lien est valable <strong>10 minutes</strong>. Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</p>
+    <p style="color:#cbd5e1;font-size:10px;margin:8px 0 0;word-break:break-all">${resetUrl}</p>
+  </div>
+  <div style="background:#f8fafc;padding:14px 32px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8">
+    NexusVault — Ne pas répondre à cet email
+  </div>
+</div></body></html>`,
+  }).catch(err => logger.error('[RESET] Email error:', err.message));
+
+  const ip = getClientIp(req);
+  audit(db, { username: user.username, action: 'RESET_DEMANDÉ', category: 'auth', severity: 'info', detail: `Demande de reset — email: ${user.email}`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+// POST /api/auth/reset-password — validation du token et changement
+app.post('/api/auth/reset-password', (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) return res.status(400).json({ error: 'Paramètres manquants' });
+  if (password.length < 14) return res.status(400).json({ error: '14 caractères minimum' });
+  const db   = getDb();
+  const now  = nowLocal();
+  const row  = db.prepare("SELECT * FROM password_reset_tokens WHERE token=? AND used=0 AND expires_at > ?").get(token, now);
+  if (!row) return res.status(400).json({ error: 'Lien invalide ou expiré' });
+
+  const bcrypt = require('bcryptjs');
+  const hash   = bcrypt.hashSync(password, 12);
+  db.prepare("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?").run(hash, row.user_id);
+  db.prepare("UPDATE password_reset_tokens SET used=1 WHERE id=?").run(row.id);
+
+  const user = db.prepare("SELECT username FROM users WHERE id=?").get(row.user_id);
+  const ip   = getClientIp(req);
+  audit(db, { username: user?.username, action: 'RESET_EFFECTUÉ', category: 'auth', severity: 'info', detail: 'Mot de passe réinitialisé via lien email', ip, success: 1 });
+  res.json({ success: true });
+});
+
+// GET /api/auth/reset-token-valid — vérifier la validité d'un token
+app.get('/api/auth/reset-token-valid', (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).json({ valid: false });
+  const db  = getDb();
+  const now = nowLocal();
+  const row = db.prepare("SELECT id FROM password_reset_tokens WHERE token=? AND used=0 AND expires_at > ?").get(token, now);
+  res.json({ valid: !!row });
+});
+
 // ── ADMINISTRATION : AUDIT ────────────────────────────────────────────────────
-app.get('/api/audit', authMiddleware, requireRole('admin'), (req, res) => {
-  const { limit = 200, category, severity } = req.query;
+app.get('/api/audit', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') {
+    try { const perms = JSON.parse(req.user.permissions || '{}'); if (!perms.audit_access) return res.status(403).json({ error: 'Accès refusé' }); } catch { return res.status(403).json({ error: 'Accès refusé' }); }
+  }
+  const { limit = 200, category, severity, success } = req.query;
   let q = 'SELECT * FROM audit_log WHERE 1=1';
   const p = [];
   if (category) { q += ' AND category = ?'; p.push(category); }
   if (severity) { q += ' AND severity = ?'; p.push(severity); }
+  if (success !== undefined && success !== '') { q += ' AND success = ?'; p.push(parseInt(success)); }
   q += ' ORDER BY id DESC LIMIT ?';
   p.push(parseInt(limit));
   res.json(getDb().prepare(q).all(...p));
+});
+
+
+
+// ── CRON SMTP CHECK (toutes les 2h) ───────────────────────────────────────────
+setInterval(() => {
+  if (!process.env.SMTP_HOST) {
+    logger.warn('[API] SMTP non configuré — les emails de réinitialisation ne seront pas envoyés');
+  }
+}, 2 * 60 * 60 * 1000); // 2 heures
+
+// ── AUDIT : ARCHIVAGE AUTOMATIQUE (fonction partagée) ─────────────────────────
+function archiveMonth(db, year, month, archivedBy) {
+  const yr = String(year), mo = String(month).padStart(2, '0');
+  const rows = db.prepare(
+    "SELECT * FROM audit_log WHERE strftime('%Y', created_at)=? AND strftime('%m', created_at)=? ORDER BY id ASC"
+  ).all(yr, mo);
+  if (rows.length === 0) return { skipped: true };
+  const now = (() => { const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; })();
+  db.prepare("INSERT OR REPLACE INTO audit_archives (year, month, entry_count, data_json, archived_at, archived_by) VALUES (?,?,?,?,?,?)")
+    .run(parseInt(yr), parseInt(mo), rows.length, JSON.stringify(rows), now, archivedBy);
+  db.prepare("DELETE FROM audit_log WHERE strftime('%Y', created_at)=? AND strftime('%m', created_at)=?").run(yr, mo);
+  audit(db, { username: archivedBy, action: 'AUDIT_ARCHIVE_AUTO', category: 'admin', severity: 'info', detail: `Archive ${yr}/${mo} — ${rows.length} entree(s)`, ip: '127.0.0.1', success: 1 });
+  return { year: yr, month: mo, count: rows.length };
+}
+
+// ── AUDIT : CRON MENSUEL CONFIGURABLE ─────────────────────────────────────────
+const cronState = { lastRun: null, lastResult: null, nextRun: null };
+
+function getCronConfig(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='cron_archive_time'").get();
+  if (row) {
+    try {
+      const val = JSON.parse(row.value);
+      return { hour: parseInt(val.hour ?? 0), minute: parseInt(val.minute ?? 5) };
+    } catch {}
+  }
+  return { hour: 0, minute: 5 }; // défaut : 00h05
+}
+
+function getNextRunInfo(hour, minute) {
+  // Calculer le prochain 1er du mois en heure locale (via nowLocal)
+  const localStr = nowLocal();
+  const year  = parseInt(localStr.slice(0, 4));
+  const month = parseInt(localStr.slice(5, 7));
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear  = month === 12 ? year + 1 : year;
+  const hh = String(hour).padStart(2, '0');
+  const mm = String(minute).padStart(2, '0');
+  return `${nextYear}-${String(nextMonth).padStart(2,'0')}-01 ${hh}:${mm}`;
+}
+
+function scheduleMonthlyCron() {
+  function runIfNeeded() {
+    // Utiliser nowLocal() pour que l'heure respecte le TZ du conteneur
+    const localStr = nowLocal(); // format: "YYYY-MM-DD HH:MM:SS"
+    const localDay     = parseInt(localStr.slice(8, 10));
+    const localHour    = parseInt(localStr.slice(11, 13));
+    const localMinute  = parseInt(localStr.slice(14, 16));
+    const db = getDb();
+    const cfg = getCronConfig(db);
+    cronState.nextRun = getNextRunInfo(cfg.hour, cfg.minute);
+
+    if (localDay === 1 && localHour === cfg.hour && localMinute >= cfg.minute) {
+      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const year  = prevMonth.getFullYear();
+      const month = prevMonth.getMonth() + 1;
+      const alreadyDone = db.prepare('SELECT id FROM audit_archives WHERE year=? AND month=?').get(year, month);
+      if (!alreadyDone) {
+        const result = archiveMonth(db, year, month, 'cron');
+        if (!result.skipped) {
+          cronState.lastRun    = nowLocal();
+          cronState.lastResult = `Archive ${year}/${String(month).padStart(2,'0')} — ${result.count} entrées`;
+          logger.info(`[CRON] ${cronState.lastResult}`);
+        }
+      }
+    }
+  }
+  setInterval(runIfNeeded, 60 * 1000);
+  runIfNeeded(); // calcul initial du nextRun
+  logger.info('[CRON] Archivage mensuel audit planifié');
+}
+scheduleMonthlyCron();
+
+// Status du cron + config
+app.get('/api/cron/status', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const cfg = getCronConfig(db);
+  res.json({
+    hour:       cfg.hour,
+    minute:     cfg.minute,
+    next_run:   cronState.nextRun,
+    last_run:   cronState.lastRun,
+    last_result: cronState.lastResult,
+    running:    true,
+  });
+});
+
+app.put('/api/cron/config', authMiddleware, requireRole('admin'), (req, res) => {
+  const { hour, minute } = req.body;
+  const db = getDb();
+  const ip = getClientIp(req);
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cron_archive_time', ?)")
+    .run(JSON.stringify({ hour: parseInt(hour ?? 0), minute: parseInt(minute ?? 5) }));
+  cronState.nextRun = getNextRunInfo(parseInt(hour ?? 0), parseInt(minute ?? 5));
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'CRON_CONFIG_MODIFIÉ', category: 'admin', severity: 'info', detail: `Cron archivage: ${String(hour).padStart(2,'0')}h${String(minute).padStart(2,'0')}`, ip, success: 1 });
+  res.json({ success: true, next_run: cronState.nextRun });
+});
+
+// ── AUDIT : ENDPOINTS ─────────────────────────────────────────────────────────
+// Lister les archives disponibles
+app.get('/api/audit/archives', authMiddleware, (req, res) => {
+  const { can } = require('./auth');
+  const db = getDb();
+  const rows = db.prepare('SELECT id, year, month, entry_count, archived_at, archived_by FROM audit_archives ORDER BY year DESC, month DESC').all();
+  res.json(rows);
+});
+
+// Lire le contenu d'une archive
+app.get('/api/audit/archives/:id', authMiddleware, (req, res) => {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM audit_archives WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Archive introuvable' });
+  let entries = [];
+  try { entries = JSON.parse(row.data_json); } catch {}
+  res.json({ ...row, entries });
 });
 
 // ── SITES ─────────────────────────────────────────────────────────────────────
@@ -499,9 +808,9 @@ app.get('/api/backups/diff', authMiddleware, (req, res) => {
 // ── DROITS PAR RÔLE ────────────────────────────────────────────────────────────
 // Droits par défaut intégrés (fallback si rien en base)
 const DEFAULT_ROLE_PERMS = {
-  admin:    { backup_read: true,  backup_import: true,  backup_write: true,  config_read: true,  config_write: true,  audit_access: true,  security_access: true,  activity_read: true,  activity_write: true,  activity_tags: true  },
-  operator: { backup_read: true,  backup_import: false, backup_write: true,  config_read: true,  config_write: false, audit_access: false, security_access: false, activity_read: true,  activity_write: true,  activity_tags: false },
-  viewer:   { backup_read: true,  backup_import: false, backup_write: false, config_read: true,  config_write: false, audit_access: false, security_access: false, activity_read: true,  activity_write: false, activity_tags: false },
+  admin:    { backup_read: true,  backup_import: true,  backup_write: true,  config_read: true,  config_write: true,  audit_access: true,  security_access: true,  activity_read: true,  activity_write: true,  activity_tags: true,  audit_archive: true  },
+  operator: { backup_read: true,  backup_import: false, backup_write: true,  config_read: true,  config_write: false, audit_access: false, security_access: false, activity_read: true,  activity_write: true,  activity_tags: false, audit_archive: false },
+  viewer:   { backup_read: true,  backup_import: false, backup_write: false, config_read: true,  config_write: false, audit_access: false, security_access: false, activity_read: true,  activity_write: false, activity_tags: false, audit_archive: false },
 };
 
 app.get('/api/role-permissions', authMiddleware, (req, res) => {
@@ -607,7 +916,6 @@ app.delete('/api/activity/tags/:id', authMiddleware, requireRole('admin'), (req,
 app.get('/api/activity/entries', authMiddleware, (req, res) => {
   const db = getDb();
   const { user_id, year, month } = req.query;
-  // Admin peut voir tous les utilisateurs, sinon seulement le sien
   const targetUserId = (req.user.role === 'admin' && user_id) ? parseInt(user_id) : req.user.id;
   let q = 'SELECT e.*, u.username, u.display_name FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.user_id=?';
   const p = [targetUserId];
@@ -615,6 +923,19 @@ app.get('/api/activity/entries', authMiddleware, (req, res) => {
   if (month) { q += ' AND e.month=?'; p.push(parseInt(month)); }
   q += ' ORDER BY e.year DESC, e.month ASC, e.created_at ASC';
   res.json(db.prepare(q).all(...p));
+});
+
+// Historique d'une note
+app.get('/api/activity/entries/:id/history', authMiddleware, (req, res) => {
+  const db = getDb();
+  const entry = db.prepare('SELECT user_id FROM activity_entries WHERE id=?').get(req.params.id);
+  if (!entry) return res.status(404).json({ error: 'Introuvable' });
+  if (entry.user_id !== req.user.id && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Accès refusé' });
+  const rows = db.prepare(
+    'SELECT h.*, u.username FROM activity_entry_history h LEFT JOIN users u ON h.changed_by=u.id WHERE h.entry_id=? ORDER BY h.changed_at ASC'
+  ).all(req.params.id);
+  res.json(rows);
 });
 
 // Années disponibles pour un utilisateur
@@ -627,25 +948,41 @@ app.get('/api/activity/years', authMiddleware, (req, res) => {
 });
 
 app.post('/api/activity/entries', authMiddleware, (req, res) => {
-  const { year, month, tag_code, content } = req.body;
+  const { year, month, tag_code, content, is_preview } = req.body;
   if (!year || !month || !tag_code || !content?.trim())
     return res.status(400).json({ error: 'Tous les champs sont requis' });
   const db = getDb();
+  // Déterminer si la note est une preview (mois/année futur)
+  const nowL = nowLocal();
+  const curYear = parseInt(nowL.slice(0,4)), curMonth = parseInt(nowL.slice(5,7));
+  const noteYear = parseInt(year), noteMonth = parseInt(month);
+  const autoPreview = noteYear > curYear || (noteYear === curYear && noteMonth > curMonth);
+  const previewFlag = autoPreview ? 1 : (is_preview ? 1 : 0);
   const r = db.prepare(
-    'INSERT INTO activity_entries (user_id, year, month, tag_code, content) VALUES (?,?,?,?,?)'
-  ).run(req.user.id, parseInt(year), parseInt(month), tag_code.toUpperCase(), content.trim());
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_AJOUTÉ', category: 'suivi', severity: 'info', detail: `${year}/${String(month).padStart(2,'0')} [${tag_code}]`, ip: getClientIp(req), success: 1 });
-  res.json({ id: r.lastInsertRowid });
+    'INSERT INTO activity_entries (user_id, year, month, tag_code, content, is_preview) VALUES (?,?,?,?,?,?)'
+  ).run(req.user.id, noteYear, noteMonth, tag_code.toUpperCase(), content.trim(), previewFlag);
+  const newId = r.lastInsertRowid;
+  // Historique : création
+  db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(newId, 'created', `[${tag_code.toUpperCase()}] ${content.trim().slice(0,80)}${content.length>80?'…':''}`, req.user.id, nowLocal());
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_AJOUTÉ', category: 'suivi', severity: 'info', detail: `${year}/${String(month).padStart(2,'0')} [${tag_code}]${previewFlag?' (preview)':''}`, ip: getClientIp(req), success: 1 });
+  res.json({ id: newId, is_preview: previewFlag });
 });
 
 app.put('/api/activity/entries/:id', authMiddleware, (req, res) => {
-  const { tag_code, content } = req.body;
+  const { tag_code, content, is_preview } = req.body;
   const db = getDb();
-  const entry = db.prepare('SELECT user_id FROM activity_entries WHERE id=?').get(req.params.id);
+  const entry = db.prepare('SELECT * FROM activity_entries WHERE id=?').get(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Introuvable' });
   if (entry.user_id !== req.user.id)
     return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres notes' });
-  db.prepare(`UPDATE activity_entries SET tag_code=?, content=?, updated_at=? WHERE id=?`).run(tag_code.toUpperCase(), content.trim(), nowLocal(), req.params.id);
+  const newPreview = is_preview === undefined ? entry.is_preview : (is_preview ? 1 : 0);
+  db.prepare('UPDATE activity_entries SET tag_code=?, content=?, is_preview=?, updated_at=? WHERE id=?').run(tag_code.toUpperCase(), content.trim(), newPreview, nowLocal(), req.params.id);
+  // Historique : modification
+  const changes = [];
+  if (entry.tag_code !== tag_code.toUpperCase()) changes.push(`Tag: ${entry.tag_code} → ${tag_code.toUpperCase()}`);
+  if (entry.content !== content.trim()) changes.push('Contenu modifié');
+  if (entry.is_preview !== newPreview) changes.push(newPreview ? 'Marqué preview' : 'Preview retirée (validée)');
+  db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(parseInt(req.params.id), 'updated', changes.length ? changes.join(' | ') : 'Modification sans changement détecté', req.user.id, nowLocal());
   res.json({ success: true });
 });
 
@@ -659,19 +996,92 @@ app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
+
+// ── SUIVI D'ACTIVITÉ — AUDIT EXPORT ──────────────────────────────────────────
+app.post('/api/activity/export-audit', authMiddleware, (req, res) => {
+  const { mode, year, month, filterTag, count, target_user } = req.body;
+  const db = getDb();
+  const ip = getClientIp(req);
+  const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  let scope = '';
+  if (mode === 'month') scope = `${MONTHS_FR[(month||1)-1]} ${year}`;
+  else if (mode === 'year') scope = `Année ${year}`;
+  else if (mode === 'tag') scope = `Tag ${filterTag || 'tous'}`;
+  const targetId = parseInt(target_user) || req.user.id;
+  const targetUser = targetId !== req.user.id ? db.prepare('SELECT username FROM users WHERE id=?').get(targetId) : null;
+  const who = targetUser ? ` (suivi de ${targetUser.username})` : '';
+  audit(db, {
+    userId: req.user.id, username: req.user.username,
+    action: 'SUIVI_EXPORTÉ',
+    category: 'suivi', severity: 'info',
+    detail: `Export PDF — ${scope} — ${count} note${count > 1 ? 's' : ''}${who}`,
+    ip, success: 1
+  });
+  res.json({ success: true });
+});
+
 // ── STATS ─────────────────────────────────────────────────────────────────────
 app.get('/api/stats', authMiddleware, (req, res) => {
   const db = getDb();
+  const now = new Date();
+  const curYear  = now.getFullYear();
+  const curMonth = now.getMonth() + 1;
+  const userId   = req.user.id;
+
+  // Activité totale — exclure les notes preview (is_preview=0 ou null)
+  const totalActivity = db.prepare('SELECT COUNT(*) as c FROM activity_entries WHERE user_id=? AND (is_preview=0 OR is_preview IS NULL)').get(userId).c;
+  const yearActivity  = db.prepare('SELECT COUNT(*) as c FROM activity_entries WHERE user_id=? AND year=? AND (is_preview=0 OR is_preview IS NULL)').get(userId, curYear).c;
+  const monthActivity = db.prepare('SELECT COUNT(*) as c FROM activity_entries WHERE user_id=? AND year=? AND month=? AND (is_preview=0 OR is_preview IS NULL)').get(userId, curYear, curMonth).c;
+  const prevYear = curYear - 1;
+  const yearActivityPrev = db.prepare('SELECT COUNT(*) as c FROM activity_entries WHERE user_id=? AND year=? AND (is_preview=0 OR is_preview IS NULL)').get(userId, prevYear).c;
+
+  // TOP3 tags année courante (hors preview)
+  const top3Cur = db.prepare(
+    'SELECT tag_code, COUNT(*) as cnt FROM activity_entries WHERE user_id=? AND year=? AND (is_preview=0 OR is_preview IS NULL) GROUP BY tag_code ORDER BY cnt DESC LIMIT 3'
+  ).all(userId, curYear);
+  // TOP3 tags année précédente (hors preview)
+  const top3Prev = db.prepare(
+    'SELECT tag_code, COUNT(*) as cnt FROM activity_entries WHERE user_id=? AND year=? AND (is_preview=0 OR is_preview IS NULL) GROUP BY tag_code ORDER BY cnt DESC LIMIT 3'
+  ).all(userId, prevYear);
+
   res.json({
-    devices: db.prepare('SELECT COUNT(*) as c FROM devices').get().c,
-    sites: db.prepare('SELECT COUNT(*) as c FROM sites').get().c,
-    backups: db.prepare('SELECT COUNT(*) as c FROM backups').get().c,
-    models: db.prepare('SELECT COUNT(*) as c FROM device_models').get().c,
+    devices:       db.prepare('SELECT COUNT(*) as c FROM devices').get().c,
+    sites:         db.prepare('SELECT COUNT(*) as c FROM sites').get().c,
+    backups:       db.prepare('SELECT COUNT(*) as c FROM backups').get().c,
+    models:        db.prepare('SELECT COUNT(*) as c FROM device_models').get().c,
+    activity: {
+      total:      totalActivity,
+      year:       yearActivity,
+      month:      monthActivity,
+      prev_year:  prevYear,
+      prev_year_count: yearActivityPrev,
+      top3_cur:   top3Cur,
+      top3_prev:  top3Prev,
+      cur_year:   curYear,
+      cur_month:  curMonth,
+    }
   });
 });
 
 // ── START ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`[API] VaultNexus backend démarré sur le port ${PORT}`);
-  getDb();
+  logger.info(`[API] NexusVault backend démarré sur le port ${PORT}`);
+  const db = getDb();
+  // Charger la config SMTP depuis la base au démarrage
+  const smtpRow = db.prepare("SELECT value FROM settings WHERE key='smtp_config'").get();
+  if (smtpRow) {
+    try {
+      const cfg = JSON.parse(smtpRow.value);
+      if (cfg.host) {
+        process.env.SMTP_HOST    = cfg.host;
+        process.env.SMTP_PORT    = String(cfg.port || 587);
+        process.env.SMTP_SECURE  = String(cfg.secure || false);
+        process.env.SMTP_USER    = cfg.user || '';
+        process.env.SMTP_PASS    = cfg.pass || '';
+        process.env.SMTP_FROM    = cfg.from || 'NexusVault <no-reply@nexusvault.local>';
+        logger.info('[SMTP] Configuration chargée depuis la base de données');
+      }
+      if (cfg.app_url) process.env.APP_URL = cfg.app_url;
+    } catch {}
+  }
 });

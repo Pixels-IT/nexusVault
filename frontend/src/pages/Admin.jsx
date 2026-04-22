@@ -59,6 +59,10 @@ function AccountTab() {
               <input className="form-control" value={data.username} onChange={e => setData(d => ({ ...d, username: e.target.value }))} />
             </div>
             <div className="form-group">
+              <label className="form-label">Adresse e-mail</label>
+              <input className="form-control" type="email" value={data.email} onChange={e => setData(d => ({ ...d, email: e.target.value }))} placeholder="utilisateur@domaine.com" />
+            </div>
+            <div className="form-group">
               <label className="form-label">Rôle</label>
               <input className="form-control" value={user?.role || ''} disabled style={{ opacity: .6 }} />
             </div>
@@ -280,6 +284,7 @@ const PERM_DEFS = [
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
     perms: [
       { key: 'audit_access',    label: "Accès au Journal d'audit" },
+      { key: 'audit_archive',   label: "Accès aux archives d'audit" },
       { key: 'security_access', label: 'Accès à Sécurité' },
     ],
   },
@@ -288,7 +293,7 @@ const PERM_DEFS = [
 const ROLES = [
   { key: 'admin',    label: 'Administrateur', color: 'var(--err)',  bg: 'var(--err-s)' },
   { key: 'operator', label: 'Opérateur',      color: 'var(--warn)', bg: 'var(--warn-s)' },
-  { key: 'viewer',   label: 'Utilisateur',    color: 'var(--muted)', bg: 'var(--surf2)' },
+  { key: 'viewer',   label: 'Utilisateur',    color: 'var(--acc)',   bg: 'var(--acc-s)' },
 ];
 
 function RolePermissionsCard() {
@@ -398,32 +403,104 @@ function RolePermissionsCard() {
 
 // ── SÉCURITÉ (timeout + liste accès) ────────────────────────────────────────
 function SecurityTab() {
-  // ── Timeout de session ──
+  const [activeTab, setActiveTab] = useState('general');
+
+  const TABS = [
+    { key: 'general',     label: 'Général',            icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M1 12h3M20 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg> },
+    { key: 'cron',        label: 'Planificateur',       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
+    { key: 'rights',      label: "Droits d'accès",      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
+  ];
+
+  return (
+    <div>
+      {/* Tabs horizontaux */}
+      <div style={{ display: 'flex', gap: 2, marginBottom: 16, borderBottom: '1px solid var(--brd)' }}>
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '9px 16px', background: 'none', border: 'none',
+            borderBottom: activeTab === t.key ? '2px solid var(--acc)' : '2px solid transparent',
+            color: activeTab === t.key ? 'var(--acc)' : 'var(--muted)',
+            fontWeight: activeTab === t.key ? 600 : 500,
+            fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font)',
+            marginBottom: -1, transition: 'color .15s, border-color .15s',
+          }}>
+            {t.icon}{t.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'general'  && <SecurityGeneralTab />}
+      {activeTab === 'cron'     && <SecurityCronTab />}
+      {activeTab === 'rights'   && <RolePermissionsCard />}
+    </div>
+  );
+}
+
+// ── ONGLET GÉNÉRAL : Timeout + Liste d'accès ─────────────────────────────────
+function SecurityGeneralTab() {
   const [timeout, setTimeout_] = useState('30');
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [saving, setSaving]     = useState(false);
+  const [msg, setMsg]           = useState('');
+  const [rows, setRows]         = useState([]);
+  const [form, setForm]         = useState({ value: '', label: '', type: 'ip' });
+  const [wlError, setWlError]   = useState('');
+  const [confirm, setConfirm]   = useState(null);
+  // SMTP
+  const [smtp, setSmtp]         = useState({ host: '', port: '587', secure: false, user: '', pass: '', from: '', app_url: '' });
+  const [smtpSaving, setSmtpSaving]   = useState(false);
+  const [smtpMsg, setSmtpMsg]         = useState('');
+  const [smtpErr, setSmtpErr]         = useState('');
+  const [smtpTesting, setSmtpTesting] = useState(false);
+  const [urlSaving, setUrlSaving]     = useState(false);
+  const [urlMsg, setUrlMsg]           = useState('');
 
   useEffect(() => {
     api.getSettings().then(s => setTimeout_(s.session_timeout_minutes || '30')).catch(() => {});
   }, []);
 
-  async function saveTimeout(e) {
-    e.preventDefault(); setSaving(true); setMsg('');
+  const loadWl = () => api.whitelist().then(setRows).catch(() => {});
+  useEffect(() => {
+    loadWl();
+    api.smtpConfig().then(s => setSmtp({
+      host: s.host || '', port: String(s.port || 587), secure: !!s.secure,
+      user: s.user || '', pass: '', from: s.from || '', app_url: s.app_url || '',
+    })).catch(() => {});
+  }, []);
+
+  async function saveSmtp(e) {
+    e.preventDefault(); setSmtpSaving(true); setSmtpErr(''); setSmtpMsg('');
     try {
-      await api.updateSettings({ session_timeout_minutes: parseInt(timeout) });
-      setMsg('Paramètres enregistrés.');
-    } catch (e) { setMsg('Erreur : ' + e.message); }
-    finally { setSaving(false); }
+      await api.smtpSave({ ...smtp, port: parseInt(smtp.port) || 587 });
+      setSmtpMsg('Configuration SMTP enregistrée.');
+    } catch (e) { setSmtpErr(e.message); }
+    finally { setSmtpSaving(false); }
   }
 
-  // ── Liste accès ──
-  const [rows, setRows] = useState([]);
-  const [form, setForm] = useState({ value: '', label: '', type: 'ip' });
-  const [wlError, setWlError] = useState('');
-  const [confirm, setConfirm] = useState(null);
+  async function saveAppUrl() {
+    setUrlSaving(true); setUrlMsg('');
+    try {
+      await api.smtpSave({ ...smtp, app_url: smtp.app_url, port: parseInt(smtp.port) || 587 });
+      setUrlMsg('Enregistré.');
+    } catch { setUrlMsg('Erreur.'); }
+    finally { setUrlSaving(false); }
+  }
 
-  const loadWl = () => api.whitelist().then(setRows).catch(() => {});
-  useEffect(() => { loadWl(); }, []);
+  async function testSmtp() {
+    setSmtpTesting(true); setSmtpErr(''); setSmtpMsg('');
+    try {
+      const r = await api.smtpTest();
+      setSmtpMsg(`Email de test envoyé à ${r.to}`);
+    } catch (e) { setSmtpErr('Erreur : ' + e.message); }
+    finally { setSmtpTesting(false); }
+  }
+
+  async function saveTimeout(e) {
+    e.preventDefault(); setSaving(true); setMsg('');
+    try { await api.updateSettings({ session_timeout_minutes: parseInt(timeout) }); setMsg('Enregistré.'); }
+    catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
 
   async function addRule(e) {
     e.preventDefault(); setWlError('');
@@ -439,51 +516,83 @@ function SecurityTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-      {/* ── Timeout de session ── */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
-              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-            </svg>
-            Timeout de session
+      {/* Grille : Timeout | URL Application */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        {/* Timeout */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              Timeout
+            </div>
+          </div>
+          <div style={{ padding: 16 }}>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+              Durée d'inactivité avant déconnexion. Alerte 60 s avant expiration.
+            </p>
+            {msg && <div className={`alert ${msg.startsWith('Erreur') ? 'alert-err' : 'alert-ok'}`} style={{ marginBottom: 10 }}>{msg}</div>}
+            <form onSubmit={saveTimeout} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+              <div className="form-group" style={{ margin: 0, flex: 1 }}>
+                <label className="form-label">Durée d'inactivité</label>
+                <select className="form-control" value={timeout} onChange={e => setTimeout_(e.target.value)}>
+                  <option value="5">5 minutes</option>
+                  <option value="10">10 minutes</option>
+                  <option value="15">15 minutes</option>
+                  <option value="30">30 minutes</option>
+                  <option value="60">1 heure</option>
+                  <option value="120">2 heures</option>
+                  <option value="240">4 heures</option>
+                  <option value="480">8 heures</option>
+                </select>
+              </div>
+              <button className="btn btn-primary" type="submit" disabled={saving}>
+                {saving ? '…' : 'OK'}
+              </button>
+            </form>
           </div>
         </div>
-        <div style={{ padding: 20 }}>
-          <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-            Durée d’inactivité avant déconnexion automatique. Une alerte s’affiche 60 s avant l’expiration.
-          </p>
-          {msg && <div className={`alert ${msg.startsWith('Erreur') ? 'alert-err' : 'alert-ok'}`} style={{ marginBottom: 12 }}>{msg}</div>}
-          <form onSubmit={saveTimeout} style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
-            <div className="form-group" style={{ margin: 0, flex: 1 }}>
-              <label className="form-label">Durée d’inactivité (minutes)</label>
-              <select className="form-control" value={timeout} onChange={e => setTimeout_(e.target.value)}>
-                <option value="5">5 minutes</option>
-                <option value="10">10 minutes</option>
-                <option value="15">15 minutes</option>
-                <option value="30">30 minutes</option>
-                <option value="60">1 heure</option>
-                <option value="120">2 heures</option>
-                <option value="240">4 heures</option>
-                <option value="480">8 heures</option>
-              </select>
+
+        {/* URL de l'application */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+                <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+              </svg>
+              URL de l'application
             </div>
-            <button className="btn btn-primary" type="submit" disabled={saving}>
-              {saving ? 'Enregistrement…' : 'Enregistrer'}
-            </button>
-          </form>
+          </div>
+          <div style={{ padding: 16 }}>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+              URL publique utilisée dans les liens des emails (ex: réinitialisation MDP).
+            </p>
+            {urlMsg && <div className="alert alert-ok" style={{ marginBottom: 10, fontSize: 12 }}>{urlMsg}</div>}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+              <div className="form-group" style={{ margin: 0, flex: 1 }}>
+                <label className="form-label">URL</label>
+                <input className="form-control" value={smtp.app_url}
+                  onChange={e => setSmtp(s => ({ ...s, app_url: e.target.value }))}
+                  placeholder="https://nexusvault.mondomaine.com" />
+              </div>
+              <button className="btn btn-primary" onClick={saveAppUrl} disabled={urlSaving}>
+                {urlSaving ? '…' : 'OK'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ── Liste d'accès ── */}
+      {/* Liste d'accès */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
-            Liste d’accès IP / URL
+            Liste d'accès IP / URL
           </div>
         </div>
         <div style={{ padding: 16 }}>
@@ -523,16 +632,73 @@ function SecurityTab() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>Aucune règle — tous les accès sont autorisés</td></tr>
+                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>Aucune règle</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-
-      {/* ── Droits d'accès par rôle ── */}
-      <RolePermissionsCard />
+      {/* ── Configuration SMTP ── */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+              <polyline points="22,6 12,13 2,6"/>
+            </svg>
+            Configuration SMTP
+          </div>
+          {smtp.host && (
+            <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, fontWeight:600, color:'var(--ok)' }}>
+              <span style={{ width:7, height:7, borderRadius:'50%', background:'var(--ok)', boxShadow:'0 0 5px var(--ok)' }}/>
+              Configuré
+            </span>
+          )}
+        </div>
+        <div style={{ padding: 16 }}>
+          {smtpMsg && <div className="alert alert-ok" style={{ marginBottom:12 }}>{smtpMsg}</div>}
+          {smtpErr && <div className="alert alert-err" style={{ marginBottom:12 }}>{smtpErr}</div>}
+          <form onSubmit={saveSmtp}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+              <div className="form-group" style={{ margin:0 }}>
+                <label className="form-label">Hôte SMTP</label>
+                <input className="form-control" value={smtp.host} onChange={e => setSmtp(s=>({...s,host:e.target.value}))} placeholder="smtp.gmail.com" />
+              </div>
+              <div className="form-group" style={{ margin:0 }}>
+                <label className="form-label">Port</label>
+                <input className="form-control" type="number" value={smtp.port} onChange={e => setSmtp(s=>({...s,port:e.target.value}))} placeholder="587" />
+              </div>
+              <div className="form-group" style={{ margin:0 }}>
+                <label className="form-label">Utilisateur SMTP</label>
+                <input className="form-control" value={smtp.user} onChange={e => setSmtp(s=>({...s,user:e.target.value}))} placeholder="user@domaine.com" />
+              </div>
+              <div className="form-group" style={{ margin:0 }}>
+                <label className="form-label">Mot de passe SMTP</label>
+                <input className="form-control" type="password" value={smtp.pass} onChange={e => setSmtp(s=>({...s,pass:e.target.value}))} placeholder="••••••••" />
+              </div>
+              <div className="form-group" style={{ margin:0 }}>
+                <label className="form-label">Expéditeur (From)</label>
+                <input className="form-control" value={smtp.from} onChange={e => setSmtp(s=>({...s,from:e.target.value}))} placeholder="NexusVault <no-reply@domaine.com>" />
+              </div>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--muted)', cursor:'pointer' }}>
+                <input type="checkbox" checked={smtp.secure} onChange={e => setSmtp(s=>({...s,secure:e.target.checked}))} />
+                SSL/TLS (port 465)
+              </label>
+              <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                <button type="button" className="btn" onClick={testSmtp} disabled={smtpTesting || !smtp.host}>
+                  {smtpTesting ? 'Envoi…' : 'Tester'}
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={smtpSaving}>
+                  {smtpSaving ? '…' : 'Enregistrer'}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
 
       {confirm && <ConfirmModal message={`Supprimer la règle "${confirm.value}" ?`}
         onConfirm={async () => { await api.deleteWhitelist(confirm.id); setConfirm(null); loadWl(); }}
@@ -541,8 +707,185 @@ function SecurityTab() {
   );
 }
 
+// ── ONGLET PLANIFICATEUR ──────────────────────────────────────────────────────
+function SecurityCronTab() {
+  const [cronHour,   setCronHour]   = useState('0');
+  const [cronMinute, setCronMinute] = useState('5');
+  const [cronStatus, setCronStatus] = useState(null);
+  const [cronSaving, setCronSaving] = useState(false);
+  const [cronMsg,    setCronMsg]    = useState('');
+  useEffect(() => {
+    api.cronStatus()
+      .then(s => {
+        setCronStatus(s);
+        setCronHour(String(s.hour).padStart(2,'0'));
+        setCronMinute(String(s.minute).padStart(2,'0'));
+      })
+      .catch(() => {});
+  }, []);
 
-// ── TAGS SUIVI D'ACTIVITÉ ──────────────────────────────────────────────────────
+  async function saveCron(e) {
+    e.preventDefault(); setCronSaving(true); setCronMsg('');
+    try {
+      const r = await api.cronConfig({ hour: parseInt(cronHour), minute: parseInt(cronMinute) });
+      setCronMsg('Configuration enregistrée.');
+      setCronStatus(prev => ({ ...prev, hour: parseInt(cronHour), minute: parseInt(cronMinute), next_run: r.next_run }));
+    } catch (e) { setCronMsg('Erreur : ' + e.message); }
+    finally { setCronSaving(false); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+              <rect x="3" y="4" width="18" height="18" rx="2"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
+              <line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/>
+              <polyline points="12 14 12 18 15 18"/>
+            </svg>
+            Archivage automatique du journal d'audit
+          </div>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: cronStatus ? 'var(--ok)' : 'var(--muted)' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: cronStatus ? 'var(--ok)' : 'var(--muted)', boxShadow: cronStatus ? '0 0 6px var(--ok)' : 'none' }} />
+            {cronStatus ? 'Cron actif' : 'Chargement…'}
+          </span>
+        </div>
+        <div style={{ padding: 20 }}>
+          <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+            Le 1er de chaque mois à l'heure configurée, le journal d'audit du mois précédent est automatiquement archivé et supprimé du journal actif.
+          </p>
+          {cronMsg && <div className={`alert ${cronMsg.startsWith('Erreur') ? 'alert-err' : 'alert-ok'}`} style={{ marginBottom: 14 }}>{cronMsg}</div>}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            {/* Configuration */}
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Configuration</div>
+              <form onSubmit={saveCron} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Heure (1er du mois)</label>
+                  <select className="form-control" value={cronHour} onChange={e => setCronHour(e.target.value)}>
+                    {Array.from({ length: 24 }, (_, i) => String(i).padStart(2,'0')).map(h => (
+                      <option key={h} value={h}>{h}h</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Minute</label>
+                  <select className="form-control" value={cronMinute} onChange={e => setCronMinute(e.target.value)}>
+                    {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <button className="btn btn-primary" type="submit" disabled={cronSaving}>
+                  {cronSaving ? '…' : 'Enregistrer'}
+                </button>
+              </form>
+            </div>
+
+            {/* Statut */}
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Statut</div>
+              {cronStatus ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ color: 'var(--muted)', minWidth: 100 }}>Prochain run :</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--acc)' }}>{cronStatus.next_run || '—'}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ color: 'var(--muted)', minWidth: 100 }}>Dernier run :</span>
+                    <span style={{ fontFamily: 'var(--mono)' }}>{cronStatus.last_run || 'Jamais'}</span>
+                  </div>
+                  {cronStatus.last_result && (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span style={{ color: 'var(--muted)', minWidth: 100 }}>Résultat :</span>
+                      <span style={{ color: 'var(--ok)', fontWeight: 600 }}>{cronStatus.last_result}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ color: 'var(--muted)', minWidth: 100 }}>Planifié :</span>
+                    <span>Le 1er du mois à {String(cronStatus.hour).padStart(2,'0')}h{String(cronStatus.minute).padStart(2,'0')}</span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: 'var(--muted)', fontSize: 12 }}>Chargement…</div>
+              )}
+            </div>
+          </div>
+
+
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+// ── MODAL LISTE DES ARCHIVES ──────────────────────────────────────────────────
+const MONTHS_AUDIT = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+function ArchiveListModal({ onClose }) {
+  const [archives, setArchives]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [viewArchive, setViewArchive] = useState(null);
+
+  useEffect(() => {
+    api.auditArchives()
+      .then(data => setArchives(data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (viewArchive) {
+    return <ArchiveViewModal archive={viewArchive} onClose={() => setViewArchive(null)} onBack={() => setViewArchive(null)} />;
+  }
+
+  return (
+    <Modal title="Archives du journal d'audit" onClose={onClose}
+      footer={<button className="btn" onClick={onClose}>Fermer</button>}>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40 }}><span className="spinner" /></div>
+      ) : archives.length === 0 ? (
+        <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 40, fontSize: 13 }}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12, opacity: .3 }}>
+            <path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/>
+          </svg>
+          <div>Aucune archive disponible</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>L'archivage automatique s'effectue le 1er de chaque mois</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+          {archives.map(a => (
+            <button key={a.id} onClick={() => setViewArchive(a)} style={{
+              padding: '14px 16px', borderRadius: 'var(--r)', cursor: 'pointer', textAlign: 'left',
+              border: '1px solid var(--brd)', background: 'var(--surf2)',
+              display: 'flex', flexDirection: 'column', gap: 4, transition: 'border-color .15s, background .15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--acc)'; e.currentTarget.style.background = 'var(--acc-s)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--brd)'; e.currentTarget.style.background = 'var(--surf2)'; }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--txt)' }}>
+                {MONTHS_AUDIT[(a.month || 1) - 1]}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{a.year}</div>
+              <div style={{ fontSize: 11, color: 'var(--ok)', fontWeight: 600 }}>
+                {a.entry_count} note{a.entry_count > 1 ? 's' : ''}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                {a.archived_by === 'cron' ? '⚙ Auto' : '👤 Manuel'}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+
+
 const TAG_PRESETS = ['#d63939','#066fd1','#2fb344','#f76707','#7c3aed','#0f9e73','#e91e8c','#c2410c','#677489','#0891b2','#ca8a04'];
 
 function ActivityTagsTab() {
@@ -657,7 +1000,81 @@ function ActivityTagsTab() {
   );
 }
 
-// ── AUDIT ─────────────────────────────────────────────────────────────────────
+
+// ── ARCHIVE MODAL ─────────────────────────────────────────────────────────────
+const MONTHS_FR_AUDIT = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+// ── VISUALISATION ARCHIVE ─────────────────────────────────────────────────────
+
+function ArchiveViewModal({ archive, onClose }) {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterSuccess, setFilterSuccess] = useState('');
+
+  useEffect(() => {
+    api.auditArchiveGet(archive.id)
+      .then(data => setEntries(data.entries || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [archive.id]);
+
+  const filtered = filterSuccess === '' ? entries
+    : entries.filter(e => String(e.success) === filterSuccess);
+
+  return (
+    <Modal title={`Archive — ${MONTHS_AUDIT[archive.month - 1]} ${archive.year}`} onClose={onClose}
+      footer={<button className="btn" onClick={onClose}>Fermer</button>}>
+      <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{archive.entry_count} entrée{archive.entry_count > 1 ? 's' : ''} · archivé le {archive.archived_at?.slice(0, 16)} par {archive.archived_by}</span>
+        <div style={{ marginLeft: 'auto' }}>
+          <select className="form-control" style={{ padding: '4px 8px', fontSize: 12, height: 28 }}
+            value={filterSuccess} onChange={e => setFilterSuccess(e.target.value)}>
+            <option value="">Tous résultats</option>
+            <option value="1">OK uniquement</option>
+            <option value="0">Échecs uniquement</option>
+          </select>
+        </div>
+      </div>
+      {loading ? <div style={{ textAlign: 'center', padding: 32 }}><span className="spinner" /></div> : (
+        <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid var(--brd)', borderRadius: 'var(--r)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ background: 'var(--surf2)', position: 'sticky', top: 0 }}>
+                <th style={{ padding: '5px 8px', textAlign: 'left', width: 130 }}>Date</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left', width: 90 }}>Sévérité</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left' }}>Action</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left', width: 100 }}>Utilisateur</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left' }}>Détail</th>
+                <th style={{ padding: '5px 8px', textAlign: 'center', width: 60 }}>Résultat</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(e => (
+                <tr key={e.id} style={{ borderBottom: '1px solid var(--brd)', background: e.success ? 'transparent' : 'var(--err-s)' }}>
+                  <td style={{ padding: '3px 8px', fontFamily: 'var(--mono)', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{e.created_at?.slice(0, 16)}</td>
+                  <td style={{ padding: '3px 8px' }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: e.severity === 'warn' ? 'var(--warn)' : e.severity === 'error' ? 'var(--err)' : 'var(--acc)' }}>{e.severity}</span>
+                  </td>
+                  <td style={{ padding: '3px 8px', fontWeight: 600 }}>{e.action}</td>
+                  <td style={{ padding: '3px 8px', color: 'var(--muted)' }}>{e.username || '—'}</td>
+                  <td style={{ padding: '3px 8px', color: 'var(--muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.detail}>{e.detail}</td>
+                  <td style={{ padding: '3px 8px', textAlign: 'center' }}>
+                    {e.success
+                      ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                      : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--err)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>}
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Aucune entrée</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ── AUDIT TAB ─────────────────────────────────────────────────────────────────
 const SEV = {
   info:  { label: 'Info',    bg: 'var(--acc-s)',  color: 'var(--acc)',  dot: '#4c9fe6' },
   warn:  { label: 'Alerte',  bg: 'var(--warn-s)', color: 'var(--warn)', dot: '#f76707' },
@@ -672,15 +1089,19 @@ const CAT_COLORS = {
 };
 
 function AuditTab() {
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ category: '', severity: '', limit: '200' });
+  const { can } = usePerms();
+  const [logs, setLogs]           = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [filters, setFilters]     = useState({ category: '', severity: '', success: '', limit: '200' });
+  const [showArchiveList, setShowArchiveList] = useState(false);
+
 
   const load = () => {
     setLoading(true);
     const p = {};
     if (filters.category) p.category = filters.category;
     if (filters.severity) p.severity = filters.severity;
+    if (filters.success !== '') p.success = filters.success;
     if (filters.limit) p.limit = filters.limit;
     api.audit(p).then(setLogs).catch(() => {}).finally(() => setLoading(false));
   };
@@ -690,38 +1111,93 @@ function AuditTab() {
   const sf = k => e => setFilters(f => ({ ...f, [k]: e.target.value }));
 
   return (
+    <>
     <div className="card">
-      <div className="card-header">
-        <div className="card-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
+      <div className="card-header" style={{ flexWrap: 'nowrap', gap: 8, overflow: 'auto' }}>
+        <div className="card-title" style={{ flexShrink: 0 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
           Journal d'audit
         </div>
-        <div className="filters">
-          <select value={filters.severity} onChange={sf('severity')}>
-            <option value="">Toutes sévérités</option>
-            <option value="info">Info</option>
-            <option value="warn">Alerte</option>
-            <option value="error">Erreur</option>
-          </select>
-          <select value={filters.category} onChange={sf('category')}>
-            <option value="">Toutes catégories</option>
-            <option value="auth">Authentification</option>
-            <option value="admin">Administration</option>
-            <option value="backup">Backups</option>
-            <option value="config">Configuration</option>
-            <option value="sécurité">Sécurité</option>
-          </select>
-          <select value={filters.limit} onChange={sf('limit')}>
-            <option value="50">50 entrées</option>
-            <option value="200">200 entrées</option>
-            <option value="500">500 entrées</option>
-          </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', marginLeft: 'auto' }}>
+          {can('audit_archive') && (
+            <button className="btn" style={{ borderColor: 'var(--ok)', color: 'var(--ok)', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
+              onClick={() => setShowArchiveList(true)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+                <path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/>
+              </svg>
+              Archive
+            </button>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
+            {/* Résultat */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <select className="form-control" style={{ padding: '4px 6px', fontSize: 12, height: 28, minWidth: 100 }}
+                value={filters.success} onChange={sf('success')}>
+                <option value="">Résultat</option>
+                <option value="1">✓ OK</option>
+                <option value="0">✗ Échec</option>
+              </select>
+              {filters.success && (
+                <button onClick={() => setFilters(f => ({ ...f, success: '' }))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '0 3px', fontSize: 13, lineHeight: 1 }}>✕</button>
+              )}
+            </div>
+            {/* Sévérité */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <select className="form-control" style={{ padding: '4px 6px', fontSize: 12, height: 28, minWidth: 110 }}
+                value={filters.severity} onChange={sf('severity')}>
+                <option value="">Sévérité</option>
+                <option value="info">Info</option>
+                <option value="warn">Alerte</option>
+                <option value="error">Erreur</option>
+              </select>
+              {filters.severity && (
+                <button onClick={() => setFilters(f => ({ ...f, severity: '' }))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '0 3px', fontSize: 13, lineHeight: 1 }}>✕</button>
+              )}
+            </div>
+            {/* Catégorie */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <select className="form-control" style={{ padding: '4px 6px', fontSize: 12, height: 28, minWidth: 120 }}
+                value={filters.category} onChange={sf('category')}>
+                <option value="">Catégorie</option>
+                <option value="auth">Authentification</option>
+                <option value="admin">Administration</option>
+                <option value="backup">Backups</option>
+                <option value="config">Configuration</option>
+                <option value="suivi">Suivi</option>
+              </select>
+              {filters.category && (
+                <button onClick={() => setFilters(f => ({ ...f, category: '' }))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '0 3px', fontSize: 13, lineHeight: 1 }}>✕</button>
+              )}
+            </div>
+            {/* Limite */}
+            <select className="form-control" style={{ padding: '4px 6px', fontSize: 12, height: 28, minWidth: 100 }}
+              value={filters.limit} onChange={sf('limit')}>
+              <option value="50">50 entrées</option>
+              <option value="200">200 entrées</option>
+              <option value="500">500 entrées</option>
+            </select>
+          </div>
         </div>
       </div>
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th style={{ width: 140 }}>Date</th><th style={{ width: 90 }}>Sévérité</th><th style={{ width: 110 }}>Catégorie</th><th>Action</th><th>Utilisateur</th><th>Détail</th><th style={{ width: 80 }}>Résultat</th></tr>
+            <tr>
+              <th style={{ width: 140 }}>Date</th>
+              <th style={{ width: 90 }}>Sévérité</th>
+              <th style={{ width: 100 }}>Catégorie</th>
+              <th style={{ width: 150 }}>Action</th>
+              <th style={{ width: 90 }}>Utilisateur</th>
+              <th>Détail</th>
+              <th style={{ width: 70 }}>Résultat</th>
+            </tr>
           </thead>
           <tbody>
             {loading && <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32 }}><span className="spinner" /></td></tr>}
@@ -746,7 +1222,7 @@ function AuditTab() {
                     </span>
                   </td>
                   <td style={{ fontWeight: 600, fontSize: 12 }}>{l.action}</td>
-                  <td style={{ fontSize: 12 }}>{l.username || '—'}</td>
+                  <td style={{ fontSize: 12, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.username || '—'}</td>
                   <td style={{ fontSize: 11, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.detail}>
                     <span style={{ color: l.success === 0 && l.detail?.includes('Identifiant tenté') ? 'var(--err)' : 'var(--muted)' }}>
                       {l.detail}
@@ -770,6 +1246,9 @@ function AuditTab() {
         </table>
       </div>
     </div>
+
+    {showArchiveList && <ArchiveListModal onClose={() => setShowArchiveList(false)} />}
+    </>
   );
 }
 
@@ -809,7 +1288,7 @@ export default function Admin() {
       <div className="page-header">
         <div>
           <div className="page-title">Administration</div>
-          <div className="page-sub">Gestion des accès, utilisateurs et audit</div>
+          <div className="page-sub">Configuration, Gestion des accès utilisateurs et Sécurité</div>
         </div>
       </div>
       <div className="config-layout">

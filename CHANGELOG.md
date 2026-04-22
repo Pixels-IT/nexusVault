@@ -1,75 +1,84 @@
-# VaultNexus — Changelog
+# NexusVault — Changelog
 
-## v2026-04-22_b3.8
-> Build 3 du 22 avril 2026 — 8 requêtes cumulées
-
-### Corrections
-- **Journal d'audit — heure TZ** : la fonction `audit()` passe désormais `created_at` explicitement depuis Node.js (`new Date()` local) au lieu de laisser SQLite évaluer `datetime('now','localtime')` (qui ignorait la variable `TZ` du conteneur).
-- **Suivi d'activité — dépliage conditionnel sur filtre** : les années et mois ne se déplient plus automatiquement si aucune note ne correspond au filtre. Seuls les niveaux ayant au moins une correspondance s'ouvrent.
-- **Numérotation de build** : système de versionnage `vJJ-MM-AAAA_bB.R` mis en place. Le fichier `.build_meta` maintient l'état entre les sessions.
+## v2026-04-22_b34.95 — Récapitulatif complet de la journée
+> 34 builds · 95 requêtes · 22 avril 2026
 
 ---
 
-## v2026-04-22_b2.6
-> Build 2 du 22 avril 2026 — 6 requêtes cumulées
+## Résumé des fonctionnalités
 
-### Nouvelles fonctionnalités
-- **Suivi d'activité** : nouvelle page `/activity` accessible depuis la navbar ("Suivi"), entre Backups et Administration.
-  - Organisation par année (décroissant) → mois (janvier à décembre), chargement lazy par mois
-  - Tags colorés personnalisables (SECU, INFRA, NETWORK, FW, MAIL, BACKUP, TEL, AV, ADM par défaut)
-  - Compteur de notes par année et par mois
-  - Filtre par tag avec dépliage automatique conditionnel
-  - L'admin peut consulter le suivi de tous les utilisateurs via un sélecteur
-  - Seul le propriétaire peut créer, modifier ou supprimer ses propres notes
-- **Droits d'accès — section Suivi** : 3 nouvelles permissions (`activity_read`, `activity_write`, `activity_tags`)
-- **Administration → Suivi d'activité** : gestion des tags (code, libellé, couleur) avec palette prédéfinie
-- **Menu Administration** réorganisé avec séparateurs visuels
+### 🔐 Authentification & Sécurité
+- **Renommage** : `VaultNexus` → `NexusVault` dans tous les fichiers, conteneurs, volumes
+- **Reset de mot de passe par email** : lien "Mot de passe oublié ?" sur la page de connexion → modal `ForgotPasswordModal` (sans quitter la page). Génère un token valable 10 min, lien envoyé par email HTML stylisé (dégradé bleu NexusVault). Si SMTP absent, lien loggé dans les logs Docker via `logger.info`
+- **Page `/reset-password`** : saisie du nouveau MDP (14 car. min.) avec indicateurs de complexité, états : demande / envoyé / token invalide / succès. Route publique hors `ProtectedLayout`
+- **Audit reset** : chaque demande tracée en base (`RESET_DEMANDÉ`) avec identifiant, email et statut
 
-### Corrections
-- **Timeout de session — navigateur fermé** : `dp_last_active` dans `localStorage`, vérification au retour sur l'application via `visibilitychange`
-- **Droits suivi** : backend restreint DELETE et PUT au propriétaire uniquement
+### ⚙️ Configuration SMTP dans l'UI
+- Nouvelle carte dans **Administration → Sécurité → Général** : hôte, port, user, mot de passe, From, case SSL/TLS
+- Bouton "Tester" : envoie un email de test à l'email du compte connecté
+- Config stockée en base (`settings` → `smtp_config`), chargée automatiquement au démarrage du backend
+- **Cron SMTP check** toutes les 2h : logue `[WARN] [API] SMTP non configuré` si absent
+- Les variables SMTP et `APP_URL` **supprimées du `.env.example`** (gérées via l'UI)
+
+### 🏠 Tableau de bord
+- **Section Backups** : 4 tuiles (Total backups, Équipements, Sites, Modèles)
+- **Section Suivi d'activité** : 4 tuiles avec `height` fixe (`115px`) et `position:absolute` pour le chiffre et le TOP3
+  - Notes totales (toutes périodes), Mois en cours, Année courante, Année précédente
+  - **TOP3 tags** intégré dans les tuiles Année courante/précédente : affiché uniquement si total ≥ 3 notes, sans numéros, aligné à droite, séparateur à `right:120px`
+  - Chiffre blanc (52px) **toujours ancré** `bottom:10px right:14px` via `position:absolute`
+
+### 📋 Suivi d'activité
+- **Notes preview** : notes sur mois futurs auto-flaggées `is_preview=1`. Badge **PRV** orange à gauche du TAG, fond hachurée orange, texte italique grisé. Exclues de tous les compteurs et de l'export PDF
+- **Checkbox preview** : disponible en édition pour les mois passés. Décocher = valider la note
+- **Historique** : bouton "Historique" (vert, icône rotation) dans le footer du modal d'édition. Timeline chronologique : création, modifications, changements de tag/preview — avec date, heure, utilisateur
+- **Compteur automatique** : `MonthSection` charge ses entrées au montage (sans clic). Compteur visible immédiatement, format `(3 notes + 1 PRV)`
+- **Compteur par année** : affiché sur la ligne de l'année sans avoir à déplier
+- **État déplié persistant** : `openYears` dans le state parent → les années restent ouvertes après ajout de note
+- **Export PDF amélioré** : header dégradé bleu, barre méta, camembert SVG de répartition par TAG (modes mois/année), notes preview exclues
+
+### 📊 Journal d'audit
+- **Filtres avec ✕** : Résultat (OK/Échec), Sévérité, Catégorie — chaque filtre réinitialisable individuellement
+- **Filtre Résultat** appliqué côté backend (`?success=0/1`)
+- **Colonnes** : Utilisateur réduit (90px), Détail maximisé, Action 150px, Résultat 70px
+- **Archivage automatique (cron)** : le 1er du mois à l'heure configurée (heure locale via `nowLocal()`), les entrées du mois précédent sont archivées en base (`audit_archives`) et supprimées du journal actif
+- **Bouton "Archive"** dans le header du journal : ouvre `ArchiveListModal` → grille de cartes par mois → modal de détail avec filtre OK/Échec
+- **Droit `audit_archive`** : nouvelle permission dans la matrice, contrôle la visibilité du bouton Archive
+
+### 🔒 Administration → Sécurité (onglets)
+Structure à 3 onglets (style identique à la page Appareils) :
+- **Général** : grille 2 colonnes (Timeout | URL application) + Liste d'accès IP/URL + Configuration SMTP
+- **Planificateur** : cron archivage (heure/minute configurable, voyant vert, prochain/dernier run)
+- **Droits d'accès** : matrice permissions × rôles
+
+### 🖼️ Logos & Interface
+- **Nouveau logo NexusVault** : `logo.png` (bouclier) + `titre.png` (NEXUSVAULT) assemblés avec fond transparent, `logo-login.png` (480px) et `logo-nav.png` (28px)
+- **Favicon** mis à jour avec le bouclier
+- **Page login** centrée avec fond dégradé sombre/clair selon le thème
+
+### 🔧 Backend & Infrastructure
+- **Logger structuré** : `[YYYY-MM-DD HH:MM:SS] [LEVEL]` via `nowLocal()` (heure locale TZ), configurable par `LOG_LEVEL=debug|info|warn|error`
+- **`CACHEBUST`** dans `docker-compose.yml` pour forcer le rebuild du cache Docker à chaque déploiement
+- **`APP_URL`** transmis au conteneur backend via `docker-compose.yml`
+- **Table `activity_entry_history`** : historique des modifications de notes
+- **Table `password_reset_tokens`** : tokens de reset MDP (durée 10 min)
+- **Table `audit_archives`** : archives mensuelles du journal d'audit
+- **Champ `is_preview`** sur `activity_entries`
 
 ---
 
-## v2026-04-22_b1.2
-> Build 1 du 22 avril 2026 — 2 requêtes cumulées
+## Variables .env requises
 
-### Nouvelles fonctionnalités
-- **Bouton Comparer** : style cohérent avec Importer/Sauvegarde, en bleu
-- **Suivi d'activité** : première implémentation (tables, endpoints, page, navbar)
+| Variable | Obligatoire | Description |
+|---|---|---|
+| `ENCRYPTION_KEY` | ✅ | Clé AES-256, générer avec `openssl rand -hex 32` |
+| `JWT_SECRET` | ✅ | Secret JWT, générer avec `openssl rand -hex 32` |
+| `APP_PORT` | ✅ | Port d'accès web (défaut : 8080) |
+| `TZ` | recommandé | Fuseau horaire (défaut : `Europe/Paris`) |
+| `LOG_LEVEL` | optionnel | `debug\|info\|warn\|error` (défaut : `info`) |
 
----
-
-## v2026-04-21 (builds antérieurs)
-
-### Nouvelles fonctionnalités
-- Vue hiérarchique Backups (Sites → Équipements → Versions), lazy loading, drag & drop des sites
-- Épinglage de versions, boutons Sauvegarde (orange) et Importer (vert)
-- Appareils déplacé dans Administration, onglet embedded avec tabs horizontaux
-- Champ Type via datalist dans les Modèles
-- Icônes par type d'équipement dans Backups
-- Filtre par type d'équipement avec dépliage automatique
-- Droits d'accès par rôle (matrice permissions × rôles dans Sécurité)
-- Hook `usePerms` appliqué sur tous les boutons et onglets sensibles
-- Footer bar avec version, licence AGPL-3.0
-- Timeout de session configurable, alerte 60s avant expiration
-- Fuseau horaire via `TZ=Europe/Paris` dans docker-compose, `nowLocal()` Node.js
-- Duplication d'équipement avec unicité nom (insensible à la casse) et IP
-- Autocomplétion dans le modal backup SSH
-
-### Corrections
-- Multiples corrections d'apostrophes dans les strings JavaScript
-- `ConfigEmbedded` séparé de `Config` pour éviter les conflits `useSearchParams`
-- Import `usePerms` manquant dans `Config.jsx` (écran blanc sur l'onglet Appareils)
-- `nowLocal()` Node.js pour toutes les dates dynamiques
+> **SMTP et APP_URL** se configurent depuis l'interface Administration → Sécurité → Général.
 
 ---
-
-## Données de démonstration
-- Sites : Paris HQ, Lyon DC
-- Modèles : Cisco Catalyst 9300 (Switch), HP Aruba 2930F (Switch), Fortinet FortiGate 90G (Pare-Feu)
-- Équipements : sw-paris-core-01 (10.0.1.1), sw-lyon-access-02 (10.1.1.2), FW-XH (10.10.10.1)
-- Tags : SECU, INFRA, NETWORK, FW, MAIL, BACKUP, TEL, AV, ADM
 
 ## Compte par défaut
 - Login : `admin` / MDP : `changeme` (changement forcé, 14 caractères minimum)
