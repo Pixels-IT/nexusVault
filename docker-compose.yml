@@ -1,0 +1,67 @@
+services:
+
+  # ── BACKEND (Node.js + SQLite) ──────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vaultnexus-backend
+    restart: unless-stopped
+    environment:
+      # Clé de chiffrement AES-256 pour les données sensibles en base SQLite.
+      # OBLIGATOIRE : changez cette valeur avant le premier démarrage.
+      # Générer une clé : openssl rand -hex 32
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-CHANGEZ-CETTE-CLE-MAINTENANT-32chars!!}
+
+      # Secret JWT pour les tokens de session.
+      # Générer : openssl rand -hex 32
+      JWT_SECRET: ${JWT_SECRET:-CHANGEZ-CE-SECRET-JWT-AVANT-PROD!!}
+
+      DB_PATH: /data/vaultnexus.db
+      PORT: 3001
+      NODE_ENV: production
+
+      # Fuseau horaire du serveur — modifiable dans .env
+      # Exemples : Europe/Paris, America/New_York, Asia/Tokyo, UTC
+      TZ: ${TZ:-Europe/Paris}
+
+    volumes:
+      - vaultnexus-data:/data
+    networks:
+      - vaultnexus-net
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── FRONTEND (React + Nginx) ────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vaultnexus-frontend
+    restart: unless-stopped
+    ports:
+      # Modifiez APP_PORT dans le fichier .env pour changer le port d'écoute.
+      - "${APP_PORT:-8080}:80"
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - vaultnexus-net
+
+# ── VOLUMES ──────────────────────────────────────────────────────────────────
+volumes:
+  vaultnexus-data:
+    driver: local
+
+# ── RÉSEAU INTERNE ───────────────────────────────────────────────────────────
+networks:
+  vaultnexus-net:
+    driver: bridge
