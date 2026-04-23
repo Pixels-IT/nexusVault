@@ -1,0 +1,20 @@
+// de — Traductions partielles. Contribuez : frontend/src/i18n/locales/de.js
+export default {
+  'auth.username': 'Benutzername',
+  'auth.password': 'Passwort',
+  'auth.login': 'Anmelden',
+  'auth.forgot': 'Passwort vergessen?',
+  'dash.title': 'Dashboard',
+  'dash.subtitle': 'Übersicht Ihrer Umgebung',
+  'dash.backups': 'Konfigurations-Backups',
+  'dash.devices': 'Geräte',
+  'dash.sites': 'Standorte',
+  'dash.models': 'Modelle',
+  'dash.notes_total': 'Notizen gesamt',
+  'nav.dashboard': 'Dashboard',
+  'nav.backups': 'Backups',
+  'nav.activity': 'Aktivität',
+  'nav.admin': 'Verwaltung',
+  'nav.scripts': 'Skripte',
+  'lang.select': 'Sprache wechseln',
+};

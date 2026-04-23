@@ -1,0 +1,20 @@
+// ja — Traductions partielles. Contribuez : frontend/src/i18n/locales/ja.js
+export default {
+  'auth.username': 'ユーザー名',
+  'auth.password': 'パスワード',
+  'auth.login': 'ログイン',
+  'auth.forgot': 'パスワードをお忘れですか？',
+  'dash.title': 'ダッシュボード',
+  'dash.subtitle': '環境の概要',
+  'dash.backups': '設定バックアップ',
+  'dash.devices': 'デバイス',
+  'dash.sites': 'サイト',
+  'dash.models': 'モデル',
+  'dash.notes_total': '合計ノート',
+  'nav.dashboard': 'ダッシュボード',
+  'nav.backups': 'バックアップ',
+  'nav.activity': 'アクティビティ',
+  'nav.admin': '管理',
+  'nav.scripts': 'スクリプト',
+  'lang.select': '言語を変更',
+};

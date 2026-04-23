@@ -1,0 +1,20 @@
+// zh — Traductions partielles. Contribuez : frontend/src/i18n/locales/zh.js
+export default {
+  'auth.username': '用户名',
+  'auth.password': '密码',
+  'auth.login': '登录',
+  'auth.forgot': '忘记密码？',
+  'dash.title': '仪表板',
+  'dash.subtitle': '您的环境概览',
+  'dash.backups': '配置备份',
+  'dash.devices': '设备',
+  'dash.sites': '站点',
+  'dash.models': '型号',
+  'dash.notes_total': '总笔记数',
+  'nav.dashboard': '仪表板',
+  'nav.backups': '备份',
+  'nav.activity': '活动',
+  'nav.admin': '管理',
+  'nav.scripts': '脚本',
+  'lang.select': '更改语言',
+};

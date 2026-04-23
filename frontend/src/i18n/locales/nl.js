@@ -1,0 +1,20 @@
+// nl — Traductions partielles. Contribuez : frontend/src/i18n/locales/nl.js
+export default {
+  'auth.username': 'Gebruikersnaam',
+  'auth.password': 'Wachtwoord',
+  'auth.login': 'Inloggen',
+  'auth.forgot': 'Wachtwoord vergeten?',
+  'dash.title': 'Dashboard',
+  'dash.subtitle': 'Overzicht van uw omgeving',
+  'dash.backups': 'Configuratie-back-ups',
+  'dash.devices': 'Apparaten',
+  'dash.sites': 'Locaties',
+  'dash.models': 'Modellen',
+  'dash.notes_total': 'Totaal notities',
+  'nav.dashboard': 'Dashboard',
+  'nav.backups': 'Back-ups',
+  'nav.activity': 'Activiteit',
+  'nav.admin': 'Beheer',
+  'nav.scripts': 'Scripts',
+  'lang.select': 'Taal wijzigen',
+};
