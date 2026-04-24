@@ -342,9 +342,9 @@ function RolePermissionsCard() {
     try {
       await api.saveRolePerms(perms);
       invalidatePermsCache();
-      setMsg('Droits enregistrés. Les changements prennent effet à la prochaine connexion.');
-    } catch (e) { setMsg('Erreur : ' + e.message); }
-    finally { setSaving(false); }
+      setMsg('Droits enregistrés. Rechargement en cours…');
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (e) { setMsg('Erreur : ' + e.message); setSaving(false); }
   }
 
   if (!perms) return <div style={{ padding: 16, textAlign: 'center' }}><span className="spinner" /></div>;

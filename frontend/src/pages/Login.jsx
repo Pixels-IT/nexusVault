@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext.jsx';
 import api from '../api.js';
 
 // Version du logiciel : date de build au format AAAA-MM-JJ
-const APP_VERSION = '2026-04-23_b46.135';
+const APP_VERSION = '2026-04-23_b47.138';
 
 
 // ── MODAL MOT DE PASSE OUBLIÉ ─────────────────────────────────────────────────

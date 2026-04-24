@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-04-23_b47.138
+> Build 47 du 23 avril 2026 — 138 requêtes cumulées
+
+### Corrections permissions
+- **Navbar** : "Suivi" renommé "Suivi d'activité" dans `fr.js`
+- **activity_tags** : routes backend POST/PUT/DELETE des tags utilisaient `requireRole('admin')` en dur. Remplacé par `requirePerm('activity_tags')` — tout rôle avec ce droit peut maintenant créer/modifier/supprimer des tags
+- **activity_read** : le backend filtrait `user_id` uniquement pour `role === 'admin'`. Ajout de `canViewAll = req.user.role === 'admin' || userPerms.activity_read === true` dans les routes `/api/activity/entries` et `/api/activity/years` — les non-admins avec ce droit voient les entrées des autres utilisateurs
+- **Droits d'accès** : après sauvegarde, la page se recharge automatiquement (1s) pour appliquer les nouveaux droits sans attendre une reconnexion
+
+---
+
 ## 2026-04-23_b46.135
 > Build 46 du 23 avril 2026 — 135 requêtes cumulées
 

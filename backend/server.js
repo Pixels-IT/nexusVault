@@ -1206,7 +1206,7 @@ app.get('/api/activity/tags', authMiddleware, (req, res) => {
   res.json(getDb().prepare('SELECT * FROM activity_tags ORDER BY code').all());
 });
 
-app.post('/api/activity/tags', authMiddleware, requireRole('admin'), (req, res) => {
+app.post('/api/activity/tags', authMiddleware, requirePerm('activity_tags'), (req, res) => {
   const { code, label, color } = req.body;
   if (!code || !label) return res.status(400).json({ error: 'Code et libellé requis' });
   const clean = code.toUpperCase().replace(/[^A-Z0-9_]/g, '');
@@ -1216,13 +1216,13 @@ app.post('/api/activity/tags', authMiddleware, requireRole('admin'), (req, res) 
   } catch { res.status(400).json({ error: 'Ce code existe déjà' }); }
 });
 
-app.put('/api/activity/tags/:id', authMiddleware, requireRole('admin'), (req, res) => {
+app.put('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), (req, res) => {
   const { label, color } = req.body;
   getDb().prepare('UPDATE activity_tags SET label=?, color=? WHERE id=?').run(label, color, req.params.id);
   res.json({ success: true });
 });
 
-app.delete('/api/activity/tags/:id', authMiddleware, requireRole('admin'), (req, res) => {
+app.delete('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), (req, res) => {
   getDb().prepare('DELETE FROM activity_tags WHERE id=?').run(req.params.id);
   res.json({ success: true });
 });
@@ -1231,7 +1231,11 @@ app.delete('/api/activity/tags/:id', authMiddleware, requireRole('admin'), (req,
 app.get('/api/activity/entries', authMiddleware, (req, res) => {
   const db = getDb();
   const { user_id, year, month } = req.query;
-  const targetUserId = (req.user.role === 'admin' && user_id) ? parseInt(user_id) : req.user.id;
+  // Vérifier si l'utilisateur a le droit de voir les entrées des autres
+  let userPerms = {};
+  try { userPerms = JSON.parse(req.user.permissions || '{}'); } catch {}
+  const canViewAll = req.user.role === 'admin' || userPerms.activity_read === true;
+  const targetUserId = (canViewAll && user_id) ? parseInt(user_id) : req.user.id;
   let q = 'SELECT e.*, u.username, u.display_name FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.user_id=?';
   const p = [targetUserId];
   if (year)  { q += ' AND e.year=?';  p.push(parseInt(year));  }
@@ -1257,7 +1261,11 @@ app.get('/api/activity/entries/:id/history', authMiddleware, (req, res) => {
 app.get('/api/activity/years', authMiddleware, (req, res) => {
   const db = getDb();
   const { user_id } = req.query;
-  const targetUserId = (req.user.role === 'admin' && user_id) ? parseInt(user_id) : req.user.id;
+  // Vérifier si l'utilisateur a le droit de voir les entrées des autres
+  let userPerms = {};
+  try { userPerms = JSON.parse(req.user.permissions || '{}'); } catch {}
+  const canViewAll = req.user.role === 'admin' || userPerms.activity_read === true;
+  const targetUserId = (canViewAll && user_id) ? parseInt(user_id) : req.user.id;
   const rows = db.prepare('SELECT DISTINCT year FROM activity_entries WHERE user_id=? ORDER BY year DESC').all(targetUserId);
   res.json(rows.map(r => r.year));
 });

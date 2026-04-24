@@ -4,7 +4,7 @@ export default {
   // Navigation
   'nav.dashboard':    'Tableau de bord',
   'nav.backups':      'Backups',
-  'nav.activity':     'Suivi',
+  'nav.activity':     "Suivi d'activité",
   'nav.admin':        'Administration',
 
   // Auth

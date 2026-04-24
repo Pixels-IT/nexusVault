@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api.js';
 
-const APP_VERSION = '2026-04-23_b46.135';
+const APP_VERSION = '2026-04-23_b47.138';
 
 export default function ResetPassword() {
   const [params]    = useSearchParams();
