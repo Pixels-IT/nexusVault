@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
+import { useI18n } from '../contexts/I18nContext.jsx';
 import api from '../api.js';
 
 // Version du logiciel : date de build au format AAAA-MM-JJ
-const APP_VERSION = '2026-04-24_b48.140';
+const APP_VERSION = '2026-04-24_b49.143';
 
 
 // ── MODAL MOT DE PASSE OUBLIÉ ─────────────────────────────────────────────────
@@ -103,6 +104,7 @@ function ForgotPasswordModal({ onClose }) {
 export default function Login() {
   const { login } = useAuth();
   const { dark, toggle } = useTheme();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const [username, setUsername] = useState('');
@@ -180,7 +182,7 @@ export default function Login() {
             style={{ width: '100%', marginTop: 14, justifyContent: 'center', padding: '10px 14px', fontSize: 13 }}
             disabled={loading}
           >
-            {loading ? 'Connexion…' : 'Se connecter'}
+            {loading ? t('auth.logging_in') : t('auth.login')}
           </button>
         </form>
 

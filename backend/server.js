@@ -160,25 +160,7 @@ app.get('/api/users/admin-count', authMiddleware, requireRole('admin'), (req, re
 // Liste des utilisateurs pour le sélecteur du suivi d'activité
 // Accessible à tout utilisateur ayant activity_read ou admin
 app.get('/api/users/for-activity', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') {
-    // Vérifier activity_read via role_permissions
-    let hasAccess = false;
-    try {
-      const jwtPerms = JSON.parse(req.user.permissions || '{}');
-      if (jwtPerms.activity_read === true) hasAccess = true;
-    } catch {}
-    if (!hasAccess) {
-      try {
-        const db2 = getDb();
-        const row2 = db2.prepare("SELECT value FROM settings WHERE key='role_permissions'").get();
-        if (row2) {
-          const rp = JSON.parse(row2.value);
-          if (rp[req.user.role]?.activity_read === true) hasAccess = true;
-        }
-      } catch {}
-    }
-    if (!hasAccess) return res.status(403).json({ error: 'Permission insuffisante' });
-  }
+  if (!checkActivityReadPerm(req)) return res.status(403).json({ error: 'Permission insuffisante' });
   const db = getDb();
   const rows = db.prepare("SELECT id, username, display_name FROM users WHERE enabled=1 ORDER BY username").all();
   res.json(rows);
@@ -1230,6 +1212,26 @@ app.get('/api/settings/public', (req, res) => {
 
 
 // ── SUIVI D'ACTIVITÉ — TAGS ───────────────────────────────────────────────────
+
+// Helper : vérifie si l'utilisateur peut voir les entrées des autres (activity_read)
+function checkActivityReadPerm(req) {
+  if (req.user.role === 'admin') return true;
+  // 1. Permissions individuelles du JWT
+  try {
+    const p = JSON.parse(req.user.permissions || '{}');
+    if (p.activity_read === true) return true;
+  } catch {}
+  // 2. Role permissions en base
+  try {
+    const row = getDb().prepare("SELECT value FROM settings WHERE key='role_permissions'").get();
+    if (row) {
+      const rp = JSON.parse(row.value);
+      if (rp[req.user.role]?.activity_read === true) return true;
+    }
+  } catch {}
+  return false;
+}
+
 app.get('/api/activity/tags', authMiddleware, (req, res) => {
   res.json(getDb().prepare('SELECT * FROM activity_tags ORDER BY code').all());
 });
@@ -1259,10 +1261,7 @@ app.delete('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'
 app.get('/api/activity/entries', authMiddleware, (req, res) => {
   const db = getDb();
   const { user_id, year, month } = req.query;
-  // Vérifier si l'utilisateur a le droit de voir les entrées des autres
-  let userPerms = {};
-  try { userPerms = JSON.parse(req.user.permissions || '{}'); } catch {}
-  const canViewAll = req.user.role === 'admin' || userPerms.activity_read === true;
+  const canViewAll = checkActivityReadPerm(req);
   const targetUserId = (canViewAll && user_id) ? parseInt(user_id) : req.user.id;
   let q = 'SELECT e.*, u.username, u.display_name FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.user_id=?';
   const p = [targetUserId];
@@ -1289,10 +1288,7 @@ app.get('/api/activity/entries/:id/history', authMiddleware, (req, res) => {
 app.get('/api/activity/years', authMiddleware, (req, res) => {
   const db = getDb();
   const { user_id } = req.query;
-  // Vérifier si l'utilisateur a le droit de voir les entrées des autres
-  let userPerms = {};
-  try { userPerms = JSON.parse(req.user.permissions || '{}'); } catch {}
-  const canViewAll = req.user.role === 'admin' || userPerms.activity_read === true;
+  const canViewAll = checkActivityReadPerm(req);
   const targetUserId = (canViewAll && user_id) ? parseInt(user_id) : req.user.id;
   const rows = db.prepare('SELECT DISTINCT year FROM activity_entries WHERE user_id=? ORDER BY year DESC').all(targetUserId);
   res.json(rows.map(r => r.year));
