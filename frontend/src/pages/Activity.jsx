@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../api.js';
+import { useI18n } from '../contexts/I18nContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePerms } from '../hooks/usePerms.js';
 import { Modal, Alert, Spinner, ConfirmModal } from '../components/UI.jsx';
@@ -132,7 +133,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
               Historique
             </button>
           )}
-          <button className="btn" onClick={onClose}>Annuler</button>
+          <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
           <button className="btn btn-primary" onClick={submit} disabled={loading || !tagCode} style={{ marginLeft:8 }}>
             {loading ? 'Enregistrement…' : isEdit ? 'Modifier' : 'Ajouter'}
           </button>
@@ -274,6 +275,7 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
 
 // ── MOIS SECTION ──────────────────────────────────────────────────────────────
 function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
+    const { t } = useI18n();
   const [entries, setEntries]   = useState([]);
   const [loading, setLoading]   = useState(false);
   const [loaded, setLoaded]     = useState(false);
@@ -374,7 +376,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
             className="btn btn-sm"
             style={{ marginLeft: 'auto', fontSize: 11 }}
             onClick={e => { e.stopPropagation(); handleAdd(); }}
-          >+ Note</button>
+          >{t('activity.add')}</button>
         )}
       </div>
 
@@ -412,6 +414,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
 
 // ── ANNÉE SECTION ─────────────────────────────────────────────────────────────
 function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle }) {
+    const { t } = useI18n();
   const [open, setOpen] = useState(isOpenDefault || false);
   const [yearCount, setYearCount] = useState(null);
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -695,7 +698,7 @@ ${chartSection}
   return (
     <Modal title="Exporter en PDF" onClose={onClose}
       footer={<>
-        <button className="btn" onClick={onClose}>Annuler</button>
+        <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
         <button className="btn btn-primary" onClick={doExport} disabled={loading}>
           {loading ? 'Génération…' : 'Exporter PDF'}
         </button>
@@ -779,6 +782,7 @@ ${chartSection}
 // ── PAGE PRINCIPALE ───────────────────────────────────────────────────────────
 export default function Activity() {
   const { user } = useAuth();
+  const { t } = useI18n();
   const isAdmin = user?.role === 'admin';
   const { can } = usePerms();
   const [filterTag, setFilterTag]   = useState('');
@@ -827,8 +831,8 @@ export default function Activity() {
     <main>
       <div className="page-header">
         <div>
-          <div className="page-title">Suivi d'activité</div>
-          <div className="page-sub">Journal chronologique des actions par période</div>
+          <div className="page-title">{t('activity.title')}</div>
+          <div className="page-sub">{t('activity.subtitle')}</div>
         </div>
         <div className="page-actions">
           {/* Sélecteur utilisateur (admin) */}
@@ -839,7 +843,7 @@ export default function Activity() {
               </svg>
               <select className="form-control" style={{ padding: '5px 8px', fontSize: 12, height: 30, minWidth: 150 }}
                 value={selectedUser || ''} onChange={e => setSelectedUser(e.target.value ? parseInt(e.target.value) : null)}>
-                <option value="">Mon suivi</option>
+                <option value="">{t('activity.my_activity')}</option>
                 {users.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
               </select>
             </div>
@@ -852,7 +856,7 @@ export default function Activity() {
               </svg>
               <select className="form-control" style={{ padding: '5px 8px', fontSize: 12, height: 30, minWidth: 120 }}
                 value={filterTag} onChange={e => setFilterTag(e.target.value)}>
-                <option value="">Tous les tags</option>
+                <option value="">{t('activity.all_tags')}</option>
                 {tags.map(t => <option key={t.code} value={t.code}>{t.code} — {t.label}</option>)}
               </select>
               {filterTag && (

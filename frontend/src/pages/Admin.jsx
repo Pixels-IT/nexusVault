@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useI18n } from '../contexts/I18nContext.jsx';
 import { Modal, Alert, ConfirmModal, Spinner } from '../components/UI.jsx';
 import PersonnalisationPage from './Personnalisation.jsx';
 import { usePerms, invalidatePermsCache } from '../hooks/usePerms.js';
@@ -77,7 +78,7 @@ function AccountTab() {
           {err && <Alert type="err">{err}</Alert>}
           <form onSubmit={saveProfile}>
             <div className="form-group">
-              <label className="form-label">Nom affiché</label>
+              <label className="form-label">{t('users.display_name')}</label>
               <input className="form-control" value={data.display_name} onChange={e => setData(d => ({ ...d, display_name: e.target.value }))} placeholder="Votre nom complet" />
             </div>
             <div className="form-group">
@@ -89,7 +90,7 @@ function AccountTab() {
               <input className="form-control" type="email" value={data.email} onChange={e => setData(d => ({ ...d, email: e.target.value }))} placeholder="utilisateur@domaine.com" />
             </div>
             <div className="form-group">
-              <label className="form-label">Rôle</label>
+              <label className="form-label">{t('users.role')}</label>
               <input className="form-control" value={user?.role || ''} disabled style={{ opacity: .6 }} />
             </div>
             <button className="btn btn-primary" type="submit">Enregistrer</button>
@@ -138,6 +139,7 @@ const PERMISSIONS = [
 ];
 
 function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
+  const { t } = useI18n();
   const isNew = !user?.id;
   const [data, setData] = useState(user ? {
     username: user.username,
@@ -182,13 +184,13 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
 
   return (
     <Modal
-      title={isNew ? 'Créer un utilisateur' : "Modifier l'utilisateur"}
+      title={isNew ? t('users.create_title') : t('users.edit_title')}
       onClose={onClose}
       footer={
         <>
           <button className="btn" onClick={onClose}>Annuler</button>
           <button className="btn btn-primary" onClick={submit} disabled={loading}>
-            {loading ? '…' : isNew ? 'Créer' : 'Modifier'}
+            {loading ? '…' : isNew ? t('users.save') : t('users.update')}
           </button>
         </>
       }
@@ -198,30 +200,30 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
       {/* Info création : lien d'init envoyé par email */}
       {isNew && (
         <div className="alert alert-warn" style={{ marginBottom: 14, fontSize: 12, textAlign: 'center', justifyContent: 'center' }}>
-          Un lien d'initialisation du mot de passe sera envoyé à l'adresse e-mail renseignée.
+          {t('users.init_link_info')}
         </div>
       )}
 
       <div className="form-row">
         <div className="form-group">
-          <label className="form-label">Identifiant *</label>
+          <label className="form-label">{t('users.username')} *</label>
           <input className="form-control" value={data.username} onChange={set('username')} autoFocus disabled={!isNew} />
         </div>
         <div className="form-group">
-          <label className="form-label">Nom affiché</label>
+          <label className="form-label">{t('users.display_name')}</label>
           <input className="form-control" value={data.display_name} onChange={set('display_name')} />
         </div>
       </div>
 
       <div className="form-group">
-        <label className="form-label">Adresse e-mail *</label>
+        <label className="form-label">{t('users.email')} *</label>
         <input className="form-control" type="email" value={data.email} onChange={set('email')}
           placeholder="utilisateur@domaine.com" />
       </div>
 
       <div className="form-row">
         <div className="form-group">
-          <label className="form-label">Rôle</label>
+          <label className="form-label">{t('users.role')}</label>
           <select className="form-control" value={data.role} onChange={set('role')}>
             <option value="admin">Administrateur</option>
             <option value="operator">Opérateur</option>
@@ -288,7 +290,7 @@ function UsersTab() {
         </button>
       </div>
       <table>
-        <thead><tr><th>Identifiant</th><th>Nom</th><th>E-mail</th><th>Rôle</th><th>Statut</th><th>Dernière connexion</th><th>Créé le</th><th></th></tr></thead>
+        <thead><tr><th>{t('users.username')}</th><th>Nom</th><th>E-mail</th><th>{t('users.role')}</th><th>Statut</th><th>{t('users.last_login')}</th><th>Créé le</th><th></th></tr></thead>
         <tbody>
           {users.map(u => (
             <tr key={u.id}>
@@ -309,14 +311,14 @@ function UsersTab() {
                       </button>
                     </div>
                   : u.enabled
-                    ? <span className="badge badge-ok"><span className="dot dot-ok" />Actif</span>
+                    ? <span className="badge badge-ok"><span className="dot dot-ok" />{t('users.enabled')}</span>
                     : <span className="badge badge-muted"><span className="dot dot-muted" />Désactivé</span>
                 }
               </td>
               <td>
                 {u.last_login_at
                   ? <span style={{ fontSize: 12 }}>{u.last_login_at.slice(0, 16).replace('T', ' ')}</span>
-                  : <span className="badge badge-muted">Jamais</span>}
+                  : <span className="badge badge-muted">{t('users.never')}</span>}
               </td>
               <td className="cell-sub">{u.created_at?.slice(0, 10)}</td>
               <td><div style={{ display: 'flex', gap: 4 }}>
@@ -402,8 +404,8 @@ const PERM_DEFS = [
 ];
 
 const ROLES = [
-  { key: 'admin',    label: 'Administrateur', color: 'var(--err)',  bg: 'var(--err-s)' },
-  { key: 'operator', label: 'Opérateur',      color: 'var(--warn)', bg: 'var(--warn-s)' },
+  { key: 'admin',    label: t('users.role_admin'), color: 'var(--err)',  bg: 'var(--err-s)' },
+  { key: 'operator', label: t('users.role_operator'),      color: 'var(--warn)', bg: 'var(--warn-s)' },
   { key: 'viewer',   label: 'Utilisateur',    color: 'var(--acc)',   bg: 'var(--acc-s)' },
 ];
 
@@ -514,15 +516,16 @@ function RolePermissionsCard() {
 
 // ── SÉCURITÉ (timeout + liste accès) ────────────────────────────────────────
 function SecurityTab() {
+  const { t } = useI18n();
   const defaultTab = new URLSearchParams(window.location.search).get('subtab') || 'general';
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   const TABS = [
-    { key: 'general',  label: 'Général',           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M1 12h3M20 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg> },
-    { key: 'rights',   label: "Droits d'accès",     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
-    { key: 'oidc',     label: 'Authentification',   icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg> },
-    { key: 'notifs',   label: 'Notifications',      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> },
-    { key: 'cron',     label: 'Planificateur',      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
+    { key: 'general',  label: t('security.general'),           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M1 12h3M20 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg> },
+    { key: 'rights',   label: t('security.rights'),     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
+    { key: 'oidc',     label: t('security.auth'),   icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg> },
+    { key: 'notifs',   label: t('security.notifs'),      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> },
+    { key: 'cron',     label: t('security.cron'),      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
   ];
 
   return (
@@ -715,7 +718,7 @@ function SecurityGeneralTab() {
                   <td>
                     <button onClick={() => toggleRule(r)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                       {r.enabled
-                        ? <span className="badge badge-ok"><span className="dot dot-ok"/>Actif</span>
+                        ? <span className="badge badge-ok"><span className="dot dot-ok"/>{t('users.enabled')}</span>
                         : <span className="badge badge-muted"><span className="dot dot-muted"/>Inactif</span>}
                     </button>
                   </td>
@@ -766,7 +769,7 @@ function SmtpModal({ onClose, onSaved }) {
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
           <div className="form-group" style={{margin:0}}><label className="form-label">Hôte SMTP</label><input className="form-control" value={s.host} onChange={e=>setS(x=>({...x,host:e.target.value}))} placeholder="smtp.gmail.com"/></div>
           <div className="form-group" style={{margin:0}}><label className="form-label">Port</label><input className="form-control" type="number" value={s.port} onChange={e=>setS(x=>({...x,port:e.target.value}))} placeholder="587"/></div>
-          <div className="form-group" style={{margin:0}}><label className="form-label">Utilisateur</label><input className="form-control" value={s.user} onChange={e=>setS(x=>({...x,user:e.target.value}))} placeholder="user@domaine.com"/></div>
+          <div className="form-group" style={{margin:0}}><label className="form-label">{t('audit.user')}</label><input className="form-control" value={s.user} onChange={e=>setS(x=>({...x,user:e.target.value}))} placeholder="user@domaine.com"/></div>
           <div className="form-group" style={{margin:0}}><label className="form-label">Mot de passe</label><input className="form-control" type="password" value={s.pass} onChange={e=>setS(x=>({...x,pass:e.target.value}))} placeholder="••••••••"/></div>
           <div className="form-group" style={{margin:0,gridColumn:'1/-1'}}><label className="form-label">Expéditeur (From)</label><input className="form-control" value={s.from} onChange={e=>setS(x=>({...x,from:e.target.value}))} placeholder="NexusVault <no-reply@domaine.com>"/></div>
         </div>
@@ -1042,6 +1045,99 @@ function SecurityNotifTab() {
 
 
 // ── ONGLET AUTHENTIFICATION OIDC ─────────────────────────────────────────────
+
+// ── CARTE LDAP ────────────────────────────────────────────────────────────────
+function LdapCard() {
+  const [ldap, setLdap] = useState({
+    enabled: false, url: '', base_dn: '', bind_dn: '', bind_password: '',
+    user_attr: 'sAMAccountName', group_filter: '', required_group: '', tls: false,
+  });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg]       = useState('');
+  const [err, setErr]       = useState('');
+
+  useEffect(() => {
+    api.ldapConfig().then(d => { if (d) setLdap(prev => ({ ...prev, ...d })); }).catch(() => {});
+  }, []);
+
+  async function save(e) {
+    e.preventDefault(); setSaving(true); setMsg(''); setErr('');
+    try { await api.ldapSave(ldap); setMsg('Configuration LDAP enregistrée.'); }
+    catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  const f = (key, label, type = 'text', ph = '') => (
+    <div className="form-group" style={{ margin: 0 }}>
+      <label className="form-label">{label}</label>
+      <input className="form-control" type={type} value={ldap[key] || ''}
+        onChange={e => setLdap(l => ({ ...l, [key]: e.target.value }))} placeholder={ph} />
+    </div>
+  );
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+          LDAP / LDAPS
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}
+          onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={ldap.enabled}
+            onChange={e => setLdap(l => ({ ...l, enabled: e.target.checked }))} />
+          <span style={{ fontWeight: 600, color: ldap.enabled ? 'var(--ok)' : 'var(--muted)' }}>
+            {ldap.enabled ? 'Activé' : 'Désactivé'}
+          </span>
+        </label>
+      </div>
+      <div style={{ padding: 20 }}>
+        {msg && <div className="alert alert-ok" style={{ marginBottom: 14 }}>{msg}</div>}
+        {err && <div className="alert alert-err" style={{ marginBottom: 14 }}>{err}</div>}
+        <div className="alert alert-warn" style={{ marginBottom: 16, fontSize: 12, justifyContent: 'center', textAlign: 'center' }}>
+          LDAP est complémentaire à l’authentification locale. Les comptes locaux restent accessibles même si LDAP est activé.
+        </div>
+        <form onSubmit={save}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+            {f('url', 'URL du serveur', 'text', 'ldap://192.168.1.10 ou ldaps://...')}
+            {f('base_dn', 'Base DN', 'text', 'dc=monentreprise,dc=com')}
+            {f('bind_dn', 'DN de service (Bind DN)', 'text', 'cn=svc-nexusvault,ou=services,dc=...')}
+            {f('bind_password', 'Mot de passe Bind', 'password', '••••••••')}
+            {f('user_attr', 'Attribut identifiant', 'text', 'sAMAccountName (AD) ou uid (OpenLDAP)')}
+            {f('required_group', 'Groupe requis (DN complet)', 'text', 'cn=NexusVault-Users,ou=groups,dc=...')}
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Filtre de groupe (optionnel)</label>
+              <input className="form-control" value={ldap.group_filter || ''}
+                onChange={e => setLdap(l => ({ ...l, group_filter: e.target.value }))}
+                placeholder="(memberOf=cn=NexusVault,ou=groups,dc=...)" />
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                Filtre LDAP supplémentaire pour restreindre l’accès. Laissez vide pour autoriser tous les utilisateurs du Base DN.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
+              <input type="checkbox" checked={ldap.tls}
+                onChange={e => setLdap(l => ({ ...l, tls: e.target.checked }))} />
+              Utiliser LDAPS (TLS) — port 636
+            </label>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function SecurityOidcTab() {
   const [cfg, setCfg] = useState({
     enabled: false,
@@ -1169,7 +1265,7 @@ function SecurityOidcTab() {
           <div className="card-header"><div className="card-title">Aperçu du bouton de connexion</div></div>
           <div style={{ padding: 16 }}>
             <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-              Ce bouton apparaîtra sur la page de connexion sous le formulaire habituel.
+              Ce bouton apparaître sur la page de connexion sous le formulaire habituel.
             </p>
             <button className="btn" style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--brd)', background: 'var(--surf2)' }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
@@ -1180,6 +1276,7 @@ function SecurityOidcTab() {
           </div>
         </div>
       )}
+      <LdapCard />
     </div>
   );
 }
@@ -1273,7 +1370,7 @@ function SecurityCronTab() {
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span style={{ color: 'var(--muted)', minWidth: 100 }}>Dernier run :</span>
-                    <span style={{ fontFamily: 'var(--mono)' }}>{cronStatus.last_run || 'Jamais'}</span>
+                    <span style={{ fontFamily: 'var(--mono)' }}>{cronStatus.last_run || t('users.never')}</span>
                   </div>
                   {cronStatus.last_result && (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1365,6 +1462,34 @@ function ArchiveListModal({ onClose }) {
 
 const TAG_PRESETS = ['#d63939','#066fd1','#2fb344','#f76707','#7c3aed','#0f9e73','#e91e8c','#c2410c','#677489','#0891b2','#ca8a04'];
 
+// ── SUIVI D'ACTIVITÉ MENU (wrapper avec sous-onglets) ───────────────────────
+function ActivityMenuTab() {
+  const [activeTab, setActiveTab] = useState('tags');
+  const sv = d => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>{d}</svg>;
+  const INNER_TABS = [
+    { key: 'tags', label: "Tags d'activité", icon: sv(<><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></>) },
+  ];
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 2, marginBottom: 20, borderBottom: '1px solid var(--brd)' }}>
+        {INNER_TABS.map(t => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '9px 16px', background: 'none', border: 'none',
+            borderBottom: activeTab === t.key ? '2px solid var(--acc)' : '2px solid transparent',
+            color: activeTab === t.key ? 'var(--acc)' : 'var(--muted)',
+            fontWeight: activeTab === t.key ? 600 : 500,
+            fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font)', marginBottom: -1,
+          }}>
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+      {activeTab === 'tags' && <ActivityTagsTab />}
+    </div>
+  );
+}
+
 function ActivityTagsTab() {
   const [tags, setTags]       = useState([]);
   const [form, setForm]       = useState({ code: '', label: '', color: '#066fd1' });
@@ -1400,7 +1525,7 @@ function ActivityTagsTab() {
       </div>
       <div style={{ padding: 16 }}>
         <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-          Les tags permettent de catégoriser les notes d'activité. Le code doit être court et en majuscules.
+          Les tags permettent de catégoriser les notes d'activité. 
         </p>
         {error && <div className="alert alert-err" style={{ marginBottom: 12 }}>{error}</div>}
         <form onSubmit={addTag} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-end' }}>
@@ -1531,11 +1656,11 @@ function ArchiveViewModal({ archive, onClose }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ background: 'var(--surf2)', position: 'sticky', top: 0 }}>
-                <th style={{ padding: '5px 8px', textAlign: 'left', width: 130 }}>Date</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left', width: 130 }}>{t('audit.date')}</th>
                 <th style={{ padding: '5px 8px', textAlign: 'left', width: 90 }}>Sévérité</th>
-                <th style={{ padding: '5px 8px', textAlign: 'left' }}>Action</th>
-                <th style={{ padding: '5px 8px', textAlign: 'left', width: 100 }}>Utilisateur</th>
-                <th style={{ padding: '5px 8px', textAlign: 'left' }}>Détail</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left' }}>{t('audit.action')}</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left', width: 100 }}>{t('audit.user')}</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left' }}>{t('audit.detail')}</th>
                 <th style={{ padding: '5px 8px', textAlign: 'center', width: 60 }}>Résultat</th>
               </tr>
             </thead>
@@ -1556,7 +1681,7 @@ function ArchiveViewModal({ archive, onClose }) {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Aucune entrée</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>{t('audit.no_entries')}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1681,23 +1806,38 @@ function AuditTab() {
         <table>
           <thead>
             <tr>
-              <th style={{ width: 140 }}>Date</th>
+              <th style={{ width: 140 }}>{t('audit.date')}</th>
               <th style={{ width: 90 }}>Sévérité</th>
               <th style={{ width: 100 }}>Catégorie</th>
-              <th style={{ width: 150 }}>Action</th>
-              <th style={{ width: 90 }}>Utilisateur</th>
-              <th>Détail</th>
+              <th style={{ width: 150 }}>{t('audit.action')}</th>
+              <th style={{ width: 90 }}>{t('audit.user')}</th>
+              <th>{t('audit.detail')}</th>
               <th style={{ width: 70 }}>Résultat</th>
             </tr>
           </thead>
           <tbody>
             {loading && <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32 }}><span className="spinner" /></td></tr>}
-            {!loading && logs.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucune entrée</td></tr>}
-            {logs.map(l => {
+            {!loading && logs.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>{t('audit.no_entries')}</td></tr>}
+            {logs.map((l, idx) => {
               const sev = SEV[l.severity] || SEV.info;
               const cat = CAT_COLORS[l.category] || { bg: 'var(--surf2)', color: 'var(--muted)' };
-              return (
-                <tr key={l.id} style={{ borderLeft: `3px solid ${sev.dot}` }}>
+              const currDay = (l.created_at || '').slice(0, 10);
+              const prevDay = idx > 0 ? (logs[idx-1].created_at || '').slice(0, 10) : currDay;
+              const newDay  = idx > 0 && currDay !== prevDay;
+              return (<>
+              {newDay && (
+                <tr key={`day-${l.id}`} style={{ pointerEvents: 'none' }}>
+                  <td colSpan={7} style={{ padding: '3px 8px', border: 'none', background: 'transparent' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.25)' }}/>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.5)',
+                        letterSpacing: '.5px', whiteSpace: 'nowrap' }}>{currDay}</span>
+                      <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.25)' }}/>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              <tr key={l.id} style={{ borderLeft: `3px solid ${sev.dot}` }}>
                   <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
                     {l.created_at?.slice(0, 16).replace('T', ' ')}
                   </td>
@@ -1731,7 +1871,7 @@ function AuditTab() {
                     )}
                   </td>
                 </tr>
-              );
+              </>);
             })}
           </tbody>
         </table>
@@ -1746,20 +1886,23 @@ function AuditTab() {
 // ── PAGE ADMIN ────────────────────────────────────────────────────────────────
 // sep = séparateur visuel dans le menu
 const TABS = [
-  { key: 'account',       label: 'Mon compte',       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
-  { key: 'personnalisation', label: 'Personnalisation', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
+  { key: 'account',       label: t('admin.my_account'),       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+  { key: 'personnalisation', label: t('admin.personalisation'), icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
   { key: '__sep1__',      sep: true },
-  { key: 'appareils',     label: 'Appareils',         icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg> },
-  { key: 'scripts_admin', label: 'Scripts',          icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
-  { key: 'activity_tags', label: "Tags d'activité", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
+  { key: 'appareils',     label: t('admin.devices'),         icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg> },
+  { key: 'scripts_admin', label: t('admin.scripts_menu'),          icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
+  { key: 'activity_tags', label: t('admin.activity_menu'), icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
   { key: '__sep2__',      sep: true },
-  { key: 'users',         label: 'Utilisateurs',      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
-  { key: 'security',      label: "Sécurité",           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
-  { key: 'audit',         label: "Journal d'audit",   icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
+  { key: 'users',         label: t('admin.users'),      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+  { key: 'security',      label: t('admin.security'),           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
+  { key: 'audit',         label: t('admin.audit'),   icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
+  { key: '__sep3__',      sep: true },
+  { key: 'logout',        label: t('admin.logout'),        icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> },
 ];
 
 export default function Admin() {
   const { user, logout: doLogout } = useAuth();
+  const { t } = useI18n();
   const [sp, setSp] = useSearchParams();
   const active = sp.get('tab') || 'account';
   const isAdmin = user?.role === 'admin';
@@ -1784,7 +1927,7 @@ export default function Admin() {
       <div className="page-header">
         <div>
           <div className="page-title">Administration</div>
-          <div className="page-sub">Configuration, Gestion des accès utilisateurs et Sécurité</div>
+          <div className="page-sub">Configuration, Personnalisation, Gestion des accès utilisateurs, Administration et Sécurité</div>
         </div>
       </div>
       <div className="config-layout">
@@ -1800,7 +1943,7 @@ export default function Admin() {
               );
             }
             return (
-              <div key={t.key} className={`side-item ${active === t.key ? 'active' : ''}`} onClick={() => setSp({ tab: t.key })}>
+              <div key={t.key} className={`side-item ${active === t.key ? 'active' : ''}`} onClick={() => { if (t.key === 'logout') doLogout(); else setSp({ tab: t.key }); }} style={t.key === 'logout' ? { color: 'var(--err)' } : {}}>
                 {t.icon}{t.label}
               </div>
             );
@@ -1813,7 +1956,7 @@ export default function Admin() {
           {active === 'users' && isAdmin && <UsersTab />}
           {active === 'security' && (isAdmin || can('security_access')) && <SecurityTab />}
           {active === 'scripts_admin' && (isAdmin || can('scripts_admin')) && <ScriptsAdminTab />}
-          {active === 'activity_tags' && (isAdmin || can('activity_tags')) && <ActivityTagsTab />}
+          {active === 'activity_tags' && (isAdmin || can('activity_tags')) && <ActivityMenuTab />}
           {active === 'audit' && (isAdmin || can('audit_access')) && <AuditTab />}
         </div>
       </div>

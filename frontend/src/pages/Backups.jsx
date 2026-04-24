@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePerms } from '../hooks/usePerms.js';
+import { useI18n } from '../contexts/I18nContext.jsx';
 import AccessDenied from '../components/AccessDenied.jsx';
 import api from '../api.js';
 import { Modal, Alert, Spinner } from '../components/UI.jsx';
@@ -515,13 +516,13 @@ function DeviceSection({ device, compareMode, selected, onSelectCompare, onView,
         <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
           {device.last_backup
             ? <>{statusBadge(device.last_backup.status)}<span className="cell-sub">v{device.last_backup.version} · {device.last_backup.created_at?.slice(0,10)}</span></>
-            : <span className="badge badge-muted">Aucun backup</span>}
+            : <span className="badge badge-muted">{t('backup.no_backup')}</span>}
         </div>
       </div>
       {open && (
         <div style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf)' }}>
           {loading ? <div style={{ padding:16, textAlign:'center' }}><Spinner /></div>
-          : backups.length === 0 ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>Aucun backup</div>
+          : backups.length === 0 ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>{t('backup.no_backup')}</div>
           : <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr style={{ background:'var(--surf2)' }}>
@@ -588,7 +589,7 @@ function SiteSection({ site, devices, compareMode, selected, onSelectCompare, on
       {open && (
         <div>
           {siteDevices.length === 0
-            ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>Aucun équipement</div>
+            ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>{t('backup.no_devices')}</div>
             : siteDevices.map(d => (
                 <DeviceSection key={d.id} device={d}
                   compareMode={compareMode} selected={selected}
@@ -693,7 +694,7 @@ export default function Backups() {
           {compareMode ? (
             <>
               <span style={{ fontSize:12, color:'var(--muted)', alignSelf:'center' }}>{selected.length}/2 sélectionné{selected.length>1?'s':''}</span>
-              <button className="btn btn-primary" disabled={selected.length!==2} onClick={() => setDiff({ a:selected[0], b:selected[1] })}>Comparer</button>
+              <button className="btn btn-primary" disabled={selected.length!==2} onClick={() => setDiff({ a:selected[0], b:selected[1] })}>{t('backup.compare')}</button>
               <button className="btn" onClick={() => { setCompareMode(false); setSelected([]); }}>Annuler</button>
             </>
           ) : (
@@ -807,7 +808,7 @@ export default function Backups() {
       {showUpload && <UploadModal devices={devices} onClose={() => setShowUpload(false)} onDone={() => { setShowUpload(false); load(); }} />}
       {confirmDelete && (
         <Modal title="Supprimer ce backup" onClose={() => setConfirmDelete(null)}
-          footer={<><button className="btn" onClick={() => setConfirmDelete(null)}>Annuler</button><button className="btn btn-danger" onClick={confirmDeleteBackup}>Supprimer</button></>}>
+          footer={<><button className="btn" onClick={() => setConfirmDelete(null)}>Annuler</button><button className="btn btn-danger" onClick={confirmDeleteBackup}>{t('backup.delete')}</button></>}>
           <p style={{ fontSize:13 }}>Supprimer le backup <strong>v{confirmDelete.version}</strong> de <strong>{confirmDelete.device_name}</strong> ?</p>
           <p style={{ fontSize:12, color:'var(--muted)', marginTop:8 }}>Cette action est irréversible. Les backups épinglés ne peuvent pas être supprimés.</p>
         </Modal>

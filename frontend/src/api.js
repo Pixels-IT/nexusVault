@@ -58,6 +58,8 @@ const api = {
   forgotPassword: (username) => request('POST', '/auth/forgot-password', { username }),
   resetPassword: (token, password) => request('POST', '/auth/reset-password', { token, password }),
   checkResetToken: (token) => request('GET', '/auth/reset-token-valid?token=' + encodeURIComponent(token)),
+  ldapConfig:     () => request('GET', '/ldap/config'),
+  ldapSave:       (d) => request('PUT', '/ldap/config', d),
   slackConfig:    () => request('GET', '/slack/config'),
   slackSave:      (d) => request('PUT', '/slack/config', d),
   slackTest:      () => request('POST', '/slack/test'),

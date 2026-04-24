@@ -431,6 +431,33 @@ app.get('/api/oidc/public', (req, res) => {
 
 
 
+
+// ── LDAP CONFIGURATION ───────────────────────────────────────────────────────
+app.get('/api/ldap/config', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM settings WHERE key='ldap_config'").get();
+  if (!row) return res.json({ enabled: false, url: '', base_dn: '', bind_dn: '', user_attr: 'sAMAccountName', group_filter: '', required_group: '', tls: false });
+  try {
+    const cfg = JSON.parse(row.value);
+    res.json({ ...cfg, bind_password: cfg.bind_password ? '••••••••' : '' });
+  } catch { res.json({ enabled: false }); }
+});
+
+app.put('/api/ldap/config', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const { enabled, url, base_dn, bind_dn, bind_password, user_attr, group_filter, required_group, tls } = req.body;
+  const db = getDb(); const ip = getClientIp(req);
+  let finalPwd = bind_password;
+  if (bind_password === '••••••••') {
+    const existing = db.prepare("SELECT value FROM settings WHERE key='ldap_config'").get();
+    if (existing) { try { finalPwd = JSON.parse(existing.value).bind_password || ''; } catch {} }
+  }
+  const cfg = { enabled: !!enabled, url: url || '', base_dn: base_dn || '', bind_dn: bind_dn || '', bind_password: finalPwd || '', user_attr: user_attr || 'sAMAccountName', group_filter: group_filter || '', required_group: required_group || '', tls: !!tls };
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ldap_config', ?)").run(JSON.stringify(cfg));
+  if (url && enabled) process.env.LDAP_ENABLED = '1';
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'LDAP_CONFIG_MODIFIÉ', category: 'admin', severity: 'info', detail: `LDAP ${cfg.enabled ? 'activé' : 'désactivé'} — URL: ${url || '(vide)'}`, ip, success: 1 });
+  res.json({ success: true });
+});
+
 // ── SLACK CONFIGURATION ───────────────────────────────────────────────────────
 app.get('/api/slack/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
