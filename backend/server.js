@@ -171,16 +171,69 @@ app.get('/api/users', authMiddleware, requireRole('admin'), (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/users', authMiddleware, requireRole('admin'), (req, res) => {
-  const { username, display_name, email, password, role, permissions } = req.body;
+app.post('/api/users', authMiddleware, requireRole('admin'), async (req, res) => {
+  const { username, display_name, email, role } = req.body;
   const ip = getClientIp(req);
   const db = getDb();
-  if (!username || !password) return res.status(400).json({ error: 'Identifiant et mot de passe requis' });
-  if (password.length < 14) return res.status(400).json({ error: 'Mot de passe: 14 caractères minimum' });
-  const hash = bcrypt.hashSync(password, 12);
-  const r = db.prepare(`INSERT INTO users (username, display_name, email, password_hash, must_change_password, role, permissions) VALUES (?,?,?,?,1,?,?)`).run(username, display_name || username, email || null, hash, role || 'viewer', JSON.stringify(permissions || {}));
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'UTILISATEUR_CRÉÉ', category: 'admin', severity: 'info', detail: `Nouvel utilisateur: ${username} (${role})`, ip, success: 1 });
-  res.json({ id: r.lastInsertRowid, username, role });
+  if (!username?.trim()) return res.status(400).json({ error: 'Identifiant requis' });
+  if (!email?.trim())    return res.status(400).json({ error: 'Adresse e-mail obligatoire' });
+
+  // Mot de passe temporaire aléatoire (sera changé via le lien)
+  const tmpPwd  = require('crypto').randomBytes(24).toString('hex');
+  const hash    = bcrypt.hashSync(tmpPwd, 12);
+  let newId;
+  try {
+    const r = db.prepare('INSERT INTO users (username, display_name, email, password_hash, must_change_password, role, permissions) VALUES (?,?,?,?,1,?,?)').run(
+      username.trim(), display_name?.trim() || username.trim(), email.trim(), hash, role || 'viewer', '{}'
+    );
+    newId = r.lastInsertRowid;
+  } catch {
+    return res.status(400).json({ error: 'Identifiant ou e-mail déjà utilisé' });
+  }
+
+  // Générer un token d'initialisation (valide 24h)
+  const token   = require('crypto').randomBytes(32).toString('hex');
+  const pad     = n => String(n).padStart(2,'0');
+  const exp     = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const expStr  = `${exp.getFullYear()}-${pad(exp.getMonth()+1)}-${pad(exp.getDate())} ${pad(exp.getHours())}:${pad(exp.getMinutes())}:${pad(exp.getSeconds())}`;
+  db.prepare('INSERT INTO password_reset_tokens (user_id, token, expires_at, used, created_at) VALUES (?,?,?,0,?)').run(newId, token, expStr, nowLocal());
+
+  const appUrl   = (process.env.APP_URL || 'http://localhost:8080').replace(/\/$/, '');
+  const initUrl  = `${appUrl}/reset-password?token=${token}`;
+
+  // Envoi de l'email d'initialisation
+  const transport = getMailTransport();
+  logger.info(`[USER] Compte créé: ${username.trim()} — lien d'initialisation: ${initUrl}`);
+
+  if (transport) {
+    const from = process.env.SMTP_FROM || 'NexusVault <no-reply@nexusvault.local>';
+    transport.sendMail({
+      from, to: email.trim(),
+      subject: 'NexusVault — Initialisation de votre compte',
+      html: `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head><body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:32px">
+<div style="max-width:480px;margin:0 auto;background:white;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)">
+  <div style="background:linear-gradient(135deg,#0d47a1,#26c6da);padding:28px 32px">
+    <div style="color:white;font-size:22px;font-weight:800;letter-spacing:1px">NEXUS<span style="opacity:.7">VAULT</span></div>
+  </div>
+  <div style="padding:28px 32px">
+    <h2 style="color:#1e293b;margin:0 0 12px;font-size:18px">Bienvenue sur NexusVault !</h2>
+    <p style="color:#64748b;font-size:13px;margin:0 0 20px">Bonjour <strong>${username.trim()}</strong>,<br><br>
+    Un compte a été créé pour vous. Cliquez sur le bouton ci-dessous pour initialiser votre mot de passe.</p>
+    <a href="${initUrl}" style="display:inline-block;background:#1976d2;color:white;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:13px">Initialiser mon mot de passe</a>
+    <p style="color:#94a3b8;font-size:11px;margin:20px 0 0">Ce lien est valable <strong>24 heures</strong>.</p>
+    <p style="color:#cbd5e1;font-size:10px;margin:8px 0 0;word-break:break-all">${initUrl}</p>
+  </div>
+  <div style="background:#f8fafc;padding:14px 32px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8">
+    NexusVault — Ne pas répondre à cet email
+  </div>
+</div></body></html>`,
+    }).catch(err => logger.error('[USER] Email init error:', err.message));
+  } else {
+    logger.warn("[USER] SMTP non configure — lien d'initialisation disponible dans les logs ci-dessus");
+  }
+
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'UTILISATEUR_CRÉÉ', category: 'admin', severity: 'info', detail: `Compte: ${username.trim()} (${role || 'viewer'}) — email init envoyé à ${email.trim()}`, ip, success: 1 });
+  res.json({ id: newId, username: username.trim(), role: role || 'viewer' });
 });
 
 app.put('/api/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
@@ -279,7 +332,7 @@ const logger = {
 
 
 // ── NOTIFICATIONS — CONFIGURATION ─────────────────────────────────────────────
-app.get('/api/notifications/catalog', authMiddleware, requireRole('admin'), (req, res) => {
+app.get('/api/notifications/catalog', authMiddleware, requirePerm('security_access'), (req, res) => {
   // Sérialiser available() comme booléen (les fonctions ne passent pas en JSON)
   const channels = Object.fromEntries(
     Object.entries(CHANNEL_CATALOG).map(([k, v]) => [k, { ...v, available: v.available() }])
@@ -287,7 +340,7 @@ app.get('/api/notifications/catalog', authMiddleware, requireRole('admin'), (req
   res.json({ events: EVENT_CATALOG, channels });
 });
 
-app.get('/api/notifications/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.get('/api/notifications/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const rows = db.prepare("SELECT * FROM notification_config").all();
   // Compléter avec les événements pas encore en base
@@ -305,7 +358,7 @@ app.get('/api/notifications/config', authMiddleware, requireRole('admin'), (req,
   res.json(result);
 });
 
-app.put('/api/notifications/config/:eventKey', authMiddleware, requireRole('admin'), (req, res) => {
+app.put('/api/notifications/config/:eventKey', authMiddleware, requirePerm('security_access'), (req, res) => {
   const { enabled, channels, options } = req.body;
   const db = getDb();
   const ip = getClientIp(req);
@@ -317,14 +370,14 @@ app.put('/api/notifications/config/:eventKey', authMiddleware, requireRole('admi
   res.json({ success: true });
 });
 
-app.get('/api/notifications/log', authMiddleware, requireRole('admin'), (req, res) => {
+app.get('/api/notifications/log', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const limit = parseInt(req.query.limit) || 50;
   res.json(db.prepare("SELECT * FROM notification_log ORDER BY sent_at DESC LIMIT ?").all(limit));
 });
 
 // Test d'envoi manuel d'une notification
-app.post('/api/notifications/test/:eventKey', authMiddleware, requireRole('admin'), (req, res) => {
+app.post('/api/notifications/test/:eventKey', authMiddleware, requirePerm('security_access'), (req, res) => {
   const testPayloads = {
     backup_download:        { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), device: 'TEST-SW-01', version: 'v12 (test)' },
     login_failed_threshold: { datetime: nowLocal(), username: 'testuser', ip: getClientIp(req), attempts: 3, threshold: 3 },
@@ -338,7 +391,7 @@ app.post('/api/notifications/test/:eventKey', authMiddleware, requireRole('admin
 });
 
 // ── OIDC CONFIGURATION ────────────────────────────────────────────────────────
-app.get('/api/oidc/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.get('/api/oidc/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key='oidc_config'").get();
   if (!row) return res.json({ enabled: false });
@@ -349,7 +402,7 @@ app.get('/api/oidc/config', authMiddleware, requireRole('admin'), (req, res) => 
   } catch { res.json({ enabled: false }); }
 });
 
-app.put('/api/oidc/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.put('/api/oidc/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const ip = getClientIp(req);
   const { enabled, provider_name, issuer_url, client_id, client_secret, redirect_uri, scopes, auto_create_users, default_role } = req.body;
@@ -379,7 +432,7 @@ app.get('/api/oidc/public', (req, res) => {
 
 
 // ── SLACK CONFIGURATION ───────────────────────────────────────────────────────
-app.get('/api/slack/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.get('/api/slack/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key='slack_config'").get();
   if (!row) return res.json({ webhook_url: '' });
@@ -389,7 +442,7 @@ app.get('/api/slack/config', authMiddleware, requireRole('admin'), (req, res) =>
   } catch { res.json({ webhook_url: '' }); }
 });
 
-app.put('/api/slack/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.put('/api/slack/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const { webhook_url } = req.body;
   const db = getDb();
   const ip = getClientIp(req);
@@ -404,7 +457,7 @@ app.put('/api/slack/config', authMiddleware, requireRole('admin'), (req, res) =>
   res.json({ success: true });
 });
 
-app.post('/api/slack/test', authMiddleware, requireRole('admin'), (req, res) => {
+app.post('/api/slack/test', authMiddleware, requirePerm('security_access'), (req, res) => {
   const url = process.env.SLACK_WEBHOOK_URL;
   if (!url) return res.status(400).json({ error: 'SLACK_WEBHOOK_URL non configuré' });
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -414,7 +467,7 @@ app.post('/api/slack/test', authMiddleware, requireRole('admin'), (req, res) => 
 });
 
 // ── TELEGRAM CONFIGURATION ─────────────────────────────────────────────────────
-app.get('/api/telegram/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.get('/api/telegram/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key='telegram_config'").get();
   if (!row) return res.json({ bot_token: '', chat_id: '' });
@@ -424,7 +477,7 @@ app.get('/api/telegram/config', authMiddleware, requireRole('admin'), (req, res)
   } catch { res.json({ bot_token: '', chat_id: '' }); }
 });
 
-app.put('/api/telegram/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.put('/api/telegram/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const { bot_token, chat_id } = req.body;
   const db = getDb();
   const ip = getClientIp(req);
@@ -441,7 +494,7 @@ app.put('/api/telegram/config', authMiddleware, requireRole('admin'), (req, res)
   res.json({ success: true });
 });
 
-app.post('/api/telegram/test', authMiddleware, requireRole('admin'), (req, res) => {
+app.post('/api/telegram/test', authMiddleware, requirePerm('security_access'), (req, res) => {
   if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID)
     return res.status(400).json({ error: 'Telegram non configuré' });
   const { dispatch } = require('./notifications.js');
@@ -457,14 +510,14 @@ app.post('/api/telegram/test', authMiddleware, requireRole('admin'), (req, res) 
 });
 
 // ── SMTP CONFIGURATION ────────────────────────────────────────────────────────
-app.get('/api/smtp/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.get('/api/smtp/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key='smtp_config'").get();
   if (!row) return res.json({ host: '', port: 587, secure: false, user: '', from: '', app_url: '' });
   try { res.json(JSON.parse(row.value)); } catch { res.json({}); }
 });
 
-app.put('/api/smtp/config', authMiddleware, requireRole('admin'), (req, res) => {
+app.put('/api/smtp/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const { host, port, secure, user, pass, from, app_url } = req.body;
   const db = getDb();
   const ip = getClientIp(req);
@@ -477,7 +530,7 @@ app.put('/api/smtp/config', authMiddleware, requireRole('admin'), (req, res) => 
   res.json({ success: true });
 });
 
-app.post('/api/smtp/test', authMiddleware, requireRole('admin'), (req, res) => {
+app.post('/api/smtp/test', authMiddleware, requirePerm('security_access'), (req, res) => {
   const transport = getMailTransport();
   if (!transport) return res.status(400).json({ error: 'SMTP non configuré' });
   const db = getDb();
@@ -614,10 +667,7 @@ app.get('/api/auth/reset-token-valid', (req, res) => {
 });
 
 // ── ADMINISTRATION : AUDIT ────────────────────────────────────────────────────
-app.get('/api/audit', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') {
-    try { const perms = JSON.parse(req.user.permissions || '{}'); if (!perms.audit_access) return res.status(403).json({ error: 'Accès refusé' }); } catch { return res.status(403).json({ error: 'Accès refusé' }); }
-  }
+app.get('/api/audit', authMiddleware, requirePerm('audit_access'), (req, res) => {
   const { limit = 200, category, severity, success } = req.query;
   let q = 'SELECT * FROM audit_log WHERE 1=1';
   const p = [];
@@ -893,12 +943,18 @@ app.post('/api/models', authMiddleware, requirePerm('config_write'), (req, res) 
 
 app.put('/api/models/:id', authMiddleware, requirePerm('config_write'), (req, res) => {
   const { vendor, model, device_type, backup_method, backup_command } = req.body;
-  getDb().prepare(`UPDATE device_models SET vendor_enc=?, model_enc=?, device_type_enc=?, backup_method_enc=?, backup_command_enc=?, updated_at=? WHERE id=?`).run(encrypt(vendor), encrypt(model), encrypt(device_type), encrypt(backup_method), encrypt(backup_command), nowLocal(), req.params.id);
+  const db = getDb(); const ip = getClientIp(req);
+  db.prepare(`UPDATE device_models SET vendor_enc=?, model_enc=?, device_type_enc=?, backup_method_enc=?, backup_command_enc=?, updated_at=? WHERE id=?`).run(encrypt(vendor), encrypt(model), encrypt(device_type), encrypt(backup_method), encrypt(backup_command), nowLocal(), req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'MODÈLE_MODIFIÉ', category: 'config', severity: 'info', detail: `${vendor} ${model}`, ip, success: 1 });
   res.json({ success: true });
 });
 
 app.delete('/api/models/:id', authMiddleware, requirePerm('config_write'), (req, res) => {
-  getDb().prepare('DELETE FROM device_models WHERE id = ?').run(req.params.id);
+  const db = getDb(); const ip = getClientIp(req);
+  const row = db.prepare('SELECT vendor_enc, model_enc FROM device_models WHERE id=?').get(req.params.id);
+  const label = row ? `${decrypt(row.vendor_enc)} ${decrypt(row.model_enc)}` : req.params.id;
+  db.prepare('DELETE FROM device_models WHERE id = ?').run(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'MODÈLE_SUPPRIMÉ', category: 'config', severity: 'warn', detail: label, ip, success: 1 });
   res.json({ success: true });
 });
 
@@ -933,12 +989,18 @@ app.put('/api/devices/:id', authMiddleware, requirePerm('config_write'), (req, r
     return res.status(400).json({ error: `Le nom "${name}" est déjà utilisé (insensible à la casse)` });
   if (otherDevices.some(d => decrypt(d.ip_enc) === ip))
     return res.status(400).json({ error: `L'adresse IP ${ip} est déjà utilisée par un autre équipement` });
-  getDb().prepare(`UPDATE devices SET name_enc=?, site_id=?, model_id=?, ip_enc=?, ssh_port_enc=?, ssh_user_enc=?, ssh_password_enc=?, enabled=?, updated_at=? WHERE id=?`).run(encrypt(name), site_id, model_id, encrypt(ip), encrypt(ssh_port || '22'), encrypt(ssh_user), encrypt(ssh_password), enabled ? 1 : 0, nowLocal(), req.params.id);
+  const db2 = getDb(); const ip2 = getClientIp(req);
+  db2.prepare(`UPDATE devices SET name_enc=?, site_id=?, model_id=?, ip_enc=?, ssh_port_enc=?, ssh_user_enc=?, ssh_password_enc=?, enabled=?, updated_at=? WHERE id=?`).run(encrypt(name), site_id, model_id, encrypt(ip), encrypt(ssh_port || '22'), encrypt(ssh_user), encrypt(ssh_password), enabled ? 1 : 0, nowLocal(), req.params.id);
+  audit(db2, { userId: req.user.id, username: req.user.username, action: 'ÉQUIPEMENT_MODIFIÉ', category: 'config', severity: 'info', detail: `${name} (${ip})`, ip: ip2, success: 1 });
   res.json({ success: true });
 });
 
 app.delete('/api/devices/:id', authMiddleware, requirePerm('config_write'), (req, res) => {
-  getDb().prepare('DELETE FROM devices WHERE id = ?').run(req.params.id);
+  const db3 = getDb(); const ip3 = getClientIp(req);
+  const dev = db3.prepare('SELECT name_enc, ip_enc FROM devices WHERE id=?').get(req.params.id);
+  const devLabel = dev ? `${decrypt(dev.name_enc)} (${decrypt(dev.ip_enc)})` : req.params.id;
+  db3.prepare('DELETE FROM devices WHERE id = ?').run(req.params.id);
+  audit(db3, { userId: req.user.id, username: req.user.username, action: 'ÉQUIPEMENT_SUPPRIMÉ', category: 'config', severity: 'warn', detail: devLabel, ip: ip3, success: 1 });
   res.json({ success: true });
 });
 
@@ -1133,9 +1195,9 @@ app.get('/api/backups/diff', authMiddleware, (req, res) => {
 // ── DROITS PAR RÔLE ────────────────────────────────────────────────────────────
 // Droits par défaut intégrés (fallback si rien en base)
 const DEFAULT_ROLE_PERMS = {
-  admin:    { backup_read: true,  backup_import: true,  backup_write: true,  config_read: true,  config_write: true,  audit_access: true,  security_access: true,  activity_read: true,  activity_write: true,  activity_tags: true,  audit_archive: true  },
-  operator: { backup_read: true,  backup_import: false, backup_write: true,  config_read: true,  config_write: false, audit_access: false, security_access: false, activity_read: true,  activity_write: true,  activity_tags: false, audit_archive: false },
-  viewer:   { backup_read: true,  backup_import: false, backup_write: false, config_read: true,  config_write: false, audit_access: false, security_access: false, activity_read: true,  activity_write: false, activity_tags: false, audit_archive: false },
+  admin:    { backup_read: true, backup_import: true, backup_write: true, backup_compare: true, config_read: true, config_write: true, audit_access: true, audit_archive: true, security_access: true, activity_write: true, activity_read: true, activity_tags: true, scripts_read: true, scripts_exec: true, scripts_admin: true },
+  operator: { backup_read: true, backup_import: false, backup_write: false, backup_compare: true, config_read: true, config_write: true, audit_access: false, audit_archive: false, security_access: false, activity_write: true, activity_read: true, activity_tags: true, scripts_read: true, scripts_exec: false, scripts_admin: false },
+  viewer:   { backup_read: true, backup_import: false, backup_write: false, backup_compare: false, config_read: true, config_write: false, audit_access: false, audit_archive: false, security_access: false, activity_write: true, activity_read: false, activity_tags: false, scripts_read: true, scripts_exec: false, scripts_admin: false },
 };
 
 app.get('/api/role-permissions', authMiddleware, (req, res) => {
@@ -1240,20 +1302,28 @@ app.post('/api/activity/tags', authMiddleware, requirePerm('activity_tags'), (re
   const { code, label, color } = req.body;
   if (!code || !label) return res.status(400).json({ error: 'Code et libellé requis' });
   const clean = code.toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  const db = getDb(); const ip = getClientIp(req);
   try {
-    const r = getDb().prepare('INSERT INTO activity_tags (code, label, color) VALUES (?, ?, ?)').run(clean, label, color || '#066fd1');
+    const r = db.prepare('INSERT INTO activity_tags (code, label, color) VALUES (?, ?, ?)').run(clean, label, color || '#066fd1');
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_CRÉÉ', category: 'suivi', severity: 'info', detail: `Tag [${clean}] "${label}" créé`, ip, success: 1 });
     res.json({ id: r.lastInsertRowid, code: clean, label, color });
   } catch { res.status(400).json({ error: 'Ce code existe déjà' }); }
 });
 
 app.put('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), (req, res) => {
   const { label, color } = req.body;
-  getDb().prepare('UPDATE activity_tags SET label=?, color=? WHERE id=?').run(label, color, req.params.id);
+  const db = getDb(); const ip = getClientIp(req);
+  const tag = db.prepare('SELECT code FROM activity_tags WHERE id=?').get(req.params.id);
+  db.prepare('UPDATE activity_tags SET label=?, color=? WHERE id=?').run(label, color, req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_MODIFIÉ', category: 'suivi', severity: 'info', detail: `Tag [${tag?.code || req.params.id}] → libellé: "${label}", couleur: ${color}`, ip, success: 1 });
   res.json({ success: true });
 });
 
 app.delete('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), (req, res) => {
-  getDb().prepare('DELETE FROM activity_tags WHERE id=?').run(req.params.id);
+  const db = getDb(); const ip = getClientIp(req);
+  const tag = db.prepare('SELECT code, label FROM activity_tags WHERE id=?').get(req.params.id);
+  db.prepare('DELETE FROM activity_tags WHERE id=?').run(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_SUPPRIMÉ', category: 'suivi', severity: 'warn', detail: `Tag [${tag?.code || req.params.id}] "${tag?.label || ''}" supprimé`, ip, success: 1 });
   res.json({ success: true });
 });
 

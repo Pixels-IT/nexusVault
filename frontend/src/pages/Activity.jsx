@@ -811,13 +811,13 @@ export default function Activity() {
 
   useEffect(() => {
     api.activityTags().then(data => setTags(Array.isArray(data) ? data : [])).catch(() => {});
-    if (isAdmin || can('activity_read')) {
+    if (canViewAll) {
       api.usersForActivity()
         .then(data => setUsers(Array.isArray(data) ? data : []))
         .catch(() => {});
     }
     loadYears();
-  }, [isAdmin, loadYears]); // eslint-disable-line
+  }, [isAdmin, canViewAll, loadYears]); // eslint-disable-line
 
   function openAdd(year, month, onSaved) {
     setAddModal({ year, month, onSaved });

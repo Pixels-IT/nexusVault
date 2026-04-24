@@ -1,4 +1,5 @@
-FROM node:20-alpine
+FROM node:22-alpine
+
 
 # Outils de compilation pour better-sqlite3 (binaire natif) + wget pour healthcheck
 RUN apk add --no-cache python3 make g++ wget

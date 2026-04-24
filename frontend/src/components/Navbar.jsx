@@ -119,12 +119,12 @@ export default function Navbar() {
             {t('nav.backups')}
           </NavLink>
 
-          {can('scripts_read') && <NavLink to="/scripts" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink to="/scripts" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
             {t('nav.scripts')}
-          </NavLink>}
+          </NavLink>
           {(can('activity_read') || can('activity_write')) && <NavLink to="/activity" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>

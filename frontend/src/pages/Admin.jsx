@@ -18,6 +18,26 @@ function PersonnalisationTab() {
   return <PersonnalisationPage embedded />;
 }
 
+// ── SCRIPTS ADMIN TAB ────────────────────────────────────────────────────────
+function ScriptsAdminTab() {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+      padding:'60px 20px', gap:14, background:'var(--surf)', border:'2px dashed var(--brd)', borderRadius:'var(--rl)' }}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="1.5" style={{ width:48, height:48 }}>
+        <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+      </svg>
+      <div style={{ fontWeight:700, fontSize:15, color:'var(--txt)' }}>Gestion des scripts</div>
+      <div style={{ fontSize:13, color:'var(--muted)', textAlign:'center', maxWidth:400 }}>
+        Cette section permettra de gérer les fichiers de scripts hébergés dans NexusVault.
+      </div>
+      <span style={{ fontSize:11, fontWeight:700, color:'var(--warn)', background:'var(--warn-s)',
+        border:'1px solid var(--warn)', borderRadius:4, padding:'3px 10px', letterSpacing:'.4px' }}>
+        BIENTÔT DISPONIBLE
+      </span>
+    </div>
+  );
+}
+
 // ── MON COMPTE ────────────────────────────────────────────────────────────────
 function AccountTab() {
   const { user } = useAuth();
@@ -120,70 +140,117 @@ const PERMISSIONS = [
 function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
   const isNew = !user?.id;
   const [data, setData] = useState(user ? {
-    username: user.username, display_name: user.display_name || '',
+    username: user.username,
+    display_name: user.display_name || '',
     email: user.email || '',
-    role: user.role || 'viewer', enabled: user.enabled !== 0,
-    permissions: (() => { try { return JSON.parse(user.permissions || '{}'); } catch { return {}; } })(),
-    password: ''
-  } : { username: '', display_name: '', email: '', role: 'viewer', enabled: true, permissions: {}, password: '' });
-  const [error, setError] = useState('');
+    role: user.role || 'viewer',
+    enabled: user.enabled !== 0,
+    password: '',
+  } : {
+    username: '', display_name: '', email: '', role: 'viewer', enabled: true, password: '',
+  });
+  const [error, setError]     = useState('');
+  const [loading, setLoading] = useState(false);
 
   const set = k => e => setData(d => ({ ...d, [k]: e.target.value }));
-  const togglePerm = k => setData(d => ({ ...d, permissions: { ...d.permissions, [k]: !d.permissions[k] } }));
 
   async function submit() {
     setError('');
-    if (!data.username) return setError('Identifiant requis');
-    if (isNew && data.password.length < 14) return setError('Mot de passe: 14 caractères minimum');
+    if (!data.username.trim()) return setError('Identifiant requis');
+    if (!data.email.trim())    return setError('Adresse e-mail obligatoire');
+    if (!isNew && data.password && data.password.length < 14)
+      return setError('Mot de passe : 14 caractères minimum');
+    setLoading(true);
     try {
-      const payload = { ...data };
-      if (!payload.password) delete payload.password;
-      if (isNew) await api.createUser(payload);
-      else await api.updateUser(user.id, payload);
+      if (isNew) {
+        // Création sans mot de passe : le backend envoie le lien d'initialisation par email
+        await api.createUser({
+          username: data.username.trim(),
+          display_name: data.display_name.trim() || data.username.trim(),
+          email: data.email.trim(),
+          role: data.role,
+        });
+      } else {
+        const payload = { ...data };
+        if (!payload.password) delete payload.password;
+        delete payload.permissions;
+        await api.updateUser(user.id, payload);
+      }
       onSave();
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(e.message); setLoading(false); }
   }
 
   return (
-    <Modal title={isNew ? 'Créer un utilisateur' : 'Modifier l\'utilisateur'} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Annuler</button><button className="btn btn-primary" onClick={submit}>Enregistrer</button></>}>
+    <Modal
+      title={isNew ? 'Créer un utilisateur' : "Modifier l'utilisateur"}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Annuler</button>
+          <button className="btn btn-primary" onClick={submit} disabled={loading}>
+            {loading ? '…' : isNew ? 'Créer' : 'Modifier'}
+          </button>
+        </>
+      }
+    >
       {error && <Alert type="err">{error}</Alert>}
+
+      {/* Info création : lien d'init envoyé par email */}
+      {isNew && (
+        <div className="alert alert-warn" style={{ marginBottom: 14, fontSize: 12, textAlign: 'center', justifyContent: 'center' }}>
+          Un lien d'initialisation du mot de passe sera envoyé à l'adresse e-mail renseignée.
+        </div>
+      )}
+
       <div className="form-row">
-        <div className="form-group"><label className="form-label">Identifiant *</label><input className="form-control" value={data.username} onChange={set('username')} autoFocus /></div>
-        <div className="form-group"><label className="form-label">Nom affiché</label><input className="form-control" value={data.display_name} onChange={set('display_name')} /></div>
+        <div className="form-group">
+          <label className="form-label">Identifiant *</label>
+          <input className="form-control" value={data.username} onChange={set('username')} autoFocus disabled={!isNew} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Nom affiché</label>
+          <input className="form-control" value={data.display_name} onChange={set('display_name')} />
+        </div>
       </div>
-      <div className="form-group"><label className="form-label">Adresse e-mail</label><input className="form-control" type="email" value={data.email} onChange={set('email')} placeholder="utilisateur@domaine.com" /></div>
+
+      <div className="form-group">
+        <label className="form-label">Adresse e-mail *</label>
+        <input className="form-control" type="email" value={data.email} onChange={set('email')}
+          placeholder="utilisateur@domaine.com" />
+      </div>
+
       <div className="form-row">
-        <div className="form-group"><label className="form-label">Rôle</label>
+        <div className="form-group">
+          <label className="form-label">Rôle</label>
           <select className="form-control" value={data.role} onChange={set('role')}>
             <option value="admin">Administrateur</option>
             <option value="operator">Opérateur</option>
             <option value="viewer">Lecteur</option>
           </select>
         </div>
-        <div className="form-group"><label className="form-label">{isNew ? 'Mot de passe *' : 'Nouveau mot de passe'}</label>
-          <input className="form-control" type="password" value={data.password} onChange={set('password')} placeholder={isNew ? '14 car. minimum' : 'Laisser vide = inchangé'} />
-        </div>
-      </div>
-      {data.role !== 'admin' && (
-        <div className="form-group">
-          <label className="form-label">Permissions spécifiques</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
-            {PERMISSIONS.map(p => (
-              <label key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }}>
-                <input type="checkbox" checked={!!data.permissions[p.key]} onChange={() => togglePerm(p.key)} />
-                {p.label}
-              </label>
-            ))}
+        {/* Mot de passe uniquement en mode édition */}
+        {!isNew && (
+          <div className="form-group">
+            <label className="form-label">Nouveau mot de passe</label>
+            <input className="form-control" type="password" value={data.password}
+              onChange={set('password')} placeholder="(laisser vide = inchangé)" />
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Compte actif : uniquement en mode édition */}
       {!isNew && (
         <div className="form-group">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: isLastAdmin ? 'not-allowed' : 'pointer', fontSize: 12, opacity: isLastAdmin ? .45 : 1 }} title={isLastAdmin ? 'Impossible de désactiver le seul administrateur' : ''}>
-            <input type="checkbox" checked={data.enabled} disabled={isLastAdmin} onChange={e => !isLastAdmin && setData(d => ({ ...d, enabled: e.target.checked }))} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8,
+            cursor: isLastAdmin ? 'not-allowed' : 'pointer' }}>
+            <input type="checkbox" checked={data.enabled} disabled={isLastAdmin}
+              onChange={e => setData(d => ({ ...d, enabled: e.target.checked }))} />
             Compte actif
-            {isLastAdmin && <span style={{ fontSize: 10, color: 'var(--warn)', fontStyle: 'italic' }}>(seul admin)</span>}
+            {isLastAdmin && (
+              <span style={{ fontSize: 10, color: 'var(--warn)', fontStyle: 'italic' }}>
+                Dernier admin — non désactivable
+              </span>
+            )}
           </label>
         </div>
       )}
@@ -279,17 +346,33 @@ const PERM_DEFS = [
     section: 'Backups',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
     perms: [
-      { key: 'backup_read',   label: 'Consulter les backups' },
-      { key: 'backup_write',  label: 'Déclencher un nouveau backup SSH' },
-      { key: 'backup_import', label: 'Importer un fichier de backup' },
+      { key: 'backup_read',    label: 'Consulter les backups' },
+      { key: 'backup_write',   label: 'Déclencher un nouveau backup SSH' },
+      { key: 'backup_import',  label: 'Importer un fichier de backup' },
+      { key: 'backup_compare', label: 'Comparer les backups' },
     ],
   },
   {
-    section: 'Appareils',
+    section: 'Menu Configuration Appareils',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg>,
     perms: [
-      { key: 'config_read',  label: 'Consulter sites / modèles / équipements' },
-      { key: 'config_write', label: 'Ajouter / modifier / supprimer' },
+      { key: 'config_read',  label: 'Consulter (menu Admin → Appareils)' },
+      { key: 'config_write', label: 'Configuration : Ajouter / modifier / supprimer' },
+    ],
+  },
+  {
+    section: 'Menu Configuration Scripts',
+    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
+    perms: [
+      { key: 'scripts_admin', label: 'Consulter (menu Admin → Scripts)' },
+    ],
+  },
+  {
+    section: 'Scripts',
+    icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
+    perms: [
+      { key: 'scripts_read', label: 'Consulter les scripts' },
+      { key: 'scripts_exec', label: 'Exécuter les scripts' },
     ],
   },
   {
@@ -298,7 +381,7 @@ const PERM_DEFS = [
     perms: [
       { key: 'activity_write', label: 'Ajouter / modifier ses propres notes' },
       { key: 'activity_read',  label: 'Consulter le suivi des autres utilisateurs' },
-      { key: 'activity_tags',  label: 'Gérer les tags (créer / supprimer)' },
+      { key: 'activity_tags',  label: "Consulter (menu Admin \u2192 Tags d'activit\u00e9)" },
     ],
   },
   {
@@ -308,8 +391,6 @@ const PERM_DEFS = [
       { key: 'audit_access',    label: "Accès au Journal d'audit" },
       { key: 'audit_archive',   label: "Accès aux archives d'audit" },
       { key: 'security_access', label: 'Accès à Sécurité' },
-      { key: 'scripts_read',    label: 'Voir les scripts' },
-      { key: 'scripts_exec',    label: 'Exécuter les scripts' },
     ],
   },
 ];
@@ -343,7 +424,7 @@ function RolePermissionsCard() {
       await api.saveRolePerms(perms);
       invalidatePermsCache();
       setMsg('Droits enregistrés. Rechargement en cours…');
-      setTimeout(() => window.location.reload(), 1000);
+      setTimeout(() => { window.location.href = window.location.pathname + '?tab=security&subtab=rights'; }, 1000);
     } catch (e) { setMsg('Erreur : ' + e.message); setSaving(false); }
   }
 
@@ -427,7 +508,8 @@ function RolePermissionsCard() {
 
 // ── SÉCURITÉ (timeout + liste accès) ────────────────────────────────────────
 function SecurityTab() {
-  const [activeTab, setActiveTab] = useState('general');
+  const defaultTab = new URLSearchParams(window.location.search).get('subtab') || 'general';
+  const [activeTab, setActiveTab] = useState(defaultTab);
 
   const TABS = [
     { key: 'general',  label: 'Général',           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M1 12h3M20 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg> },
@@ -1662,6 +1744,7 @@ const TABS = [
   { key: 'personnalisation', label: 'Personnalisation', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
   { key: '__sep1__',      sep: true },
   { key: 'appareils',     label: 'Appareils',         icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg> },
+  { key: 'scripts_admin', label: 'Scripts',          icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
   { key: 'activity_tags', label: "Tags d'activité", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
   { key: '__sep2__',      sep: true },
   { key: 'users',         label: 'Utilisateurs',      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
@@ -1670,7 +1753,7 @@ const TABS = [
 ];
 
 export default function Admin() {
-  const { user } = useAuth();
+  const { user, logout: doLogout } = useAuth();
   const [sp, setSp] = useSearchParams();
   const active = sp.get('tab') || 'account';
   const isAdmin = user?.role === 'admin';
@@ -1680,7 +1763,9 @@ export default function Admin() {
     if (t.sep) return true; // séparateurs toujours inclus (masqués si voisins cachés)
     if (t.key === 'account') return true;
     if (t.key === 'personnalisation') return true;
-    if (t.key === 'appareils') return true;
+    if (t.key === 'logout') return true;
+    if (t.key === 'appareils') return isAdmin || can('config_read');
+    if (t.key === 'scripts_admin') return isAdmin || can('scripts_admin');
     if (t.key === 'activity_tags') return isAdmin || can('activity_tags');
     if (t.key === 'users') return isAdmin;
     if (t.key === 'security') return isAdmin || can('security_access');
@@ -1721,6 +1806,7 @@ export default function Admin() {
           {active === 'appareils' && <AppareilsTab />}
           {active === 'users' && isAdmin && <UsersTab />}
           {active === 'security' && (isAdmin || can('security_access')) && <SecurityTab />}
+          {active === 'scripts_admin' && (isAdmin || can('scripts_admin')) && <ScriptsAdminTab />}
           {active === 'activity_tags' && (isAdmin || can('activity_tags')) && <ActivityTagsTab />}
           {active === 'audit' && (isAdmin || can('audit_access')) && <AuditTab />}
         </div>

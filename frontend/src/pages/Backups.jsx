@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePerms } from '../hooks/usePerms.js';
+import AccessDenied from '../components/AccessDenied.jsx';
 import api from '../api.js';
 import { Modal, Alert, Spinner } from '../components/UI.jsx';
 
@@ -680,6 +681,7 @@ export default function Backups() {
     : devices;
   const filteredOrphan = orphanDevices.filter(d => !filterType || (d.device_type || '') === filterType);
 
+  if (!can('backup_read')) return <AccessDenied page="Backups" />;
   return (
     <main>
       <div className="page-header">
