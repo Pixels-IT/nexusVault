@@ -74,5 +74,9 @@ export default {
   'common.no':        'No',
 
   'nav.scripts': 'Scripts',
-  'lang.select':      'Change language',
+  'scripts.title':     'Scripts',
+  'scripts.subtitle':  'Script management',
+  'scripts.desc':      'This will allow you to manage your script files in a secure place.',
+  'scripts.coming':    'COMING SOON',
+  'lang.select':       'Change language',
 };

@@ -84,5 +84,9 @@ export default {
 
   // Langue
   'nav.scripts': 'Scripts',
-  'lang.select':      'Changer la langue',
+  'scripts.title':     'Scripts',
+  'scripts.subtitle':  'Gestion des scripts',
+  'scripts.desc':      'Elle permettra de gérer les fichiers de vos scripts dans un lieu sécurisé.',
+  'scripts.coming':    'BIENTÔT DISPONIBLE',
+  'lang.select':       'Changer la langue',
 };
