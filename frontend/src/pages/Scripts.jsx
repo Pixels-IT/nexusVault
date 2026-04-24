@@ -7,7 +7,7 @@ export default function Scripts() {
   const { can } = usePerms();
   const { t } = useI18n();
 
-  if (!can('scripts_read')) return <AccessDenied page=t('scripts.title') />;
+  if (!can('scripts_read')) return <AccessDenied page={t('scripts.title')} />;
 
   return (
     <main>
