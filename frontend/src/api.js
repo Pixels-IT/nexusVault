@@ -21,6 +21,7 @@ const api = {
   updateAccount: (d) => request('PUT', '/account', d),  // d = { username, display_name, email }
   // Users
   users: () => request('GET', '/users'),
+  usersForActivity: () => request('GET', '/users/for-activity'),
   adminCount: () => request('GET', '/users/admin-count'),
   createUser: (d) => request('POST', '/users', d),
   updateUser: (id, d) => request('PUT', `/users/${id}`, d),

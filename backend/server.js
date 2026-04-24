@@ -156,6 +156,34 @@ app.get('/api/users/admin-count', authMiddleware, requireRole('admin'), (req, re
   res.json({ count });
 });
 
+
+// Liste des utilisateurs pour le sélecteur du suivi d'activité
+// Accessible à tout utilisateur ayant activity_read ou admin
+app.get('/api/users/for-activity', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') {
+    // Vérifier activity_read via role_permissions
+    let hasAccess = false;
+    try {
+      const jwtPerms = JSON.parse(req.user.permissions || '{}');
+      if (jwtPerms.activity_read === true) hasAccess = true;
+    } catch {}
+    if (!hasAccess) {
+      try {
+        const db2 = getDb();
+        const row2 = db2.prepare("SELECT value FROM settings WHERE key='role_permissions'").get();
+        if (row2) {
+          const rp = JSON.parse(row2.value);
+          if (rp[req.user.role]?.activity_read === true) hasAccess = true;
+        }
+      } catch {}
+    }
+    if (!hasAccess) return res.status(403).json({ error: 'Permission insuffisante' });
+  }
+  const db = getDb();
+  const rows = db.prepare("SELECT id, username, display_name FROM users WHERE enabled=1 ORDER BY username").all();
+  res.json(rows);
+});
+
 app.get('/api/users', authMiddleware, requireRole('admin'), (req, res) => {
   const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at FROM users ORDER BY id').all();
   res.json(rows);

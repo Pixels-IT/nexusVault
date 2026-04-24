@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-04-24_b48.140
+> Build 48 du 24 avril 2026 — 140 requêtes cumulées
+
+### Corrections permissions (causes racines identifiées)
+- **activity_tags — cause** : `requirePerm()` dans `auth.js` lisait uniquement `req.user.permissions` (champ JWT signé au login). Or la matrice des droits est stockée dans `settings.role_permissions` et N'EST PAS dans le JWT. Fix : `requirePerm()` vérifie d'abord le JWT, puis interroge `settings.role_permissions` en base comme fallback — sans nécessiter une reconnexion
+- **activity_read — cause** : le sélecteur d'utilisateur nécessite `api.users()` → `GET /api/users` → `requireRole('admin')`. Un non-admin recevait 403 et `users` restait vide. Fix : nouvel endpoint `GET /api/users/for-activity` accessible à tout utilisateur ayant `activity_read` (vérifié via JWT ou role_permissions en base). Retourne uniquement `id`, `username`, `display_name`
+- **Date build** : corrigée — 24/04/2026 au lieu de 23/04/2026
+
+---
+
 ## 2026-04-23_b47.138
 > Build 47 du 23 avril 2026 — 138 requêtes cumulées
 

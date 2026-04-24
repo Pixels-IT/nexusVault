@@ -812,7 +812,7 @@ export default function Activity() {
   useEffect(() => {
     api.activityTags().then(data => setTags(Array.isArray(data) ? data : [])).catch(() => {});
     if (isAdmin || can('activity_read')) {
-      api.users()
+      api.usersForActivity()
         .then(data => setUsers(Array.isArray(data) ? data : []))
         .catch(() => {});
     }
