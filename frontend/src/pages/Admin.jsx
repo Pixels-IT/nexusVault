@@ -55,6 +55,7 @@ function AccountTab() {
   }, []);
 
   async function saveProfile(e) {
+  const { t } = useI18n();
     e.preventDefault(); setErr(''); setMsg('');
     try { await api.updateAccount(data); setMsg('Profil mis à jour.'); } catch (e) { setErr(e.message); }
   }
@@ -392,7 +393,7 @@ const PERM_DEFS = [
     section: "Menu Configuration Activité",
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>,
     perms: [
-      { key: 'activity_tags', label: "Consulter (menu Admin → Tags d'activité)" },
+      { key: 'activity', label: "Consulter (menu Admin → Tags d'activité)" },
     ],
   },
   {
@@ -616,6 +617,7 @@ function SecurityGeneralTab() {
   }
 
   async function addRule(e) {
+  const { t } = useI18n();
     e.preventDefault(); setWlError('');
     if (!form.value) return setWlError('Valeur requise');
     try { await api.createWhitelist(form); setForm({ value: '', label: '', type: 'ip' }); loadWl(); }
@@ -778,7 +780,7 @@ function SmtpModal({ onClose, onSaved }) {
     try { const r=await api.smtpTest(); setMsg(`Email de test envoyé à ${r.to}`); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
   return (
     <Modal title="Configuration SMTP" onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Fermer</button><button className="btn" onClick={test} disabled={testing||!s.host}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={<><button className="btn" onClick={test} disabled={testing||!s.host}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
@@ -813,7 +815,7 @@ function TelegramModal({ onClose, onSaved }) {
     try { await api.telegramTest(); setMsg('Message Telegram envoyé !'); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
   return (
     <Modal title="Configuration Telegram" onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Fermer</button><button className="btn" onClick={test} disabled={testing||!t.bot_token||!t.chat_id}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={<><button className="btn" onClick={test} disabled={testing||!t.bot_token||!t.chat_id}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
@@ -843,7 +845,7 @@ function SlackModal({ onClose, onSaved }) {
     try { await api.slackTest(); setMsg('Message Slack envoyé !'); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
   return (
     <Modal title="Configuration Slack" onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Fermer</button><button className="btn" onClick={test} disabled={testing||!url||url.startsWith('••••')}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={<><button className="btn" onClick={test} disabled={testing||!url||url.startsWith('••••')}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
@@ -1727,132 +1729,142 @@ function AuditTab() {
   const { can } = usePerms();
   const [logs, setLogs]           = useState([]);
   const [loading, setLoading]     = useState(true);
-  const [filters, setFilters]     = useState({ category: '', severity: '', success: '', limit: '200' });
+  const [filters, setFilters]     = useState({ category: '', severity: '', success: '', limit: '25' });
   const [showArchiveList, setShowArchiveList] = useState(false);
+  const [page, setPage]           = useState(1);
 
 
   const load = () => {
     setLoading(true);
-    const p = {};
+    const p = { limit: 1000 }; // Charger max depuis l'API, pagination côté frontend
     if (filters.category) p.category = filters.category;
     if (filters.severity) p.severity = filters.severity;
     if (filters.success !== '') p.success = filters.success;
-    if (filters.limit) p.limit = filters.limit;
     api.audit(p).then(setLogs).catch(() => {}).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [filters]);
+  useEffect(() => { load(); setPage(1); }, [filters]);
 
   const sf = k => e => setFilters(f => ({ ...f, [k]: e.target.value }));
 
   return (
     <>
     <div className="card">
-      <div className="card-header" style={{ flexWrap: 'nowrap', gap: 8, overflow: 'auto' }}>
+      <div className="card-header" style={{ gap: 8 }}>
         <div className="card-title" style={{ flexShrink: 0 }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
             <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
           </svg>
-          Journal d'audit
+          {t('audit.title')}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', marginLeft: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0 }}>
+          <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
+            value={filters.success} onChange={sf('success')}>
+            <option value="">Résultat</option>
+            <option value="1">✓ OK</option>
+            <option value="0">✗ Échec</option>
+          </select>
+          <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
+            value={filters.severity} onChange={sf('severity')}>
+            <option value="">Sévérité</option>
+            <option value="info">Info</option>
+            <option value="warn">Alerte</option>
+            <option value="error">Erreur</option>
+          </select>
+          <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
+            value={filters.category} onChange={sf('category')}>
+            <option value="">Catégorie</option>
+            <option value="auth">Auth</option>
+            <option value="admin">Admin</option>
+            <option value="backup">Backup</option>
+            <option value="config">Config</option>
+            <option value="suivi">Suivi</option>
+          </select>
+          <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28, width: 60 }}
+            value={filters.limit} onChange={sf('limit')}>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
           {can('audit_archive') && (
             <button className="btn" style={{ borderColor: 'var(--ok)', color: 'var(--ok)', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
               onClick={() => setShowArchiveList(true)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 13, height: 13 }}>
                 <path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/>
               </svg>
               Archive
             </button>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
-            {/* Résultat */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <select className="form-control" style={{ padding: '4px 6px', fontSize: 12, height: 28, minWidth: 100 }}
-                value={filters.success} onChange={sf('success')}>
-                <option value="">Résultat</option>
-                <option value="1">✓ OK</option>
-                <option value="0">✗ Échec</option>
-              </select>
-              {filters.success && (
-                <button onClick={() => setFilters(f => ({ ...f, success: '' }))}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '0 3px', fontSize: 13, lineHeight: 1 }}>✕</button>
-              )}
-            </div>
-            {/* Sévérité */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <select className="form-control" style={{ padding: '4px 6px', fontSize: 12, height: 28, minWidth: 110 }}
-                value={filters.severity} onChange={sf('severity')}>
-                <option value="">Sévérité</option>
-                <option value="info">Info</option>
-                <option value="warn">Alerte</option>
-                <option value="error">Erreur</option>
-              </select>
-              {filters.severity && (
-                <button onClick={() => setFilters(f => ({ ...f, severity: '' }))}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '0 3px', fontSize: 13, lineHeight: 1 }}>✕</button>
-              )}
-            </div>
-            {/* Catégorie */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <select className="form-control" style={{ padding: '4px 6px', fontSize: 12, height: 28, minWidth: 120 }}
-                value={filters.category} onChange={sf('category')}>
-                <option value="">Catégorie</option>
-                <option value="auth">Authentification</option>
-                <option value="admin">Administration</option>
-                <option value="backup">Backups</option>
-                <option value="config">Configuration</option>
-                <option value="suivi">Suivi</option>
-              </select>
-              {filters.category && (
-                <button onClick={() => setFilters(f => ({ ...f, category: '' }))}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '0 3px', fontSize: 13, lineHeight: 1 }}>✕</button>
-              )}
-            </div>
-            {/* Limite */}
-            <select className="form-control" style={{ padding: '4px 6px', fontSize: 12, height: 28, minWidth: 100 }}
-              value={filters.limit} onChange={sf('limit')}>
-              <option value="50">50 entrées</option>
-              <option value="200">200 entrées</option>
-              <option value="500">500 entrées</option>
-            </select>
-          </div>
         </div>
       </div>
-      <div className="table-wrap">
-        <table>
+
+      {/* ── Pagination haut ── */}
+      {(() => {
+        const limit = parseInt(filters.limit) || 25;
+        const totalPages = Math.ceil(logs.length / limit);
+        if (totalPages <= 1) return null;
+        const rangeStart = (page - 1) * limit + 1;
+        const rangeEnd = Math.min(page * limit, logs.length);
+        const delta = 2;
+        const pageBtns = [];
+        for (let p = Math.max(1, page - delta); p <= Math.min(totalPages, page + delta); p++) pageBtns.push(p);
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 0 8px', flexWrap: 'wrap', borderBottom: '1px solid var(--brd)' }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 8 }}>
+              {rangeStart}–{rangeEnd} / {logs.length}
+            </span>
+            <button className="btn btn-sm" onClick={() => setPage(1)} disabled={page === 1} style={{ padding: '3px 8px', minWidth: 28 }}>«</button>
+            <button className="btn btn-sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} style={{ padding: '3px 8px', minWidth: 28 }}>‹</button>
+            {pageBtns[0] > 1 && <span style={{ fontSize: 12, color: 'var(--muted)', padding: '0 2px' }}>…</span>}
+            {pageBtns.map(p => (
+              <button key={p} className={`btn btn-sm${p === page ? ' btn-primary' : ''}`}
+                onClick={() => setPage(p)}
+                style={{ padding: '3px 8px', minWidth: 28, fontWeight: p === page ? 700 : 400 }}>
+                {p}
+              </button>
+            ))}
+            {pageBtns[pageBtns.length - 1] < totalPages && <span style={{ fontSize: 12, color: 'var(--muted)', padding: '0 2px' }}>…</span>}
+            <button className="btn btn-sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} style={{ padding: '3px 8px', minWidth: 28 }}>›</button>
+            <button className="btn btn-sm" onClick={() => setPage(totalPages)} disabled={page === totalPages} style={{ padding: '3px 8px', minWidth: 28 }}>»</button>
+            <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>
+              Page {page}/{totalPages}
+            </span>
+          </div>
+        );
+      })()}
+      <div className="table-wrap" style={{ width: '100%', overflow: 'hidden' }}>
+        <table className="audit-table">
           <thead>
             <tr>
-              <th style={{ width: 140 }}>{t('audit.date')}</th>
-              <th style={{ width: 90 }}>Sévérité</th>
-              <th style={{ width: 100 }}>Catégorie</th>
-              <th style={{ width: 150 }}>{t('audit.action')}</th>
-              <th style={{ width: 90 }}>{t('audit.user')}</th>
-              <th>{t('audit.detail')}</th>
-              <th style={{ width: 70 }}>Résultat</th>
+              <th style={{ width: '14%' }}>{t('audit.date')}</th>
+              <th style={{ width: '9%' }}>{t('audit.level')}</th>
+              <th style={{ width: '10%' }}>{t('audit.category')}</th>
+              <th style={{ width: '21%' }}>{t('audit.action')}</th>
+              <th style={{ width: '10%' }}>{t('audit.user')}</th>
+              <th style={{ width: '26%' }}>{t('audit.detail')}</th>
+              <th style={{ width: '10%', textAlign: 'right' }}>{t('audit.result')}</th>
             </tr>
           </thead>
           <tbody>
             {loading && <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32 }}><span className="spinner" /></td></tr>}
             {!loading && logs.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>{t('audit.no_entries')}</td></tr>}
-            {logs.map((l, idx) => {
-              const sev = SEV[l.severity] || SEV.info;
-              const cat = CAT_COLORS[l.category] || { bg: 'var(--surf2)', color: 'var(--muted)' };
-              const currDay = (l.created_at || '').slice(0, 10);
-              const prevDay = idx > 0 ? (logs[idx-1].created_at || '').slice(0, 10) : currDay;
-              const newDay  = idx > 0 && currDay !== prevDay;
+            {(() => {
+                const limit2 = parseInt(filters.limit) || 25;
+                const pagedLogs = logs.slice((page-1)*limit2, page*limit2);
+                return pagedLogs.map((l, idx) => {
+                  const globalIdx = (page-1)*limit2 + idx;
+                  const sev = SEV[l.severity] || SEV.info;
+                  const cat = CAT_COLORS[l.category] || { bg: 'var(--surf2)', color: 'var(--muted)' };
+                  const currDay = (l.created_at || '').slice(0, 10);
+                  const prevDay = globalIdx > 0 ? (logs[globalIdx-1].created_at || '').slice(0, 10) : currDay;
+                  const newDay  = globalIdx > 0 && currDay !== prevDay;
               return (<>
               {newDay && (
                 <tr key={`day-${l.id}`} style={{ pointerEvents: 'none' }}>
-                  <td colSpan={7} style={{ padding: '3px 8px', border: 'none', background: 'transparent' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.25)' }}/>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.5)',
-                        letterSpacing: '.5px', whiteSpace: 'nowrap' }}>{currDay}</span>
-                      <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.25)' }}/>
-                    </div>
+                  <td colSpan={7} style={{ padding: 0, border: 'none', background: 'transparent', lineHeight: 0 }}>
+                    <div style={{ height: 2, background: 'var(--acc)', opacity: 0.35 }}/>
                   </td>
                 </tr>
               )}
@@ -1878,7 +1890,7 @@ function AuditTab() {
                       {l.detail}
                     </span>
                   </td>
-                  <td>
+                  <td style={{ textAlign: 'right', paddingRight: 12 }}>
                     {l.success ? (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--ok)', fontSize: 11, fontWeight: 600 }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg> OK
@@ -1890,12 +1902,65 @@ function AuditTab() {
                     )}
                   </td>
                 </tr>
-              </>);
-            })}
+                  </>);
+                });
+              })()}
           </tbody>
         </table>
       </div>
     </div>
+
+    {/* Pagination */}
+    {(() => {
+      const limit = parseInt(filters.limit) || 25;
+      const totalPages = Math.ceil(logs.length / limit);
+      if (totalPages <= 1) return null;
+      const rangeStart = (page - 1) * limit + 1;
+      const rangeEnd = Math.min(page * limit, logs.length);
+      // Pages proches : afficher max 5 boutons numérotés autour de la page courante
+      const pageBtns = [];
+      const delta = 2;
+      for (let p = Math.max(1, page - delta); p <= Math.min(totalPages, page + delta); p++) {
+        pageBtns.push(p);
+      }
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '14px 0', flexWrap: 'wrap' }}>
+          {/* Infos */}
+          <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 8 }}>
+            {rangeStart}–{rangeEnd} / {logs.length}
+          </span>
+          {/* Première page */}
+          <button className="btn btn-sm" onClick={() => setPage(1)} disabled={page === 1}
+            title="Première page" style={{ padding: '3px 8px', minWidth: 28 }}>«</button>
+          {/* Page précédente */}
+          <button className="btn btn-sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+            style={{ padding: '3px 8px', minWidth: 28 }}>‹</button>
+          {/* Ellipse début */}
+          {pageBtns[0] > 1 && <span style={{ fontSize: 12, color: 'var(--muted)', padding: '0 2px' }}>…</span>}
+          {/* Boutons de pages numérotés */}
+          {pageBtns.map(p => (
+            <button key={p} className={`btn btn-sm${p === page ? ' btn-primary' : ''}`}
+              onClick={() => setPage(p)}
+              style={{ padding: '3px 8px', minWidth: 28, fontWeight: p === page ? 700 : 400 }}>
+              {p}
+            </button>
+          ))}
+          {/* Ellipse fin */}
+          {pageBtns[pageBtns.length - 1] < totalPages && <span style={{ fontSize: 12, color: 'var(--muted)', padding: '0 2px' }}>…</span>}
+          {/* Page suivante */}
+          <button className="btn btn-sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+            style={{ padding: '3px 8px', minWidth: 28 }}>›</button>
+          {/* Dernière page */}
+          <button className="btn btn-sm" onClick={() => setPage(totalPages)} disabled={page === totalPages}
+            title="Dernière page" style={{ padding: '3px 8px', minWidth: 28 }}>»</button>
+          {/* Aller à la page */}
+          <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>
+            Page {page}/{totalPages}
+          </span>
+        </div>
+      );
+    })()}
+
 
     {showArchiveList && <ArchiveListModal onClose={() => setShowArchiveList(false)} />}
     </>
@@ -1916,27 +1981,30 @@ export default function Admin() {
   const { can } = usePerms();
 
   const TABS = [
+    { key: '__label_profil__', sectionLabel: t('admin.section_profil') },
     { key: 'account',       label: t('admin.my_account'),       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
     { key: 'personnalisation', label: t('admin.personalisation'), icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
+    { key: 'logout',        label: t('admin.logout'),        icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> },
     { key: '__sep1__',      sep: true },
+    { key: '__label_config__', sectionLabel: t('admin.section_config') },
     { key: 'appareils',     label: t('admin.devices'),         icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg> },
     { key: 'scripts_admin', label: t('admin.scripts_menu'),          icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
-    { key: 'activity_tags', label: t('admin.activity_menu'), icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
+    { key: 'activity', label: t('admin.activity_menu'), icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
     { key: '__sep2__',      sep: true },
+    { key: '__label_admin__', sectionLabel: t('admin.section_admin') },
     { key: 'users',         label: t('admin.users'),      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
     { key: 'security',      label: t('admin.security'),           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
     { key: 'audit',         label: t('admin.audit'),   icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
-    { key: '__sep3__',      sep: true },
-    { key: 'logout',        label: t('admin.logout'),        icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> },
   ];
   const visibleTabs = TABS.filter(t => {
     if (t.sep) return true; // séparateurs toujours inclus (masqués si voisins cachés)
     if (t.key === 'account') return true;
     if (t.key === 'personnalisation') return true;
     if (t.key === 'logout') return true;
+    if (t.sectionLabel) return true;  // labels toujours visibles
     if (t.key === 'appareils') return isAdmin || can('config_read');
     if (t.key === 'scripts_admin') return isAdmin || can('scripts_admin');
-    if (t.key === 'activity_tags') return isAdmin || can('activity_tags');
+    if (t.key === 'activity') return isAdmin || can('activity');
     if (t.key === 'users') return isAdmin;
     if (t.key === 'security') return isAdmin || can('security_access');
     if (t.key === 'audit') return isAdmin || can('audit_access');
@@ -1953,22 +2021,64 @@ export default function Admin() {
       </div>
       <div className="config-layout">
         <div className="side-menu">
-          {visibleTabs.map((t, i) => {
-            if (t.sep) {
-              // Masquer le séparateur s'il est en premier, dernier, ou entouré d'autres séparateurs
-              const prev = visibleTabs[i - 1];
-              const next = visibleTabs[i + 1];
-              if (!prev || !next || prev.sep || next.sep) return null;
-              return (
-                <div key={t.key} style={{ margin: '6px 14px', borderTop: '1px solid var(--brd)', opacity: .5 }} />
-              );
-            }
-            return (
-              <div key={t.key} className={`side-item ${active === t.key ? 'active' : ''}`} onClick={() => { if (t.key === 'logout') doLogout(); else setSp({ tab: t.key }); }} style={t.key === 'logout' ? { color: 'var(--err)' } : {}}>
-                {t.icon}{t.label}
+          {(() => {
+            // Grouper les tabs par section pour afficher la bande verticale
+            const groups = [];
+            let cur = { label: null, key: null, items: [] };
+            visibleTabs.forEach(t => {
+              if (t.sectionLabel) {
+                groups.push({ ...cur });
+                cur = { label: t.sectionLabel, key: t.key, items: [] };
+              } else {
+                cur.items.push(t);
+              }
+            });
+            groups.push({ ...cur });
+
+            return groups.filter(g => g.items.length > 0 || g.label).map((group, gi) => (
+              <div key={group.key || `g${gi}`} style={{ display: 'flex' }}>
+                {/* Bande verticale label de section */}
+                {group.label ? (
+                  <div style={{
+                    width: 13, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(255,255,255,0.025)',
+                    borderRight: '1px solid var(--brd)',
+                    alignSelf: 'stretch',
+                  }}>
+                    <span style={{
+                      writingMode: 'vertical-rl',
+                      transform: 'rotate(180deg)',
+                      fontSize: 7, fontWeight: 700,
+                      color: 'rgba(255,255,255,0.75)', letterSpacing: '2px',
+                      textTransform: 'uppercase', userSelect: 'none',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {group.label}
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ width: 0 }} />
+                )}
+                {/* Items du groupe */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {group.items.map(t => {
+                    if (t.sep) {
+                      return <div key={t.key} style={{ margin: '4px 10px', borderTop: '1px solid var(--brd)', opacity: .4 }} />;
+                    }
+                    return (
+                      <div key={t.key}
+                        className={`side-item ${active === t.key ? 'active' : ''}`}
+                        onClick={() => { if (t.key === 'logout') doLogout(); else setSp({ tab: t.key }); }}
+                        style={t.key === 'logout' ? { color: 'var(--err)', fontSize: 12 } : { fontSize: 12 }}>
+                        {t.icon}{t.label}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            );
-          })}
+            ));
+          })()}
         </div>
         <div>
           {active === 'account' && <AccountTab />}
@@ -1977,7 +2087,7 @@ export default function Admin() {
           {active === 'users' && isAdmin && <UsersTab />}
           {active === 'security' && (isAdmin || can('security_access')) && <SecurityTab />}
           {active === 'scripts_admin' && (isAdmin || can('scripts_admin')) && <ScriptsAdminTab />}
-          {active === 'activity_tags' && (isAdmin || can('activity_tags')) && <ActivityMenuTab />}
+          {active === 'activity' && (isAdmin || can('activity')) && <ActivityMenuTab />}
           {active === 'audit' && (isAdmin || can('audit_access')) && <AuditTab />}
         </div>
       </div>

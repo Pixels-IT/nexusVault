@@ -8,6 +8,48 @@ const jwt = require('jsonwebtoken');
 const { getDb, encrypt, decrypt, audit } = require('./db');
 const { authMiddleware, requireRole, requirePerm, JWT_SECRET, getClientIp, checkWhitelist } = require('./auth');
 
+// ── CLI : reset-password ────────────────────────────────────────────────────
+// Usage : node server.js reset-password <username>
+if (process.argv[2] === 'reset-password') {
+  const username = process.argv[3];
+  if (!username) {
+    console.error('Usage: node server.js reset-password <username>');
+    process.exit(1);
+  }
+  const db = getDb();
+  const user = db.prepare('SELECT id, username FROM users WHERE username = ?').get(username);
+  if (!user) {
+    console.error(`Utilisateur "${username}" introuvable.`);
+    process.exit(1);
+  }
+  const hash = bcrypt.hashSync('changeme', 12);
+  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, locked_until = NULL, failed_attempts = 0 WHERE id = ?")
+    .run(hash, user.id);
+  // Supprimer les tokens de réinitialisation en attente
+  try { db.prepare("DELETE FROM password_reset_tokens WHERE user_id = ?").run(user.id); } catch {}
+  // Log console (visible dans docker logs nexusvault-backend)
+  const _ts = new Date().toISOString();
+  console.log(`[${_ts}] [RESET-PASSWORD] Mot de passe de "${username}" (id=${user.id}) réinitialisé via CLI. Changement obligatoire à la prochaine connexion.`);
+  // Audit dans la base de données
+  try {
+    audit(db, {
+      userId: user.id,
+      username: user.username,
+      action: 'MOT_DE_PASSE_RÉINITIALISÉ',
+      category: 'admin',
+      severity: 'warn',
+      detail: `Réinitialisation CLI docker exec — mot de passe remis à "changeme"`,
+      ip: 'LOCAL-CLI',
+      success: 1,
+    });
+  } catch (auditErr) {
+    console.warn('[RESET-PASSWORD] Impossible d\'écrire dans l\'audit:', auditErr.message);
+  }
+  console.log(`[${_ts}] [RESET-PASSWORD] Entrée ajoutée au journal d'audit.`);
+  process.exit(0);
+}
+
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -1046,7 +1088,9 @@ app.get('/api/backups', authMiddleware, (req, res) => {
 app.get('/api/backups/:id/content', authMiddleware, (req, res) => {
   const row = getDb().prepare('SELECT content_enc FROM backups WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Non trouvé' });
-  audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'BACKUP_LU', category: 'backup', severity: 'info', detail: `Backup ID ${req.params.id}`, ip: getClientIp(req), success: 1 });
+  const _db_lu = getDb();
+  const _bk_lu = _db_lu.prepare('SELECT b.version, d.name_enc FROM backups b LEFT JOIN devices d ON d.id=b.device_id WHERE b.id=?').get(req.params.id);
+  audit(_db_lu, { userId: req.user.id, username: req.user.username, action: 'BACKUP_LU', category: 'backup', severity: 'info', detail: _bk_lu ? `${decrypt(_bk_lu.name_enc||'')} v${_bk_lu.version}` : `Backup ID ${req.params.id}`, ip: getClientIp(req), success: 1 });
   res.json({ content: decrypt(row.content_enc) });
 });
 
@@ -1153,7 +1197,7 @@ app.patch('/api/backups/:id/pin', authMiddleware, requirePerm('backup_write'), (
     userId: req.user.id, username: req.user.username,
     action: newPinned ? 'BACKUP_ÉPINGLÉ' : 'BACKUP_DÉSÉPINGLÉ',
     category: 'backup', severity: 'info',
-    detail: `Backup ID ${req.params.id}`, ip: getClientIp(req), success: 1
+    detail: (() => { const bk2 = db.prepare('SELECT b.version, d.name_enc FROM backups b LEFT JOIN devices d ON d.id=b.device_id WHERE b.id=?').get(req.params.id); return bk2 ? `${decrypt(bk2.name_enc||'')} v${bk2.version}` : `Backup ID ${req.params.id}`; })(), ip: getClientIp(req), success: 1
   });
   res.json({ id: parseInt(req.params.id), pinned: newPinned });
 });
@@ -1208,7 +1252,14 @@ app.get('/api/backups/diff', authMiddleware, (req, res) => {
       }
     }
   }
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'DIFF_CONSULTÉ', category: 'backup', severity: 'info', detail: `Backup ${id_a} vs ${id_b}`, ip: getClientIp(req), success: 1 });
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DIFF_CONSULTÉ', category: 'backup', severity: 'info',
+    detail: (() => {
+      const ba = db.prepare('SELECT b.version, d.name_enc FROM backups b LEFT JOIN devices d ON d.id=b.device_id WHERE b.id=?').get(id_a);
+      const bb = db.prepare('SELECT b.version, d.name_enc FROM backups b LEFT JOIN devices d ON d.id=b.device_id WHERE b.id=?').get(id_b);
+      const la = ba ? `${decrypt(ba.name_enc||'')} v${ba.version}` : `ID ${id_a}`;
+      const lb = bb ? `${decrypt(bb.name_enc||'')} v${bb.version}` : `ID ${id_b}`;
+      return `${la} ↔ ${lb}`;
+    })(), ip: getClientIp(req), success: 1 });
   res.json({
     version_a: { id: a.id, version: a.version, created_at: a.created_at, device_name: decrypt(a.name_enc) },
     version_b: { id: b.id, version: b.version, created_at: b.created_at, device_name: decrypt(b.name_enc) },
@@ -1408,7 +1459,7 @@ app.post('/api/activity/entries', authMiddleware, (req, res) => {
   const newId = r.lastInsertRowid;
   // Historique : création
   db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(newId, 'created', `[${tag_code.toUpperCase()}] ${content.trim().slice(0,80)}${content.length>80?'…':''}`, req.user.id, nowLocal());
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_AJOUTÉ', category: 'suivi', severity: 'info', detail: `${year}/${String(month).padStart(2,'0')} [${tag_code}]${previewFlag?' (preview)':''}`, ip: getClientIp(req), success: 1 });
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_AJOUTÉ', category: 'suivi', severity: 'info', detail: (() => { const _d = nowLocal().slice(0,10); const _dd = _d.slice(8,10); const _mm = _d.slice(5,7); const _txt = (content||'').slice(0,60); return `${tag_code} · ${_dd}/${_mm} · ${_txt}${_txt.length===60?'…':''}${previewFlag?' (preview)':''}`; })(), ip: getClientIp(req), success: 1 });
   res.json({ id: newId, is_preview: previewFlag });
 });
 
@@ -1427,6 +1478,11 @@ app.put('/api/activity/entries/:id', authMiddleware, (req, res) => {
   if (entry.content !== content.trim()) changes.push('Contenu modifié');
   if (entry.is_preview !== newPreview) changes.push(newPreview ? 'Marqué preview' : 'Preview retirée (validée)');
   db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(parseInt(req.params.id), 'updated', changes.length ? changes.join(' | ') : 'Modification sans changement détecté', req.user.id, nowLocal());
+  // Audit SUIVI_MODIFIÉ
+  const _txt2 = (content||'').trim().slice(0, 60);
+  const _d2 = entry.created_at ? entry.created_at.slice(0,10) : nowLocal().slice(0,10);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_MODIFIÉ', category: 'suivi', severity: 'info',
+    detail: `${tag_code.toUpperCase()} · ${_d2.slice(8,10)}/${_d2.slice(5,7)} · ${_txt2}${_txt2.length===60?'…':''}`, ip: getClientIp(req), success: 1 });
   res.json({ success: true });
 });
 

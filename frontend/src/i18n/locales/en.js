@@ -13,7 +13,7 @@ export default {
   'auth.logging_in':  'Signing in…',
   'auth.forgot':      'Forgot password?',
   'auth.forgot_title':'Forgot password',
-  'auth.forgot_desc': 'Enter your username to receive a reset link valid for 10 minutes.',
+  'auth.forgot_desc': 'Enter your username. If an email is configured on your account and the SMTP server is active, you will receive a reset link valid for 10 minutes.',
   'auth.send':        'Send',
   'auth.sending':     'Sending…',
   'auth.cancel':      'Cancel',
@@ -87,6 +87,7 @@ export default {
   'activity.edit':        'Edit',
   'activity.delete':      'Delete',
   'activity.history':     'History',
+  'activity.tag_required': 'No TAG applied — please select a tag before saving.',
   'activity.close':       'Close',
 
   // Admin — menu
@@ -100,6 +101,9 @@ export default {
   'admin.users':            'Users',
   'admin.security':         'Security',
   'admin.audit':            'Audit log',
+  'admin.section_profil':   'Profile',
+  'admin.section_config': 'Configuration',
+  'admin.section_admin': 'Administration',
   'admin.logout':           'Sign out',
 
   // Admin — account

@@ -6,11 +6,12 @@ import { useI18n } from '../contexts/I18nContext.jsx';
 import api from '../api.js';
 
 // Version du logiciel : date de build au format AAAA-MM-JJ
-const APP_VERSION = '2026-04-25_b68.188';
+const APP_VERSION = '2026-04-25_b103.280';
 
 
 // ── MODAL MOT DE PASSE OUBLIÉ ─────────────────────────────────────────────────
 function ForgotPasswordModal({ onClose }) {
+  const { t } = useI18n();
   const [username,  setUsername]  = useState('');
   const [loading,   setLoading]   = useState(false);
   const [step,      setStep]      = useState('form'); // form | sent | error
@@ -57,7 +58,7 @@ function ForgotPasswordModal({ onClose }) {
         {step === 'form' && (
           <>
             <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 18, lineHeight: 1.6 }}>
-              Entrez votre identifiant. Si un email est configuré sur votre compte et que le serveur SMTP est actif, vous recevrez un lien de réinitialisation valable <strong>10 minutes</strong>.
+              {t('auth.forgot_desc')}
             </p>
             {errMsg && (
               <div style={{ background: 'var(--err-s)', color: 'var(--err)', border: '1px solid var(--err)', borderRadius: 'var(--r)', padding: '8px 12px', fontSize: 12, marginBottom: 14 }}>
@@ -177,13 +178,15 @@ export default function Login() {
               autoComplete="current-password"
             />
           </div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
           <button
             className="btn btn-primary"
-            style={{ width: '100%', marginTop: 14, justifyContent: 'center', padding: '10px 14px', fontSize: 13 }}
+            style={{ minWidth: 180, justifyContent: 'center', padding: '10px 28px', fontSize: 13 }}
             disabled={loading}
           >
             {loading ? t('auth.logging_in') : t('auth.login')}
           </button>
+          </div>
         </form>
 
         {/* Lien reset mot de passe */}

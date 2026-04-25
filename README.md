@@ -139,3 +139,19 @@ Les données SQLite sont stockées dans le volume Docker `nexusvault-data`. Pour
 docker run --rm -v nexusvault-data:/data -v $(pwd):/backup alpine \
   tar czf /backup/nexusvault-backup-$(date +%Y%m%d).tar.gz /data
 ```
+
+## Réinitialisation d'un mot de passe
+
+En cas de perte d'accès, réinitialisez le mot de passe d'un compte depuis l'hôte Docker :
+
+```bash
+docker exec -it nexusvault-backend node server.js reset-password <nomducompte>
+```
+
+**Exemple :**
+```bash
+docker exec -it nexusvault-backend node server.js reset-password admin
+```
+
+Le mot de passe est réinitialisé à `changeme` et un changement obligatoire est imposé à la prochaine connexion. Le compte est aussi déverrouillé si nécessaire.
+

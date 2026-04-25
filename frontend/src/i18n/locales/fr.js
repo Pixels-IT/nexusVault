@@ -15,7 +15,7 @@ export default {
   'auth.logging_in':  'Connexion…',
   'auth.forgot':      'Mot de passe oublié ?',
   'auth.forgot_title':'Mot de passe oublié',
-  'auth.forgot_desc': 'Entrez votre identifiant pour recevoir un lien de réinitialisation valable 10 minutes.',
+  'auth.forgot_desc': 'Entrez votre identifiant. Si un email est configuré sur votre compte et que le serveur SMTP est actif, vous recevrez un lien de réinitialisation valable 10 minutes.',
   'auth.send':        'Envoyer',
   'auth.sending':     'Envoi…',
   'auth.cancel':      'Annuler',
@@ -89,6 +89,7 @@ export default {
   'activity.edit':        'Modifier',
   'activity.delete':      'Supprimer',
   'activity.history':     'Historique',
+  'activity.tag_required': 'Pas de TAG appliqué — veuillez sélectionner un tag avant de valider.',
   'activity.close':       'Fermer',
 
   // Admin — menu
@@ -102,6 +103,9 @@ export default {
   'admin.users':            'Utilisateurs',
   'admin.security':         'Sécurité',
   'admin.audit':            "Journal d'audit",
+  'admin.section_profil':   'Profil',
+  'admin.section_config': 'Configuration',
+  'admin.section_admin': 'Administration',
   'admin.logout':           'Déconnexion',
 
   // Admin — compte

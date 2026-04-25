@@ -66,9 +66,8 @@ function ContentView({ backup, onClose }) {
             </div>
           )}
         </div>
-        <div className="modal-footer" style={{ flexShrink:0 }}>
+        <div className="modal-footer" style={{ flexShrink:0, justifyContent:'flex-end' }}>
           <span style={{ fontSize:11, color:'var(--muted)' }}>{content.split('\n').length} lignes · {fmtSize(backup.size_bytes)}</span>
-          <button className="btn" onClick={onClose}>Fermer</button>
         </div>
       </div>
     </div>
@@ -173,7 +172,6 @@ function DiffView({ idA, idB, onClose }) {
           </>}
         </div>
         <div className="modal-footer" style={{ flexShrink:0 }}>
-          <button className="btn" onClick={onClose}>Fermer</button>
         </div>
       </div>
     </div>
@@ -478,6 +476,7 @@ function getDistinctTypes(devices) {
 
 // ── DEVICE SECTION ────────────────────────────────────────────────────────────
 function DeviceSection({ device, compareMode, selected, onSelectCompare, onView, onDelete, defaultOpen }) {
+  const { t } = useI18n();
   const [open, setOpen]       = useState(false);
   const [backups, setBackups] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -553,6 +552,7 @@ function DeviceSection({ device, compareMode, selected, onSelectCompare, onView,
 
 // ── SITE SECTION (draggable) ──────────────────────────────────────────────────
 function SiteSection({ site, devices, compareMode, selected, onSelectCompare, onView, onDelete, dragHandleProps, forceOpen }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
 
   // Dépliage automatique quand forceOpen change
@@ -606,6 +606,7 @@ function SiteSection({ site, devices, compareMode, selected, onSelectCompare, on
 const PREF_KEY = 'site_order';
 
 export default function Backups() {
+  const { t } = useI18n();
   const [sites, setSites]           = useState([]);
   const [devices, setDevices]       = useState([]);
   const [orderedSites, setOrderedSites] = useState([]); // sites dans l'ordre de l'utilisateur
@@ -666,7 +667,9 @@ export default function Backups() {
     setSelected(s => s.includes(id) ? s.filter(x => x !== id) : s.length < 2 ? [...s, id] : [s[1], id]);
   }
 
-  async function handleDelete(backup) { setConfirmDelete(backup); }
+  async function handleDelete(backup) {
+    setConfirmDelete(backup);
+  }
   async function confirmDeleteBackup() {
     if (!confirmDelete) return;
     try { await api.deleteBackup(confirmDelete.id); setConfirmDelete(null); load(); }
