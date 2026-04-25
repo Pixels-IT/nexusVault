@@ -6,7 +6,7 @@ import { useI18n } from '../contexts/I18nContext.jsx';
 import api from '../api.js';
 
 // Version du logiciel : date de build au format AAAA-MM-JJ
-const APP_VERSION = '2026-04-24_b63.183';
+const APP_VERSION = '2026-04-25_b68.188';
 
 
 // ── MODAL MOT DE PASSE OUBLIÉ ─────────────────────────────────────────────────
