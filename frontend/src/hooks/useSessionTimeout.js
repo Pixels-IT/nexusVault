@@ -21,9 +21,11 @@ export function useSessionTimeout({ onWarn, onExpire }) {
   useEffect(() => { logoutRef.current  = logout;   }, [logout]);
 
   const doExpire = useCallback(() => {
+    // Ne déconnecter que si l'utilisateur est encore connecté
+    if (!logoutRef.current) return;
     localStorage.removeItem(LAST_ACTIVE_KEY);
     onExpireRef.current?.();
-    logoutRef.current?.();
+    logoutRef.current?.('timeout'); // passer la source pour l'audit
   }, []);
 
   const reset = useCallback(() => {
@@ -54,12 +56,16 @@ export function useSessionTimeout({ onWarn, onExpire }) {
         // Vérifier la dernière activité stockée
         const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || '0');
         const elapsed = Date.now() - lastActive;
+        const loginTime = parseInt(localStorage.getItem('dp_login_time') || '0');
+        const justLoggedIn = (Date.now() - loginTime) < 10000; // connecté depuis < 10s
 
-        if (lastActive > 0 && elapsed > timeoutMsRef.current) {
+        if (!justLoggedIn && lastActive > 0 && elapsed > timeoutMsRef.current) {
           // Le timeout a expiré pendant que le navigateur était fermé
           console.log(`[Session] Expiré depuis ${Math.round(elapsed/1000)}s — déconnexion`);
           doExpire();
         } else {
+          // Nouvelle connexion ou session valide : réinitialiser le timer
+          localStorage.removeItem(LAST_ACTIVE_KEY);
           reset();
         }
       })

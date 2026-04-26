@@ -12,7 +12,15 @@ function statusBadge(s) {
   if (s === 'error') return <span className="badge badge-err"><span className="dot dot-err"/>Erreur</span>;
   return <span className="badge badge-muted">{s}</span>;
 }
-function fmtDate(dt) { return dt ? dt.slice(0,10) + ' ' + dt.slice(11,16) : '—'; }
+function fmtDate(dt) {
+  if (!dt) return '—';
+  if (dt.includes('T') || dt.endsWith('Z')) {
+    const d = new Date(dt);
+    const pad = n => String(n).padStart(2,'0');
+    return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+  }
+  return dt.slice(0,10) + ' ' + dt.slice(11,16);
+}
 function fmtSize(b) {
   if (!b) return '—';
   return b < 1024 ? `${b} o` : `${(b/1024).toFixed(1)} Ko`;
@@ -44,7 +52,7 @@ function ContentView({ backup, onClose }) {
             </div>
           </div>
           <div style={{ display:'flex', gap:8 }}>
-            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })} disabled={loading}>
+            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); api.logBackupCopy(backup.id).catch(()=>{}); })} disabled={loading}>
               {copied ? '✓ Copié' : 'Copier'}
             </button>
             <button className="btn btn-sm" onClick={onClose}>✕</button>

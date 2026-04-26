@@ -15,6 +15,6 @@ export default {
   'nav.backups': '备份',
   'nav.activity': '活动',
   'nav.admin': '管理',
-  'nav.scripts': '脚本',
+  'nav.automatisation': '脚本',
   'lang.select': '更改语言',
 };

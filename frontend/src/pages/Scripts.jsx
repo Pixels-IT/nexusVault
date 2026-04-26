@@ -7,7 +7,7 @@ export default function Scripts() {
   const { can } = usePerms();
   const { t } = useI18n();
 
-  if (!can('scripts_read')) return <AccessDenied page={t('scripts.title')} />;
+  if (!can('automatisation_read')) return <AccessDenied page={t('automatisation.title')} />;
 
   return (
     <main>
@@ -33,7 +33,7 @@ export default function Scripts() {
           Module Scripts
         </div>
         <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', maxWidth: 400 }}>
-          {t('scripts.desc')}<br/>
+          {t('automatisation.desc')}<br/>
           
         </div>
         <span style={{

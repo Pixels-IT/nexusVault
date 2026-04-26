@@ -4,7 +4,7 @@ export default {
   // Navigation
   'nav.dashboard':    'Tableau de bord',
   'nav.backups':      'Backups',
-  'nav.scripts':      'Scripts',
+  'nav.automatisation': 'Automatisation',
   'nav.activity':     "Suivi d'activité",
   'nav.admin':        'Administration',
 
@@ -98,7 +98,7 @@ export default {
   'admin.my_account':       'Mon compte',
   'admin.personalisation':  'Personnalisation',
   'admin.devices':          'Appareils',
-  'admin.scripts_menu':     'Scripts',
+  'admin.automatisation_menu': 'Automatisation',
   'admin.activity_menu':    "Suivi d'activité",
   'admin.users':            'Utilisateurs',
   'admin.security':         'Sécurité',
@@ -170,10 +170,10 @@ export default {
   'audit.ip':               'IP',
 
   // Scripts
-  'scripts.title':     'Scripts',
-  'scripts.subtitle':  'Gestion des scripts',
-  'scripts.desc':      'Elle permettra de stocker vos scripts dans un lieu sécurisé.',
-  'scripts.coming':    'BIENTÔT DISPONIBLE',
+  'automatisation.title': 'Automatisation',
+  'automatisation.subtitle': 'Scripts et automatisation de tâches',
+  "automatisation.desc": "Gérez vos scripts et automatisez vos tâches d'infrastructure dans un lieu sécurisé.",
+  'automatisation.coming': 'BIENTÔT DISPONIBLE',
 
   // Langue
   'lang.select':       'Changer la langue',

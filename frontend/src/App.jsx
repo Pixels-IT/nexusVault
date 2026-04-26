@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
 import { ThemeProvider } from './contexts/ThemeContext.jsx';
 import { I18nProvider } from './contexts/I18nContext.jsx';
@@ -16,11 +16,33 @@ import Scripts from './pages/Scripts.jsx';
 import Personnalisation from './pages/Personnalisation.jsx';
 import './index.css';
 
-const APP_VERSION = '2026-04-25_b103.280';
+const APP_VERSION = '2026-04-26_b112.300';
 
 // ── Banner avertissement session ───────────────────────────────────────────────
-function SessionWarning({ seconds, onDismiss }) {
-  if (!seconds) return null;
+function SessionWarning({ seconds: initialSeconds, onDismiss, onExpire }) {
+  const [countdown, setCountdown] = useState(initialSeconds);
+  const [gone, setGone] = useState(false);
+
+  useEffect(() => {
+    if (!initialSeconds) return;
+    setCountdown(initialSeconds);
+    setGone(false);
+    const iv = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(iv);
+          setGone(true);
+          onExpire?.();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(iv);
+  // eslint-disable-next-line
+  }, [initialSeconds]);
+
+  if (!initialSeconds || gone) return null;
   return (
     <div style={{
       position: 'fixed', bottom: 'calc(var(--footer-h) + 12px)', left: '50%',
@@ -33,7 +55,7 @@ function SessionWarning({ seconds, onDismiss }) {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
       </svg>
-      Session expirée dans {seconds}s — cliquez pour rester connecté
+      Session expirée dans <strong style={{ fontVariantNumeric: 'tabular-nums', minWidth: 24, display: 'inline-block', textAlign: 'center' }}>{countdown}s</strong> — cliquez pour rester connecté
       <button onClick={onDismiss} style={{ background: 'rgba(255,255,255,.25)', border: 'none', color: 'white', padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>
         Continuer
       </button>
@@ -66,7 +88,7 @@ function ProtectedLayout({ children }) {
         {children}
       </div>
       <Footer />
-      <SessionWarning seconds={warnSec} onDismiss={() => setWarnSec(null)} />
+      <SessionWarning seconds={warnSec} onDismiss={() => setWarnSec(null)} onExpire={() => setWarnSec(null)} />
     </>
   );
 }
@@ -95,7 +117,7 @@ function AppRoutes() {
             <Route path="/appareils" element={<Navigate to="/admin?tab=appareils" replace />} />
             <Route path="/admin"   element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
-            <Route path="/scripts" element={<ProtectedRoute><Scripts /></ProtectedRoute>} />
+            <Route path="/automatisation" element={<ProtectedRoute><Scripts /></ProtectedRoute>} />
             <Route path="/personnalisation" element={<ProtectedRoute><Personnalisation /></ProtectedRoute>} />
           </Routes>
         </ProtectedLayout>

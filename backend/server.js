@@ -1204,6 +1204,17 @@ app.patch('/api/backups/:id/pin', authMiddleware, requirePerm('backup_write'), (
 
 
 // ── BACKUP : SUPPRESSION (protégée si épinglée) ──────────────────────────────
+
+// ── BACKUP : LOG COPIE PRESSE-PAPIERS ────────────────────────────────────────
+app.post('/api/backups/:id/audit-copy', authMiddleware, (req, res) => {
+  const db = getDb();
+  const bk = db.prepare('SELECT b.version, d.name_enc FROM backups b LEFT JOIN devices d ON d.id=b.device_id WHERE b.id=?').get(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'BACKUP_COPIÉ', category: 'backup', severity: 'info',
+    detail: bk ? `${decrypt(bk.name_enc||'')} v${bk.version}` : `Backup ID ${req.params.id}`,
+    ip: getClientIp(req), success: 1 });
+  res.json({ success: true });
+});
+
 app.delete('/api/backups/:id', authMiddleware, requirePerm('backup_write'), (req, res) => {
   const db = getDb();
   const backup = db.prepare('SELECT id, pinned, version FROM backups WHERE id = ?').get(req.params.id);
@@ -1273,9 +1284,9 @@ app.get('/api/backups/diff', authMiddleware, (req, res) => {
 // ── DROITS PAR RÔLE ────────────────────────────────────────────────────────────
 // Droits par défaut intégrés (fallback si rien en base)
 const DEFAULT_ROLE_PERMS = {
-  admin:    { backup_read: true, backup_import: true, backup_write: true, backup_compare: true, config_read: true, config_write: true, audit_access: true, audit_archive: true, security_access: true, activity_write: true, activity_read: true, activity_tags: true, scripts_read: true, scripts_exec: true, scripts_admin: true },
-  operator: { backup_read: true, backup_import: false, backup_write: false, backup_compare: true, config_read: true, config_write: true, audit_access: false, audit_archive: false, security_access: false, activity_write: true, activity_read: true, activity_tags: true, scripts_read: true, scripts_exec: false, scripts_admin: false },
-  viewer:   { backup_read: true, backup_import: false, backup_write: false, backup_compare: false, config_read: true, config_write: false, audit_access: false, audit_archive: false, security_access: false, activity_write: true, activity_read: false, activity_tags: false, scripts_read: true, scripts_exec: false, scripts_admin: false },
+  admin:    { backup_read: true, backup_import: true, backup_write: true, backup_compare: true, config_read: true, config_write: true, audit_access: true, audit_archive: true, security_access: true, activity_write: true, activity_read: true, activity_tags: true, automatisation_read: true, automatisation_exec: true, automatisation_admin: true },
+  operator: { backup_read: true, backup_import: false, backup_write: false, backup_compare: true, config_read: true, config_write: true, audit_access: false, audit_archive: false, security_access: false, activity_write: true, activity_read: true, activity_tags: true, automatisation_read: true, automatisation_exec: false, automatisation_admin: false },
+  viewer:   { backup_read: true, backup_import: false, backup_write: false, backup_compare: false, config_read: true, config_write: false, audit_access: false, audit_archive: false, security_access: false, activity_write: true, activity_read: false, activity_tags: false, automatisation_read: true, automatisation_exec: false, automatisation_admin: false },
 };
 
 app.get('/api/role-permissions', authMiddleware, (req, res) => {

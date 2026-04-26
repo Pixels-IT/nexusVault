@@ -15,6 +15,6 @@ export default {
   'nav.backups': 'Backup',
   'nav.activity': 'Attività',
   'nav.admin': 'Amministrazione',
-  'nav.scripts': 'Script',
+  'nav.automatisation': 'Script',
   'lang.select': 'Cambia lingua',
 };

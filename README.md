@@ -155,3 +155,21 @@ docker exec -it nexusvault-backend node server.js reset-password admin
 
 Le mot de passe est réinitialisé à `changeme` et un changement obligatoire est imposé à la prochaine connexion. Le compte est aussi déverrouillé si nécessaire.
 
+
+## Variable LOG_LEVEL
+
+Configure la verbosité des logs du conteneur backend (`docker logs nexusvault-backend`) :
+
+| Valeur | Ce qui est affiché |
+|--------|-------------------|
+| `debug` | Tout : appels API, requêtes SQL, activité détaillée. Utile pour déboguer. |
+| `info` | **(défaut)** Informations importantes : démarrage du serveur, création de comptes, envoi d'emails, réinitialisations de mot de passe. |
+| `warn` | Avertissements : tentatives de brute-force, SMTP absent, anomalies non critiques. |
+| `error` | Erreurs critiques uniquement : exceptions non gérées, échecs base de données, crashs. |
+
+Exemple dans `docker-compose.yml` :
+```yaml
+environment:
+  LOG_LEVEL: warn
+```
+

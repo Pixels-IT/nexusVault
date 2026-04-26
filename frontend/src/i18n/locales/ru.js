@@ -15,6 +15,6 @@ export default {
   'nav.backups': 'Резервы',
   'nav.activity': 'Активность',
   'nav.admin': 'Администрирование',
-  'nav.scripts': 'Скрипты',
+  'nav.automatisation': 'Скрипты',
   'lang.select': 'Изменить язык',
 };

@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import api from '../api.js';
 
 const AuthCtx = createContext(null);
 
@@ -20,13 +21,25 @@ export function AuthProvider({ children }) {
 
   const login = (token) => {
     localStorage.setItem('dp_token', token);
+    localStorage.setItem('dp_login_time', String(Date.now())); // pour useSessionTimeout
     const payload = JSON.parse(atob(token.split('.')[1]));
     setUser(payload);
     return payload;
   };
 
-  const logout = () => {
+  const logout = (source = 'manual') => {
+    // Capturer le token AVANT de le supprimer (authMiddleware en a besoin)
+    const token = localStorage.getItem('dp_token');
+    if (token) {
+      // Envoyer l'audit de déconnexion avec le token encore valide
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ source }),
+      }).catch(() => {}); // fire-and-forget
+    }
     localStorage.removeItem('dp_token');
+    localStorage.removeItem('dp_login_time');
     setUser(null);
   };
 

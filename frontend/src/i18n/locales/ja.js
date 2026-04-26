@@ -15,6 +15,6 @@ export default {
   'nav.backups': 'バックアップ',
   'nav.activity': 'アクティビティ',
   'nav.admin': '管理',
-  'nav.scripts': 'スクリプト',
+  'nav.automatisation': 'スクリプト',
   'lang.select': '言語を変更',
 };
