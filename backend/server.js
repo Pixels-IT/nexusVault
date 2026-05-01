@@ -840,7 +840,10 @@ function archiveMonth(db, year, month, archivedBy) {
   db.prepare("INSERT OR REPLACE INTO audit_archives (year, month, entry_count, data_json, archived_at, archived_by) VALUES (?,?,?,?,?,?)")
     .run(parseInt(yr), parseInt(mo), rows.length, JSON.stringify(rows), now, archivedBy);
   db.prepare("DELETE FROM audit_log WHERE strftime('%Y', created_at)=? AND strftime('%m', created_at)=?").run(yr, mo);
-  audit(db, { username: archivedBy, action: 'AUDIT_ARCHIVE_AUTO', category: 'admin', severity: 'info', detail: `Archive ${yr}/${mo} — ${rows.length} entree(s)`, ip: '127.0.0.1', success: 1 });
+  // Trouver l'userId si archivedBy est un username
+  let _uid = null;
+  try { const _u = db.prepare('SELECT id FROM users WHERE username=?').get(archivedBy); _uid = _u ? _u.id : null; } catch {}
+  audit(db, { userId: _uid, username: archivedBy, action: 'AUDIT_ARCHIVÉ', category: 'admin', severity: 'info', detail: `Archive ${yr}/${mo} créée — ${rows.length} entrée(s) archivées`, ip: '127.0.0.1', success: 1 });
   return { year: yr, month: mo, count: rows.length };
 }
 
@@ -900,6 +903,12 @@ function scheduleMonthlyCron() {
         } else {
           cronState.lastRun    = nowLocal();
           cronState.lastResult = `Archive ${year}/${String(month).padStart(2,'0')} — ${result.count} entrees`;
+          // Persister lastRun dans la DB pour survivre aux redémarrages
+          try {
+            db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cron_last_run', ?)").run(
+              JSON.stringify({ run: cronState.lastRun, result: cronState.lastResult })
+            );
+          } catch {}
           logger.info(`[CRON] ${cronState.lastResult}`);
         }
       }
@@ -956,8 +965,7 @@ app.post('/api/audit/archive-now', authMiddleware, requireRole('admin'), (req, r
 
 // ── AUDIT : ENDPOINTS ─────────────────────────────────────────────────────────
 // Lister les archives disponibles
-app.get('/api/audit/archives', authMiddleware, (req, res) => {
-  const { can } = require('./auth');
+app.get('/api/audit/archives', authMiddleware, requirePerm('audit_archive'), (req, res) => {
   const db = getDb();
   const rows = db.prepare('SELECT id, year, month, entry_count, archived_at, archived_by FROM audit_archives ORDER BY year DESC, month DESC').all();
   res.json(rows);
@@ -975,9 +983,7 @@ app.get('/api/audit/archives/:id', authMiddleware, (req, res) => {
 
 
 // ── AUDIT : TÉLÉCHARGER ARCHIVE EN ZIP ────────────────────────────────────────
-app.get('/api/audit/archives/:id/download', authMiddleware, (req, res) => {
-  const { can } = require('./auth');
-  if (!can(req.user, 'audit_archive')) return res.status(403).json({ error: 'Accès refusé' });
+app.get('/api/audit/archives/:id/download', authMiddleware, requirePerm('audit_archive'), (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM audit_archives WHERE id=?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Archive introuvable' });
@@ -985,12 +991,13 @@ app.get('/api/audit/archives/:id/download', authMiddleware, (req, res) => {
   let entries = [];
   try { entries = JSON.parse(row.data_json); } catch {}
   // Générer un CSV des entrées
+  const BOM = '\uFEFF'; // BOM UTF-8 pour compatibilité Excel/LibreOffice
   const header = 'date,niveau,categorie,action,utilisateur,ip,detail,resultat\n';
   const rows = entries.map(e => [
     e.created_at, e.severity, e.category, e.action,
     e.username || '', e.ip || '', (e.detail || '').replace(/"/g, '""'), e.success ? 'OK' : 'ECHEC'
   ].map(v => `"${v}"`).join(',')).join('\n');
-  const csv = header + rows;
+  const csv = BOM + header + rows;
   // Compresser en gzip
   const compressed = zlib.gzipSync(Buffer.from(csv, 'utf8'));
   const filename = `audit_${row.year}-${String(row.month).padStart(2,'0')}.csv.gz`;

@@ -471,6 +471,12 @@ function RolePermissionsCard() {
         </div>
       )}
 
+      <div className="alert alert-warn" style={{ margin: '0 0 14px 0', fontSize: 12, justifyContent: 'center', textAlign: 'center' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}>
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        Les droits de l'administrateur sont permanents et ne peuvent pas être modifiés.
+      </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -520,12 +526,7 @@ function RolePermissionsCard() {
           </tbody>
         </table>
       </div>
-      <div className="alert alert-warn" style={{ margin: '0 18px 14px', fontSize: 12 }}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}>
-          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-        Les droits de l'administrateur sont permanents et ne peuvent pas être modifiés.
-      </div>
+
     </div>
   );
 }
@@ -2112,7 +2113,7 @@ export default function Admin() {
             });
             groups.push({ ...cur });
 
-            return groups.filter(g => g.items.length > 0 || g.label).map((group, gi) => (
+            return groups.filter(g => g.items.length > 0).map((group, gi) => (
               <div key={group.key || `g${gi}`} style={{ display: 'flex' }}>
                 {/* Bande verticale label de section */}
                 {group.label ? (

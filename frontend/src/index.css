@@ -359,7 +359,7 @@ tr:hover td { background: var(--surf2); }
 .config-layout > :last-child { min-width: 0; }
 .config-layout .card { max-width: 100%; width: 100%; overflow: clip; }
 .config-layout 
-.side-menu { background: var(--surf); border: 1px solid var(--brd); border-radius: var(--rl); overflow: hidden; align-self: start; position: sticky; top: 16px; }
+.side-menu { background: var(--surf); border: 1px solid var(--brd); border-radius: var(--rl); overflow: hidden; align-self: start; position: sticky; top: 16px; min-height: 340px; }
 .side-item {
   display: flex; align-items: center; gap: 10px;
   padding: 11px 16px;
