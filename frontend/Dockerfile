@@ -7,19 +7,37 @@ ARG CACHEBUST=1
 COPY . .
 RUN npm run build
 
-# nginx:unprivileged = image nginx officielle conçue pour tourner sans root
-# écoute sur 8080 par défaut, pas besoin de chown ni de USER
-FROM nginxinc/nginx-unprivileged:alpine
+FROM nginx:alpine
 
-# Mot de passe root complexe (best practice)
-USER root
-RUN echo "root:$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9!@#$%^&*' | head -c 32)" | chpasswd 2>/dev/null || true
+# Mot de passe root complexe
+RUN passwd -d root 2>/dev/null || true
 
+# Créer l'utilisateur non-root
+RUN addgroup -S app-nexus && adduser -S -G app-nexus -H app-nexus
+
+# Config nginx pour non-root :
+# - pid dans /tmp
+# - supprimer directive user (ne peut pas changer d'user si non-root)
+# - répertoires temporaires accessibles
+RUN sed -i \
+      -e 's|pid\s*/var/run/nginx.pid;|pid /tmp/nginx.pid;|' \
+      -e '/^user/d' \
+      /etc/nginx/nginx.conf && \
+    mkdir -p /tmp/nginx/client_body /tmp/nginx/proxy /tmp/nginx/fastcgi && \
+    chown -R app-nexus:app-nexus /tmp/nginx && \
+    chown -R app-nexus:app-nexus /var/cache/nginx && \
+    chown -R app-nexus:app-nexus /var/log/nginx
+
+# Injecter les chemins temporaires dans nginx.conf principal
+RUN sed -i '/http {/a \    client_body_temp_path /tmp/nginx/client_body;\n    proxy_temp_path /tmp/nginx/proxy;\n    fastcgi_temp_path /tmp/nginx/fastcgi;' \
+    /etc/nginx/nginx.conf
+
+RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/build /usr/share/nginx/html
+RUN chown -R app-nexus:app-nexus /usr/share/nginx/html
 
-# Revenir à l'user non-root de l'image (101 = nginx dans unprivileged)
-USER 101
+USER app-nexus
 
 EXPOSE 8080
 

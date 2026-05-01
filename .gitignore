@@ -6,3 +6,6 @@ frontend/build/
 *.db
 *.db-shm
 *.db-wal
+
+# Script de déploiement local (peut contenir des secrets)
+deploy-dev.sh

@@ -82,8 +82,19 @@ app.use((req, res, next) => {
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 // Brute force : 5 tentatives en 10 minutes → compte verrouillé
-const BRUTE_MAX   = 5;
-const BRUTE_WINDOW = 10 * 60; // 10 min en secondes
+let BRUTE_MAX   = 5;    // configurable via l'interface
+let BRUTE_WINDOW = 10 * 60; // 10 min en secondes (configurable)
+
+function getBruteConfig(db) {
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key='brute_config'").get();
+    if (row) {
+      const v = JSON.parse(row.value);
+      return { max: parseInt(v.max || 5), window: parseInt(v.window || 600) };
+    }
+  } catch {}
+  return { max: 5, window: 600 };
+}
 
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
@@ -108,6 +119,9 @@ app.post('/api/auth/login', (req, res) => {
     }
   }
 
+  const bruteConf = getBruteConfig(db);
+  const BRUTE_MAX = bruteConf.max;
+  const BRUTE_WINDOW = bruteConf.window;
   const pwOk = user && user.enabled && bcrypt.compareSync(password, user.password_hash);
 
   if (!pwOk) {

@@ -259,6 +259,21 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
           </label>
         </div>
       )}
+
+      {/* Déverrouillage — uniquement si le compte est verrouillé */}
+      {!isNew && isLocked && (
+        <div className="alert alert-warn" style={{ margin: '8px 0 0 0', fontSize: 12 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}>
+            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          <span>Compte verrouillé jusqu'au {user.locked_until?.slice(0,16).replace('T',' ')}</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', cursor: 'pointer', fontWeight: 600 }}>
+            <input type="checkbox" checked={data.unlock}
+              onChange={e => setData(d => ({ ...d, unlock: e.target.checked }))} />
+            Déverrouiller
+          </label>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -588,10 +603,15 @@ function SecurityGeneralTab() {
   const [appUrl, setAppUrl]       = useState('');
   const [urlSaving, setUrlSaving] = useState(false);
   const [urlMsg, setUrlMsg]       = useState('');
+  const [bruteMax, setBruteMax]   = useState('5');
+  const [bruteWin, setBruteWin]   = useState('10');
+  const [bruteSaving, setBruteSaving] = useState(false);
+  const [bruteMsg, setBruteMsg]   = useState('');
 
   useEffect(() => {
     api.getSettings().then(s => setTimeout_(s.session_timeout_minutes || '30')).catch(() => {});
     api.smtpConfig().then(s => setAppUrl(s.app_url || '')).catch(() => {});
+    api.bruteConfig().then(cfg => { setBruteMax(String(cfg.max || 5)); setBruteWin(String(Math.round((cfg.window||600)/60))); }).catch(() => {});
   }, []);
 
   const loadWl = () => api.whitelist().then(setRows).catch(() => {});
@@ -611,6 +631,15 @@ function SecurityGeneralTab() {
       setUrlMsg('Enregistré.');
     } catch { setUrlMsg('Erreur.'); }
     finally { setUrlSaving(false); }
+  }
+
+  async function saveBrute() {
+    setBruteSaving(true); setBruteMsg('');
+    try {
+      await api.saveBruteConfig({ max: parseInt(bruteMax), window: parseInt(bruteWin) * 60 });
+      setBruteMsg('Enregistré.');
+    } catch { setBruteMsg('Erreur.'); }
+    finally { setBruteSaving(false); }
   }
 
   async function saveTimeout(e) {
@@ -635,8 +664,8 @@ function SecurityGeneralTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Grille : Timeout | URL Application */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {/* Grille : Timeout | URL Application | Brute-force */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
         {/* Timeout */}
         <div className="card">
           <div className="card-header">
@@ -701,6 +730,36 @@ function SecurityGeneralTab() {
               </button>
             </div>
           </div>
+
+        {/* Brute-force */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+                <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              Blocage brute-force
+            </div>
+          </div>
+          <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Tentatives avant verrouillage</label>
+              <select className="form-control" value={bruteMax} onChange={e => setBruteMax(e.target.value)}>
+                {[3,4,5,6,7,8,10].map(n => <option key={n} value={n}>{n} tentatives</option>)}
+              </select>
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Durée du verrouillage</label>
+              <select className="form-control" value={bruteWin} onChange={e => setBruteWin(e.target.value)}>
+                {[5,10,15,20,30,60].map(m => <option key={m} value={m}>{m} minutes</option>)}
+              </select>
+            </div>
+            {bruteMsg && <div className="alert alert-ok" style={{ fontSize: 11, padding: '4px 10px' }}>{bruteMsg}</div>}
+            <button className="btn btn-primary" onClick={saveBrute} disabled={bruteSaving} style={{ alignSelf: 'flex-end' }}>
+              {bruteSaving ? '…' : 'Enregistrer'}
+            </button>
+          </div>
+        </div>
         </div>
       </div>
 
