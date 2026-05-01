@@ -223,7 +223,7 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
 
       <div className="form-group">
         <label className="form-label">{t('users.email')} *</label>
-        <input className="form-control" type="email" value={data.email} onChange={set('email')}
+        <input className="form-control" type="email" value={data.email} pattern="[^\s@]+@[^\s@]+\.[^\s@]+" onChange={set('email')}
           placeholder="utilisateur@domaine.com" />
       </div>
 

@@ -4,9 +4,10 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useI18n } from '../contexts/I18nContext.jsx';
 import api from '../api.js';
+import LangSwitcher from '../components/LangSwitcher.jsx';
 
 // Version du logiciel : date de build au format AAAA-MM-JJ
-const APP_VERSION = '2026-05-01_b129.347';
+const APP_VERSION = '2026-05-01_b130.350';
 
 
 // ── MODAL MOT DE PASSE OUBLIÉ ─────────────────────────────────────────────────
@@ -47,7 +48,7 @@ function ForgotPasswordModal({ onClose }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" style={{ width: 20, height: 20 }}>
               <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
-            <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--txt)' }}>Mot de passe oublié</span>
+            <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--txt)' }}>{t('auth.forgot_title')}</span>
           </div>
           <button onClick={onClose}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 18, lineHeight: 1, padding: '0 4px' }}>
@@ -67,15 +68,15 @@ function ForgotPasswordModal({ onClose }) {
             )}
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label className="form-label">IDENTIFIANT</label>
+                <label className="form-label">{t('auth.forgot_username')}</label>
                 <input className="form-control" value={username}
                   onChange={e => setUsername(e.target.value)}
-                  placeholder="Votre identifiant" autoFocus />
+                  placeholder={t('auth.forgot_placeholder')} autoFocus />
               </div>
               <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-                <button type="button" className="btn" onClick={onClose} style={{ flex: 1 }}>Annuler</button>
+                <button type="button" className="btn" onClick={onClose} style={{ flex: 1 }}>{t('auth.forgot_cancel')}</button>
                 <button type="submit" className="btn btn-primary" disabled={loading} style={{ flex: 1, justifyContent: 'center' }}>
-                  {loading ? 'Envoi…' : 'Envoyer'}
+                  {loading ? t('auth.forgot_sending') : t('auth.forgot_send')}
                 </button>
               </div>
             </form>
@@ -88,13 +89,11 @@ function ForgotPasswordModal({ onClose }) {
               style={{ width: 44, height: 44, margin: '0 auto 14px', display: 'block' }}>
               <polyline points="20 6 9 17 4 12"/>
             </svg>
-            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--txt)', marginBottom: 10 }}>Demande envoyée</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--txt)', marginBottom: 10 }}>{t('auth.forgot_sent_title')}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 20 }}>
-              Demande traitée. Si un email est configuré sur ce compte, vous recevrez le lien sous peu.
+              {t('auth.forgot_sent_desc')}
             </div>
-            <button className="btn btn-primary" onClick={onClose} style={{ justifyContent: 'center', padding: '9px 28px' }}>
-              Fermer
-            </button>
+            <button className="btn btn-primary" onClick={onClose} style={{ justifyContent: 'center', padding: '9px 28px' }}>{t('auth.forgot_close')}</button>
           </div>
         )}
       </div>
@@ -133,12 +132,14 @@ export default function Login() {
   return (
     <div className="login-page">
       {/* Toggle thème en haut à droite même sur la page login */}
-      <button
-        className={`theme-toggle ${dark ? 'on' : ''}`}
-        onClick={toggle}
-        title={dark ? 'Mode clair' : 'Mode sombre'}
-        style={{ position: 'fixed', top: 18, right: 20 }}
-      />
+      <div style={{ position: 'fixed', top: 14, right: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <LangSwitcher />
+        <button
+          className={`theme-toggle ${dark ? 'on' : ''}`}
+          onClick={toggle}
+          title={dark ? 'Mode clair' : 'Mode sombre'}
+        />
+      </div>
 
       <div className="login-card">
         {/* Logo */}
@@ -152,14 +153,14 @@ export default function Login() {
 
         {passwordChanged && (
           <div className="alert alert-ok" style={{ marginBottom: 16 }}>
-            ✓ Mot de passe modifié. Veuillez vous reconnecter.
+            {t('auth.password_changed')}
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
           {error && <div className="alert alert-err" style={{ marginBottom: 16 }}>{error}</div>}
           <div className="form-group">
-            <label className="form-label">Identifiant</label>
+            <label className="form-label">{t('auth.username')}</label>
             <input
               className="form-control"
               value={username}
@@ -169,7 +170,7 @@ export default function Login() {
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Mot de passe</label>
+            <label className="form-label">{t('auth.password')}</label>
             <input
               className="form-control"
               type="password"
@@ -195,7 +196,7 @@ export default function Login() {
             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--muted)', padding: 0 }}
             onMouseEnter={e => e.target.style.color='var(--acc)'}
             onMouseLeave={e => e.target.style.color='var(--muted)'}>
-            Mot de passe oublié ?
+            {t('auth.forgot_link')}
           </button>
         </div>
         {showForgot && <ForgotPasswordModal onClose={() => setShowForgot(false)} />}

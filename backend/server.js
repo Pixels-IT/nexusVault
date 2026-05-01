@@ -226,6 +226,10 @@ app.get('/api/users', authMiddleware, requireRole('admin'), (req, res) => {
 
 app.post('/api/users', authMiddleware, requireRole('admin'), async (req, res) => {
   const { username, display_name, email, role } = req.body;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Adresse email invalide' });
+  }
+
   const ip = getClientIp(req);
   const db = getDb();
   if (!username?.trim()) return res.status(400).json({ error: 'Identifiant requis' });
