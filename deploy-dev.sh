@@ -5,14 +5,23 @@ cd "$SCRIPT_DIR"
 
 # Lire la version depuis .build_meta
 VERSION=$(python3 -c "
-import sys, json
+import json
 with open('.build_meta') as f:
     m = json.load(f)
-print('b{}.{} — {}'.format(m['build'], m['requests'], m['date']))
+print('v{}-b{}.{}'.format(m['date'], m['build'], m['requests']))
 ")
 
+# Message de commit : version + description passée en argument
+# Usage: ./deploy-dev.sh "Menu Admin — Frontend unhealthy"
+# Sans argument : juste la version
+if [ -n "$1" ]; then
+    MSG="${VERSION} - ${1}"
+else
+    MSG="${VERSION}"
+fi
+
 git add -A
-git commit -m "build ${VERSION}"
+git commit -m "${MSG}"
 git push origin dev
 
-echo "Pushé vers dev ✓ (${VERSION})"
+echo "Poussé vers dev ✓ (${MSG})"

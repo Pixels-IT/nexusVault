@@ -2074,20 +2074,17 @@ export default function Admin() {
     { key: 'security',      label: t('admin.security'),           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
     { key: 'audit',         label: t('admin.audit'),   icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
   ];
-  const visibleTabs = TABS.filter(t => {
-    if (t.sep) return true; // séparateurs toujours inclus (masqués si voisins cachés)
-    if (t.key === 'account') return true;
-    if (t.key === 'personnalisation') return true;
-    if (t.key === 'logout') return true;
-    if (t.sectionLabel) return true;  // labels toujours visibles
-    if (t.key === 'appareils') return isAdmin || can('config_read');
-    if (t.key === 'automatisation_admin') return isAdmin || can('automatisation_admin');
-    if (t.key === 'activity') return isAdmin || can('activity');
-    if (t.key === 'users') return isAdmin;
-    if (t.key === 'security') return isAdmin || can('security_access');
-    if (t.key === 'audit') return isAdmin || can('audit_access');
+  const visibleTabs = TABS;
+  const canAccessTab = (key) => {
+    if (['account','personnalisation','logout'].includes(key)) return true;
+    if (key === 'appareils') return isAdmin || can('config_read');
+    if (key === 'automatisation_admin') return isAdmin || can('automatisation_admin');
+    if (key === 'activity') return isAdmin || can('activity');
+    if (key === 'users') return isAdmin;
+    if (key === 'security') return isAdmin || can('security_access');
+    if (key === 'audit') return isAdmin || can('audit_access');
     return isAdmin;
-  });
+  };
 
   return (
     <main>
@@ -2113,7 +2110,7 @@ export default function Admin() {
             });
             groups.push({ ...cur });
 
-            return groups.filter(g => g.items.length > 0).map((group, gi) => (
+            return groups.filter(g => g.items.length > 0 || g.label).map((group, gi) => (
               <div key={group.key || `g${gi}`} style={{ display: 'flex', minHeight: 120 }}>
                 {/* Bande verticale label de section */}
                 {group.label ? (
@@ -2144,12 +2141,23 @@ export default function Admin() {
                     if (t.sep) {
                       return <div key={t.key} style={{ margin: '4px 10px', borderTop: '1px solid var(--brd)', opacity: .4 }} />;
                     }
+                    const accessible = canAccessTab(t.key);
                     return (
                       <div key={t.key}
                         className={`side-item ${active === t.key ? 'active' : ''}`}
-                        onClick={() => { if (t.key === 'logout') doLogout(); else setSp({ tab: t.key }); }}
-                        style={t.key === 'logout' ? { color: 'var(--err)', fontSize: 12 } : { fontSize: 12 }}>
+                        onClick={() => {
+                          if (!accessible) return;
+                          if (t.key === 'logout') doLogout();
+                          else setSp({ tab: t.key });
+                        }}
+                        title={!accessible ? 'Acces non autorise' : undefined}
+                        style={{
+                          fontSize: 12,
+                          ...(t.key === 'logout' ? { color: 'var(--err)' } : {}),
+                          ...(accessible ? {} : { opacity: 0.35, cursor: 'not-allowed' }),
+                        }}>
                         {t.icon}{t.label}
+                        {!accessible && <span style={{ marginLeft:'auto', fontSize:9 }}>&#128274;</span>}
                       </div>
                     );
                   })}
