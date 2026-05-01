@@ -144,6 +144,7 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
   const { t } = useI18n();
   const ROLES = useRoles();
   const isNew = !user?.id;
+  const isLocked = !!(user?.locked_until && new Date(user.locked_until.replace(' ','T')) > new Date());
   const [data, setData] = useState(user ? {
     username: user.username,
     display_name: user.display_name || '',
@@ -151,6 +152,7 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
     role: user.role || 'viewer',
     enabled: user.enabled !== 0,
     password: '',
+    unlock: false,
   } : {
     username: '', display_name: '', email: '', role: 'viewer', enabled: true, password: '',
   });
@@ -731,6 +733,9 @@ function SecurityGeneralTab() {
             </div>
           </div>
 
+
+        </div>
+
         {/* Brute-force */}
         <div className="card">
           <div className="card-header">
@@ -761,6 +766,7 @@ function SecurityGeneralTab() {
           </div>
         </div>
         </div>
+
       </div>
 
       {/* Liste d'accès */}

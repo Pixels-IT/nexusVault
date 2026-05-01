@@ -45,7 +45,7 @@ services:
     build:
       context: ./frontend
       args:
-        CACHEBUST: 20260501162736
+        CACHEBUST: 20260501163817
       dockerfile: Dockerfile
     container_name: nexusvault-frontend
     restart: unless-stopped
@@ -54,9 +54,14 @@ services:
       - "${APP_PORT:-8080}:8080"
     environment:
       TZ: ${TZ:-Europe/Paris}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
     networks:
       - nexusvault-net
 
