@@ -2114,7 +2114,7 @@ export default function Admin() {
             groups.push({ ...cur });
 
             return groups.filter(g => g.items.length > 0).map((group, gi) => (
-              <div key={group.key || `g${gi}`} style={{ display: 'flex' }}>
+              <div key={group.key || `g${gi}`} style={{ display: 'flex', minHeight: 120 }}>
                 {/* Bande verticale label de section */}
                 {group.label ? (
                   <div style={{
