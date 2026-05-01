@@ -45,7 +45,7 @@ services:
     build:
       context: ./frontend
       args:
-        CACHEBUST: 20260501163817
+        CACHEBUST: 20260501164224
       dockerfile: Dockerfile
     container_name: nexusvault-frontend
     restart: unless-stopped

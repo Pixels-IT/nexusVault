@@ -765,7 +765,6 @@ function SecurityGeneralTab() {
             </button>
           </div>
         </div>
-        </div>
 
       </div>
 
