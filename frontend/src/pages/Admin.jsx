@@ -1307,6 +1307,7 @@ function SecurityCronTab() {
   const { t } = useI18n();
   const [cronHour,   setCronHour]   = useState('0');
   const [cronMinute, setCronMinute] = useState('5');
+  const [cronDay,    setCronDay]    = useState('1');
   const [cronStatus, setCronStatus] = useState(null);
   const [cronSaving, setCronSaving] = useState(false);
   const [cronMsg,    setCronMsg]    = useState('');
@@ -1316,6 +1317,7 @@ function SecurityCronTab() {
         setCronStatus(s);
         setCronHour(String(s.hour).padStart(2,'0'));
         setCronMinute(String(s.minute).padStart(2,'0'));
+        setCronDay(String(s.day ?? 1));
       })
       .catch(() => {});
   }, []);
@@ -1323,9 +1325,9 @@ function SecurityCronTab() {
   async function saveCron(e) {
     e.preventDefault(); setCronSaving(true); setCronMsg('');
     try {
-      const r = await api.cronConfig({ hour: parseInt(cronHour), minute: parseInt(cronMinute) });
+      const r = await api.cronConfig({ hour: parseInt(cronHour), minute: parseInt(cronMinute), day: parseInt(cronDay) });
       setCronMsg('Configuration enregistrée.');
-      setCronStatus(prev => ({ ...prev, hour: parseInt(cronHour), minute: parseInt(cronMinute), next_run: r.next_run }));
+      setCronStatus(prev => ({ ...prev, hour: parseInt(cronHour), minute: parseInt(cronMinute), day: parseInt(cronDay), next_run: r.next_run }));
     } catch (e) { setCronMsg('Erreur : ' + e.message); }
     finally { setCronSaving(false); }
   }
@@ -1360,7 +1362,18 @@ function SecurityCronTab() {
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Configuration</div>
               <form onSubmit={saveCron} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Heure (1er du mois)</label>
+                  <label className="form-label" style={{ display:'flex', alignItems:'center', gap:6 }}>
+                    Jour du mois
+                    <span style={{ fontSize:10, background:'var(--warn-s)', color:'var(--warn)', padding:'1px 6px', borderRadius:10, fontWeight:600 }}>TEST</span>
+                  </label>
+                  <select className="form-control" value={cronDay} onChange={e => setCronDay(e.target.value)}>
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Heure</label>
                   <select className="form-control" value={cronHour} onChange={e => setCronHour(e.target.value)}>
                     {Array.from({ length: 24 }, (_, i) => String(i).padStart(2,'0')).map(h => (
                       <option key={h} value={h}>{h}h</option>
@@ -1423,56 +1436,117 @@ function SecurityCronTab() {
 const MONTHS_AUDIT = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
 function ArchiveListModal({ onClose }) {
+  const { t } = useI18n();
   const [archives, setArchives]   = useState([]);
   const [loading, setLoading]     = useState(true);
-  const [viewArchive, setViewArchive] = useState(null);
+  const [openYear, setOpenYear]   = useState(null);
+  const [downloading, setDownloading] = useState(null);
 
   useEffect(() => {
     api.auditArchives()
-      .then(data => setArchives(data))
+      .then(data => { setArchives(data); if (data.length > 0) setOpenYear(data[0].year); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  if (viewArchive) {
-    return <ArchiveViewModal archive={viewArchive} onClose={() => setViewArchive(null)} onBack={() => setViewArchive(null)} />;
-  }
+  // Construire la liste des années (archives + années futures jusqu'à now+1)
+  const now = new Date();
+  const archiveMap = {}; // { year: { month: archive } }
+  archives.forEach(a => {
+    if (!archiveMap[a.year]) archiveMap[a.year] = {};
+    archiveMap[a.year][a.month] = a;
+  });
+  const years = [];
+  const minYear = archives.length > 0 ? Math.min(...archives.map(a => a.year)) : now.getFullYear();
+  for (let y = now.getFullYear(); y >= minYear; y--) years.push(y);
+
+  const MONTHS = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+
+  const downloadArchive = (a) => {
+    setDownloading(a.id);
+    const url = api.auditArchiveDl(a.id);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `audit_${a.year}-${String(a.month).padStart(2,'0')}.csv.gz`;
+    // Ajouter le token d'auth dans un header via fetch
+    fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('dp_token')}` } })
+      .then(r => r.blob())
+      .then(blob => {
+        const burl = URL.createObjectURL(blob);
+        link.href = burl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(burl);
+      })
+      .catch(() => {})
+      .finally(() => setDownloading(null));
+  };
 
   return (
     <Modal title="Archives du journal d'audit" onClose={onClose}
       footer={<button className="btn" onClick={onClose}>Fermer</button>}>
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><span className="spinner" /></div>
-      ) : archives.length === 0 ? (
+      ) : years.length === 0 ? (
         <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 40, fontSize: 13 }}>
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12, opacity: .3 }}>
-            <path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/>
-          </svg>
           <div>Aucune archive disponible</div>
           <div style={{ fontSize: 12, marginTop: 4 }}>L'archivage automatique s'effectue le 1er de chaque mois</div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
-          {archives.map(a => (
-            <button key={a.id} onClick={() => setViewArchive(a)} style={{
-              padding: '14px 16px', borderRadius: 'var(--r)', cursor: 'pointer', textAlign: 'left',
-              border: '1px solid var(--brd)', background: 'var(--surf2)',
-              display: 'flex', flexDirection: 'column', gap: 4, transition: 'border-color .15s, background .15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--acc)'; e.currentTarget.style.background = 'var(--acc-s)'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--brd)'; e.currentTarget.style.background = 'var(--surf2)'; }}
-            >
-              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--txt)' }}>
-                {MONTHS_AUDIT[(a.month || 1) - 1]}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{a.year}</div>
-              <div style={{ fontSize: 11, color: 'var(--ok)', fontWeight: 600 }}>
-                {a.entry_count} note{a.entry_count > 1 ? 's' : ''}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                {a.archived_by === 'cron' ? '⚙ Auto' : '👤 Manuel'}
-              </div>
-            </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {years.map(year => (
+            <div key={year}>
+              {/* Bouton année */}
+              <button
+                onClick={() => setOpenYear(openYear === year ? null : year)}
+                style={{
+                  width: '100%', textAlign: 'left', padding: '10px 16px',
+                  background: openYear === year ? 'var(--acc-s)' : 'var(--surf2)',
+                  border: '1px solid' + (openYear === year ? ' var(--acc)' : ' var(--brd)'),
+                  borderRadius: 'var(--r)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  fontWeight: 700, fontSize: 15, color: openYear === year ? 'var(--acc)' : 'var(--txt)',
+                }}
+              >
+                <span>{year}</span>
+                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>
+                  {Object.keys(archiveMap[year] || {}).length} archive{Object.keys(archiveMap[year] || {}).length !== 1 ? 's' : ''}
+                </span>
+              </button>
+              {/* Grille des mois */}
+              {openYear === year && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, padding: '10px 0 4px 0' }}>
+                  {MONTHS.map((mName, mi) => {
+                    const month = mi + 1;
+                    const arch = archiveMap[year]?.[month];
+                    const isFuture = year > now.getFullYear() || (year === now.getFullYear() && month > now.getMonth() + 1);
+                    return (
+                      <button key={month}
+                        disabled={!arch || isFuture || downloading === arch?.id}
+                        onClick={() => arch && downloadArchive(arch)}
+                        title={arch ? `${arch.entry_count} entrée${arch.entry_count > 1 ? 's' : ''} — cliquer pour télécharger` : "Pas d'archive"}
+                        style={{
+                          padding: '8px 4px', borderRadius: 'var(--r)', fontSize: 12, fontWeight: 600,
+                          cursor: arch ? 'pointer' : 'default',
+                          border: '1px solid',
+                          borderColor: arch ? 'var(--acc)' : 'var(--brd)',
+                          background: arch ? 'var(--acc-s)' : 'var(--surf)',
+                          color: arch ? 'var(--acc)' : 'var(--muted)',
+                          opacity: isFuture ? 0.3 : 1,
+                          transition: 'all .15s',
+                        }}
+                        onMouseEnter={e => { if (arch) e.currentTarget.style.background = 'var(--acc)'; e.currentTarget.style.color = 'white'; }}
+                        onMouseLeave={e => { if (arch) { e.currentTarget.style.background = 'var(--acc-s)'; e.currentTarget.style.color = 'var(--acc)'; } }}
+                      >
+                        {downloading === arch?.id ? '…' : mName}
+                        {arch && <div style={{ fontSize: 9, fontWeight: 400, marginTop: 2 }}>{arch.entry_count}</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}

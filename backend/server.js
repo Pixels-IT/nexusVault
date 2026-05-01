@@ -852,10 +852,10 @@ function getCronConfig(db) {
   if (row) {
     try {
       const val = JSON.parse(row.value);
-      return { hour: parseInt(val.hour ?? 0), minute: parseInt(val.minute ?? 5) };
+      return { hour: parseInt(val.hour ?? 0), minute: parseInt(val.minute ?? 5), day: parseInt(val.day ?? 1) };
     } catch {}
   }
-  return { hour: 0, minute: 5 }; // défaut : 00h05
+  return { hour: 0, minute: 5, day: 1 }; // défaut : 00h05 le 1er du mois
 }
 
 function getNextRunInfo(hour, minute) {
@@ -881,8 +881,10 @@ function scheduleMonthlyCron() {
     const cfg = getCronConfig(db);
     cronState.nextRun = getNextRunInfo(cfg.hour, cfg.minute);
 
-    if (localDay === 1 && localHour === cfg.hour && localMinute >= cfg.minute) {
-      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    if (localDay === (cfg.day ?? 1) && localHour === cfg.hour && localMinute >= cfg.minute) {
+      const localYear  = parseInt(localStr.slice(0, 4));
+      const localMonth = parseInt(localStr.slice(5, 7));
+      const prevMonth = new Date(localYear, localMonth - 2, 1); // mois précédent (0-indexed)
       const year  = prevMonth.getFullYear();
       const month = prevMonth.getMonth() + 1;
       const alreadyDone = db.prepare('SELECT id FROM audit_archives WHERE year=? AND month=?').get(year, month);
@@ -913,18 +915,36 @@ app.get('/api/cron/status', authMiddleware, requireRole('admin'), (req, res) => 
     last_run:   cronState.lastRun,
     last_result: cronState.lastResult,
     running:    true,
+    day: getCronConfig(getDb()).day,
   });
 });
 
 app.put('/api/cron/config', authMiddleware, requireRole('admin'), (req, res) => {
-  const { hour, minute } = req.body;
+  const { hour, minute, day } = req.body;
   const db = getDb();
   const ip = getClientIp(req);
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cron_archive_time', ?)")
-    .run(JSON.stringify({ hour: parseInt(hour ?? 0), minute: parseInt(minute ?? 5) }));
+    .run(JSON.stringify({ hour: parseInt(hour ?? 0), minute: parseInt(minute ?? 5), day: parseInt(day ?? 1) }));
   cronState.nextRun = getNextRunInfo(parseInt(hour ?? 0), parseInt(minute ?? 5));
+  // Propagation du jour dans le cronState
   audit(db, { userId: req.user.id, username: req.user.username, action: 'CRON_CONFIG_MODIFIÉ', category: 'admin', severity: 'info', detail: `Cron archivage: ${String(hour).padStart(2,'0')}h${String(minute).padStart(2,'0')}`, ip, success: 1 });
   res.json({ success: true, next_run: cronState.nextRun });
+});
+
+
+// ── AUDIT : ARCHIVER MAINTENANT (manuel / test) ────────────────────────────
+app.post('/api/audit/archive-now', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const localStr = nowLocal();
+  const localYear  = parseInt(localStr.slice(0, 4));
+  const localMonth = parseInt(localStr.slice(5, 7));
+  // Archiver le mois précédent par défaut
+  const targetDate = new Date(localYear, localMonth - 2, 1);
+  const year  = req.body.year  || targetDate.getFullYear();
+  const month = req.body.month || (targetDate.getMonth() + 1);
+  const result = archiveMonth(db, year, month, req.user.username);
+  if (result.skipped) return res.json({ skipped: true, message: `Archive ${year}/${String(month).padStart(2,'0')} déjà existante` });
+  res.json({ success: true, year, month, count: result.count });
 });
 
 // ── AUDIT : ENDPOINTS ─────────────────────────────────────────────────────────
@@ -944,6 +964,37 @@ app.get('/api/audit/archives/:id', authMiddleware, (req, res) => {
   let entries = [];
   try { entries = JSON.parse(row.data_json); } catch {}
   res.json({ ...row, entries });
+});
+
+
+// ── AUDIT : TÉLÉCHARGER ARCHIVE EN ZIP ────────────────────────────────────────
+app.get('/api/audit/archives/:id/download', authMiddleware, (req, res) => {
+  const { can } = require('./auth');
+  if (!can(req.user, 'audit_archive')) return res.status(403).json({ error: 'Accès refusé' });
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM audit_archives WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Archive introuvable' });
+  const zlib = require('zlib');
+  let entries = [];
+  try { entries = JSON.parse(row.data_json); } catch {}
+  // Générer un CSV des entrées
+  const header = 'date,niveau,categorie,action,utilisateur,ip,detail,resultat\n';
+  const rows = entries.map(e => [
+    e.created_at, e.severity, e.category, e.action,
+    e.username || '', e.ip || '', (e.detail || '').replace(/"/g, '""'), e.success ? 'OK' : 'ECHEC'
+  ].map(v => `"${v}"`).join(',')).join('\n');
+  const csv = header + rows;
+  // Compresser en gzip
+  const compressed = zlib.gzipSync(Buffer.from(csv, 'utf8'));
+  const filename = `audit_${row.year}-${String(row.month).padStart(2,'0')}.csv.gz`;
+  res.set({
+    'Content-Type': 'application/gzip',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Content-Length': compressed.length,
+  });
+  res.send(compressed);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'ARCHIVE_TÉLÉCHARGÉE',
+    category: 'admin', severity: 'info', detail: `${row.year}/${String(row.month).padStart(2,'0')} — ${row.entry_count} entrées`, ip: getClientIp(req), success: 1 });
 });
 
 // Déblocage manuel d'un compte verrouillé
