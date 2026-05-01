@@ -182,6 +182,7 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
         if (!payload.password) delete payload.password;
         delete payload.permissions;
         await api.updateUser(user.id, payload);
+        if (data.unlock) await api.unlockUser(user.id);
       }
       onSave();
     } catch (e) { setError(e.message); setLoading(false); }

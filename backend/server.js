@@ -220,7 +220,7 @@ app.get('/api/users/for-activity', authMiddleware, (req, res) => {
 });
 
 app.get('/api/users', authMiddleware, requireRole('admin'), (req, res) => {
-  const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at FROM users ORDER BY id').all();
+  const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at, locked_until, failed_attempts FROM users ORDER BY id').all();
   res.json(rows);
 });
 
@@ -746,6 +746,34 @@ app.get('/api/auth/reset-token-valid', (req, res) => {
   res.json({ valid: !!row });
 });
 
+// ── DÉCONNEXION (audit log) ───────────────────────────────────────────────────
+app.post('/api/auth/logout', authMiddleware, (req, res) => {
+  const { source } = req.body;
+  const db = getDb();
+  audit(db, {
+    userId: req.user.id, username: req.user.username,
+    action: source === 'timeout' ? 'DECONNEXION_TIMEOUT' : 'DECONNEXION',
+    category: 'auth', severity: 'info',
+    detail: source === 'timeout' ? 'Session expiree apres inactivite' : 'Deconnexion volontaire',
+    ip: getClientIp(req), success: 1,
+  });
+  res.json({ success: true });
+});
+
+// ── CONFIG BRUTE-FORCE ────────────────────────────────────────────────────────
+app.get('/api/security/brute-config', authMiddleware, requireRole('admin'), (req, res) => {
+  res.json(getBruteConfig(getDb()));
+});
+app.put('/api/security/brute-config', authMiddleware, requireRole('admin'), (req, res) => {
+  const { max, window: win } = req.body;
+  const db = getDb();
+  const safeMax = Math.max(1, parseInt(max) || 5);
+  const safeWin = Math.max(60, parseInt(win) || 600);
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brute_config', ?)").run(JSON.stringify({ max: safeMax, window: safeWin }));
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'BRUTE_CONFIG_MODIFIE', category: 'admin', severity: 'warn', detail: `Brute-force: ${safeMax} tentatives, verrouillage ${Math.round(safeWin/60)} min`, ip: getClientIp(req), success: 1 });
+  res.json({ success: true, max: safeMax, window: safeWin });
+});
+
 // ── ADMINISTRATION : AUDIT ────────────────────────────────────────────────────
 app.get('/api/audit', authMiddleware, requirePerm('audit_access'), (req, res) => {
   const { limit = 200, category, severity, success } = req.query;
@@ -1185,8 +1213,8 @@ app.post('/api/backups/upload', authMiddleware, requirePerm('backup_write'), (re
   const last    = db.prepare('SELECT MAX(version) as v FROM backups WHERE device_id = ?').get(device_id);
   const version = (last.v || 0) + 1;
   const r = db.prepare(
-    'INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc, triggered_by) VALUES (?,?,?,?,?,?,?)'
-  ).run(device_id, version, encrypt(content), content.length, 'ok', encrypt(note || 'Upload manuel'), 'upload');
+    'INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc, triggered_by, created_at) VALUES (?,?,?,?,?,?,?,?)'
+  ).run(device_id, version, encrypt(content), content.length, 'ok', encrypt(note || 'Upload manuel'), 'upload', nowLocal());
   audit(db, { userId: req.user.id, username: req.user.username, action: 'BACKUP_UPLOADE', category: 'backup', severity: 'info', detail: `${deviceName} v${version}`, ip, success: 1 });
   res.json({ id: r.lastInsertRowid, version, status: 'ok' });
 });
@@ -1250,8 +1278,8 @@ app.post('/api/backups/trigger', authMiddleware, requirePerm('backup_write'), as
   }
 
   const r = db.prepare(
-    'INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc, triggered_by) VALUES (?,?,?,?,?,?,?)'
-  ).run(device_id, version, encrypt(content), content.length, status, encrypt(note || ''), req.user.username);
+    'INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc, triggered_by, created_at) VALUES (?,?,?,?,?,?,?,?)'
+  ).run(device_id, version, encrypt(content), content.length, status, encrypt(note || ''), req.user.username, nowLocal());
 
   audit(db, { userId: req.user.id, username: req.user.username, action: 'BACKUP_DÉCLENCHÉ', category: 'backup', severity: status === 'ok' ? 'info' : 'warn', detail: `${deviceName} v${version} [${status}]${errorMsg ? ': ' + errorMsg : ''}`, ip, success: status === 'ok' ? 1 : 0 });
 

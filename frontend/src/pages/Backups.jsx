@@ -14,12 +14,12 @@ function statusBadge(s) {
 }
 function fmtDate(dt) {
   if (!dt) return '—';
-  if (dt.includes('T') || dt.endsWith('Z')) {
-    const d = new Date(dt);
-    const pad = n => String(n).padStart(2,'0');
-    return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
-  }
-  return dt.slice(0,10) + ' ' + dt.slice(11,16);
+  if (!dt.includes('T') && !dt.endsWith('Z')) return dt.slice(0, 16);
+  const d = new Date(dt);
+  if (isNaN(d.getTime())) return dt.slice(0, 16).replace('T', ' ');
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+         ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 function fmtSize(b) {
   if (!b) return '—';

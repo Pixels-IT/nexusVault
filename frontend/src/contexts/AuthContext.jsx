@@ -31,12 +31,13 @@ export function AuthProvider({ children }) {
     // Capturer le token AVANT de le supprimer (authMiddleware en a besoin)
     const token = localStorage.getItem('dp_token');
     if (token) {
-      // Envoyer l'audit de déconnexion avec le token encore valide
+      // keepalive:true garantit que la requête part même si la page se décharge
       fetch('/api/auth/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ source }),
-      }).catch(() => {}); // fire-and-forget
+        keepalive: true,
+      }).catch(() => {});
     }
     localStorage.removeItem('dp_token');
     localStorage.removeItem('dp_login_time');

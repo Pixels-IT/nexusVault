@@ -16,7 +16,7 @@ import Scripts from './pages/Scripts.jsx';
 import Personnalisation from './pages/Personnalisation.jsx';
 import './index.css';
 
-const APP_VERSION = '2026-05-01_b125.331';
+const APP_VERSION = '2026-05-01_b129.347';
 
 // ── Banner avertissement session ───────────────────────────────────────────────
 function SessionWarning({ seconds: initialSeconds, onDismiss, onExpire }) {
@@ -75,11 +75,17 @@ function Footer() {
 // ── Layout protégé ─────────────────────────────────────────────────────────────
 function ProtectedLayout({ children }) {
   const [warnSec, setWarnSec] = useState(null);
+  const { logout } = useAuth();
 
   useSessionTimeout({
     onWarn:   (s) => setWarnSec(s),
-    onExpire: ()  => setWarnSec(null),
+    onExpire: ()  => setWarnSec(null), // doExpire dans le hook appelle déjà logout('timeout')
   });
+
+  const handleSessionExpire = () => {
+    setWarnSec(null);
+    logout('timeout'); // countdown du SessionWarning arrive à 0
+  };
 
   return (
     <>
@@ -88,7 +94,7 @@ function ProtectedLayout({ children }) {
         {children}
       </div>
       <Footer />
-      <SessionWarning seconds={warnSec} onDismiss={() => setWarnSec(null)} onExpire={() => setWarnSec(null)} />
+      <SessionWarning seconds={warnSec} onDismiss={() => setWarnSec(null)} onExpire={handleSessionExpire} />
     </>
   );
 }
