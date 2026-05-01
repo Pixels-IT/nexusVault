@@ -881,18 +881,25 @@ function scheduleMonthlyCron() {
     const cfg = getCronConfig(db);
     cronState.nextRun = getNextRunInfo(cfg.hour, cfg.minute);
 
-    if (localDay === (cfg.day ?? 1) && localHour === cfg.hour && localMinute >= cfg.minute) {
+    const targetDay = cfg.day ?? 1;
+    logger.debug(`[CRON] tick ${localStr} — cfg jour=${targetDay} heure=${cfg.hour}h${String(cfg.minute).padStart(2,'0')}`);
+    if (localDay === targetDay && localHour === cfg.hour && localMinute >= cfg.minute) {
       const localYear  = parseInt(localStr.slice(0, 4));
       const localMonth = parseInt(localStr.slice(5, 7));
-      const prevMonth = new Date(localYear, localMonth - 2, 1); // mois précédent (0-indexed)
+      const prevMonth = new Date(localYear, localMonth - 2, 1);
       const year  = prevMonth.getFullYear();
       const month = prevMonth.getMonth() + 1;
+      logger.info(`[CRON] Condition remplie — archivage ${year}/${String(month).padStart(2,'0')}`);
       const alreadyDone = db.prepare('SELECT id FROM audit_archives WHERE year=? AND month=?').get(year, month);
-      if (!alreadyDone) {
+      if (alreadyDone) {
+        logger.info(`[CRON] Archive ${year}/${String(month).padStart(2,'0')} deja existante — skip`);
+      } else {
         const result = archiveMonth(db, year, month, 'cron');
-        if (!result.skipped) {
+        if (result.skipped) {
+          logger.warn(`[CRON] Aucune entree a archiver pour ${year}/${String(month).padStart(2,'0')}`);
+        } else {
           cronState.lastRun    = nowLocal();
-          cronState.lastResult = `Archive ${year}/${String(month).padStart(2,'0')} — ${result.count} entrées`;
+          cronState.lastResult = `Archive ${year}/${String(month).padStart(2,'0')} — ${result.count} entrees`;
           logger.info(`[CRON] ${cronState.lastResult}`);
         }
       }
