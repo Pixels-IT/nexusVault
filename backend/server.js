@@ -82,9 +82,6 @@ app.use((req, res, next) => {
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 // Brute force : 5 tentatives en 10 minutes → compte verrouillé
-let BRUTE_MAX   = 5;    // configurable via l'interface
-let BRUTE_WINDOW = 10 * 60; // 10 min en secondes (configurable)
-
 function getBruteConfig(db) {
   try {
     const row = db.prepare("SELECT value FROM settings WHERE key='brute_config'").get();
