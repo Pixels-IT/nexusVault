@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../api.js';
+import { useI18n } from '../contexts/I18nContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePerms } from '../hooks/usePerms.js';
 import { Modal, Alert, Spinner, ConfirmModal } from '../components/UI.jsx';
@@ -83,13 +84,15 @@ function HistoryModal({ entryId, onClose }) {
 }
 
 function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave }) {
+  const { t } = useI18n();
   const isEdit = !!entry;
   const now = new Date();
   const [year,      setYear]     = useState(entry?.year  || defaultYear  || now.getFullYear());
   const [month,     setMonth]    = useState(entry?.month || defaultMonth || now.getMonth() + 1);
-  const [tagCode,   setTagCode]  = useState(entry?.tag_code || tags[0]?.code || '');
+  const [tagCode,   setTagCode]  = useState(entry?.tag_code || '');  // pas de pré-sélection
   const [content,   setContent]  = useState(entry?.content || '');
   const [isPreview, setIsPreview] = useState(entry?.is_preview ? true : false);
+  const [tagError,  setTagError]  = useState(false);
   const [loading,   setLoading]  = useState(false);
   const [error,     setError]    = useState('');
   const [showHistory, setShowHistory] = useState(false);
@@ -103,7 +106,8 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
   };
 
   async function submit() {
-    setError('');
+    setError(''); setTagError(false);
+    if (!tagCode) { setTagError(true); return; }
     if (!content.trim()) return setError('Le contenu est requis');
     setLoading(true);
     try {
@@ -118,22 +122,24 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
   return (
     <>
     <Modal
-      title={isEdit ? 'Modifier la note' : 'Ajouter une note'}
+      title={<div style={{display:'flex',alignItems:'center',gap:10,width:'100%'}}>
+        <span>{isEdit ? 'Modifier la note' : 'Ajouter une note'}</span>
+        {isEdit && (
+          <button className="btn btn-sm" onClick={() => setShowHistory(true)}
+            style={{marginLeft:'auto',marginRight:6,display:'flex',alignItems:'center',gap:4,fontSize:11,
+              borderColor:'var(--ok)',color:'var(--ok)'}}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+            </svg>
+            {t('activity.history')}
+          </button>
+        )}
+      </div>}
       onClose={onClose}
       footer={
-        <div style={{ display:'flex', alignItems:'center', width:'100%' }}>
-          {/* Bouton Historique à gauche (visible seulement en édition) */}
-          {isEdit && (
-            <button className="btn" onClick={() => setShowHistory(true)}
-              style={{ marginRight:'auto', borderColor:'var(--ok)', color:'var(--ok)', display:'flex', alignItems:'center', gap:6 }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:13, height:13 }}>
-                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/>
-              </svg>
-              Historique
-            </button>
-          )}
-          <button className="btn" onClick={onClose}>Annuler</button>
-          <button className="btn btn-primary" onClick={submit} disabled={loading || !tagCode} style={{ marginLeft:8 }}>
+        <div style={{ display:'flex', justifyContent:'flex-end', gap:8, width:'100%' }}>
+          <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
+          <button className="btn btn-primary" onClick={submit} disabled={loading || !tagCode}>
             {loading ? 'Enregistrement…' : isEdit ? 'Modifier' : 'Ajouter'}
           </button>
         </div>
@@ -160,7 +166,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
         <label className="form-label">Tag</label>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:6 }}>
           {tags.map(t => (
-            <button key={t.code} onClick={() => setTagCode(t.code)} style={{
+            <button key={t.code} onClick={() => { setTagCode(t.code); setTagError(false); }} style={{
               display:'inline-flex', alignItems:'center', gap:6,
               padding:'5px 12px', borderRadius:4, cursor:'pointer',
               border: `2px solid ${tagCode===t.code ? t.color : 'var(--brd)'}`,
@@ -174,6 +180,12 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
             </button>
           ))}
         </div>
+        {tagError && (
+          <div className="alert alert-warn" style={{ marginTop: 8, fontSize: 12 }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            {t('activity.tag_required')}
+          </div>
+        )}
       </div>
       <div className="form-group">
         <label className="form-label">Description</label>
@@ -233,8 +245,14 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
             <span style={{ fontSize: 8, fontWeight: 800, color: '#f76707', fontFamily: 'var(--mono)', letterSpacing: '.5px' }}>PRV</span>
           </div>
           <TagBadge tag={tag} />
+          {entry.created_at && (
+            <span style={{ fontSize:11, color:'rgba(247,103,7,0.7)', whiteSpace:'nowrap' }}>
+              {(entry.created_at||'').slice(8,10)}/{(entry.created_at||'').slice(5,7)}
+            </span>
+          )}
+          <span style={{ color:'rgba(247,103,7,0.5)', fontSize:11 }}>—</span>
         </div>
-        <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, fontStyle: 'italic' }}>
+        <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, fontStyle: 'italic', alignSelf:'center' }}>
           {entry.content}
         </div>
         {canEdit && (
@@ -256,10 +274,16 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
     onMouseEnter={e => e.currentTarget.style.background = 'var(--surf2)'}
     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
     >
-      <div style={{ paddingTop: 2, flexShrink: 0 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, alignSelf:'center' }}>
         <TagBadge tag={tag} />
+        {entry.created_at && (
+          <span style={{ fontSize:11, color:'var(--muted)', whiteSpace:'nowrap' }}>
+            {(entry.created_at||'').slice(8,10)}/{(entry.created_at||'').slice(5,7)}
+          </span>
+        )}
+        <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>
       </div>
-      <div style={{ flex: 1, fontSize: 13, color: 'var(--txt)', lineHeight: 1.6 }}>
+      <div style={{ flex: 1, fontSize: 13, color: 'var(--txt)', lineHeight: 1.6, alignSelf:'center' }}>
         {entry.content}
       </div>
       {canEdit && (
@@ -274,6 +298,7 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
 
 // ── MOIS SECTION ──────────────────────────────────────────────────────────────
 function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
+    const { t } = useI18n();
   const [entries, setEntries]   = useState([]);
   const [loading, setLoading]   = useState(false);
   const [loaded, setLoaded]     = useState(false);
@@ -322,7 +347,9 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
       .finally(() => setLoading(false));
   }, [filterTag]); // eslint-disable-line
 
-  function handleAdd() { onAdd(year, month, () => { load(); }); }
+  function handleAdd() {
+    onAdd(year, month, () => { load(); });
+  }
 
   async function handleDelete() {
     await api.deleteEntry(delEntry.id);
@@ -374,7 +401,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
             className="btn btn-sm"
             style={{ marginLeft: 'auto', fontSize: 11 }}
             onClick={e => { e.stopPropagation(); handleAdd(); }}
-          >+ Note</button>
+          >{t('activity.add')}</button>
         )}
       </div>
 
@@ -412,6 +439,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
 
 // ── ANNÉE SECTION ─────────────────────────────────────────────────────────────
 function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle }) {
+    const { t } = useI18n();
   const [open, setOpen] = useState(isOpenDefault || false);
   const [yearCount, setYearCount] = useState(null);
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -479,6 +507,7 @@ function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onTo
 
 // ── EXPORT PDF ────────────────────────────────────────────────────────────────
 function ExportModal({ tags, userId, targetUserName, onClose }) {
+  const { t } = useI18n();
   const { user } = useAuth();
   const now = new Date();
   const [mode,      setMode]      = useState('month');
@@ -695,7 +724,7 @@ ${chartSection}
   return (
     <Modal title="Exporter en PDF" onClose={onClose}
       footer={<>
-        <button className="btn" onClick={onClose}>Annuler</button>
+        <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
         <button className="btn btn-primary" onClick={doExport} disabled={loading}>
           {loading ? 'Génération…' : 'Exporter PDF'}
         </button>
@@ -779,6 +808,7 @@ ${chartSection}
 // ── PAGE PRINCIPALE ───────────────────────────────────────────────────────────
 export default function Activity() {
   const { user } = useAuth();
+  const { t } = useI18n();
   const isAdmin = user?.role === 'admin';
   const { can } = usePerms();
   const [filterTag, setFilterTag]   = useState('');
@@ -811,13 +841,13 @@ export default function Activity() {
 
   useEffect(() => {
     api.activityTags().then(data => setTags(Array.isArray(data) ? data : [])).catch(() => {});
-    if (isAdmin || can('activity_read')) {
-      api.users()
+    if (canViewAll) {
+      api.usersForActivity()
         .then(data => setUsers(Array.isArray(data) ? data : []))
         .catch(() => {});
     }
     loadYears();
-  }, [isAdmin, loadYears]); // eslint-disable-line
+  }, [isAdmin, canViewAll, loadYears]); // eslint-disable-line
 
   function openAdd(year, month, onSaved) {
     setAddModal({ year, month, onSaved });
@@ -827,8 +857,8 @@ export default function Activity() {
     <main>
       <div className="page-header">
         <div>
-          <div className="page-title">Suivi d'activité</div>
-          <div className="page-sub">Journal chronologique des actions par période</div>
+          <div className="page-title">{t('activity.title')}</div>
+          <div className="page-sub">{t('activity.subtitle')}</div>
         </div>
         <div className="page-actions">
           {/* Sélecteur utilisateur (admin) */}
@@ -839,7 +869,7 @@ export default function Activity() {
               </svg>
               <select className="form-control" style={{ padding: '5px 8px', fontSize: 12, height: 30, minWidth: 150 }}
                 value={selectedUser || ''} onChange={e => setSelectedUser(e.target.value ? parseInt(e.target.value) : null)}>
-                <option value="">Mon suivi</option>
+                <option value="">{t('activity.my_activity')}</option>
                 {users.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
               </select>
             </div>
@@ -852,7 +882,7 @@ export default function Activity() {
               </svg>
               <select className="form-control" style={{ padding: '5px 8px', fontSize: 12, height: 30, minWidth: 120 }}
                 value={filterTag} onChange={e => setFilterTag(e.target.value)}>
-                <option value="">Tous les tags</option>
+                <option value="">{t('activity.all_tags')}</option>
                 {tags.map(t => <option key={t.code} value={t.code}>{t.code} — {t.label}</option>)}
               </select>
               {filterTag && (

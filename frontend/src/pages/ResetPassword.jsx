@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api.js';
+import { useI18n } from '../contexts/I18nContext.jsx';
 
-const APP_VERSION = '2026-04-23_b47.138';
+const APP_VERSION = '2026-04-24_b50.144';
 
 export default function ResetPassword() {
+  const { t } = useI18n();
   const [params]    = useSearchParams();
   const token       = params.get('token');
 
@@ -97,7 +99,7 @@ export default function ResetPassword() {
               </div>
               <button className="btn btn-primary" type="submit" disabled={loading}
                 style={{ width: '100%', marginTop: 14, justifyContent: 'center', padding: '10px 14px', fontSize: 13 }}>
-                {loading ? 'Envoi…' : 'Envoyer le lien'}
+                {loading ? t('auth.sending') : 'Envoyer le lien'}
               </button>
             </form>
             <div style={{ textAlign: 'center', marginTop: 14 }}>
@@ -172,7 +174,7 @@ export default function ResetPassword() {
               </div>
               <button className="btn btn-primary" type="submit" disabled={loading}
                 style={{ width: '100%', marginTop: 14, justifyContent: 'center', padding: '10px 14px', fontSize: 13 }}>
-                {loading ? 'Enregistrement…' : 'Changer le mot de passe'}
+                {loading ? t('auth.saving') : 'Changer le mot de passe'}
               </button>
             </form>
           </>

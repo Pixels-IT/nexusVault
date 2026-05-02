@@ -62,7 +62,10 @@ function TabDashboard() {
   return (
     <div style={{display:'flex', flexDirection:'column', gap:16}}>
       <div className="alert alert-warn" style={{fontSize:12, justifyContent:'center', textAlign:'center'}}>
-        La personnalisation des tuiles sera persistée dans votre profil au prochain déploiement.
+        <strong>BIENTÔT DISPONIBLE</strong> — Fonctionnalité en cours de développement.
+      </div>
+      <div className="alert alert-warn" style={{fontSize:12, justifyContent:'center', textAlign:'center', fontWeight:700, letterSpacing:'.5px'}}>
+        BIENTÔT DISPONIBLE — Les préférences seront sauvegardées dans votre profil.
       </div>
 
       {/* Section Backups */}
@@ -150,6 +153,12 @@ function TabActivity() {
 
   return (
     <div style={{display:'flex', flexDirection:'column', gap:16}}>
+      <div className="alert alert-warn" style={{fontSize:12, justifyContent:'center', textAlign:'center'}}>
+        <strong>BIENTÔT DISPONIBLE</strong> — Fonctionnalité en cours de développement.
+      </div>
+      <div className="alert alert-warn" style={{fontSize:12, justifyContent:'center', textAlign:'center', fontWeight:700, letterSpacing:'.5px'}}>
+        BIENTÔT DISPONIBLE — Ces préférences seront sauvegardées dans votre profil.
+      </div>
       <div className="card">
         <div className="card-header">
           <div className="card-title">

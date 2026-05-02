@@ -1,30 +1,13 @@
 import { useEffect, useState } from 'react';
 import { usePerms } from '../hooks/usePerms.js';
+import { useI18n } from '../contexts/I18nContext.jsx';
+import AccessDenied from '../components/AccessDenied.jsx';
 
 export default function Scripts() {
   const { can } = usePerms();
+  const { t } = useI18n();
 
-  if (!can('scripts_read')) {
-    return (
-      <main>
-        <div className="page-header">
-          <div>
-            <div className="page-title">Scripts</div>
-            <div className="page-sub">Gestion des scripts</div>
-          </div>
-        </div>
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--muted)' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-            style={{ width: 48, height: 48, margin: '0 auto 16px', display: 'block', opacity: .4 }}>
-            <rect x="3" y="11" width="18" height="11" rx="2"/>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>Accès non autorisé</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>Vous n'avez pas la permission de consulter les scripts.</div>
-        </div>
-      </main>
-    );
-  }
+  if (!can('automatisation_read')) return <AccessDenied page={t('automatisation.title')} />;
 
   return (
     <main>
@@ -50,8 +33,8 @@ export default function Scripts() {
           Module Scripts
         </div>
         <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', maxWidth: 400 }}>
-          Cette fonctionnalité est en cours de développement.<br/>
-          Elle permettra de gérer les fichiers de vos scripts dans un lieu sécurisé.
+          {t('automatisation.desc')}<br/>
+          
         </div>
         <span style={{
           fontSize: 11, fontWeight: 700, color: 'var(--warn)',

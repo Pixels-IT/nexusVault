@@ -47,10 +47,21 @@ function requirePerm(perm) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
     if (req.user.role === 'admin') return next();
-    let perms = {};
-    try { perms = JSON.parse(req.user.permissions || '{}'); } catch {}
-    if (!perms[perm]) return res.status(403).json({ error: 'Permission insuffisante' });
-    next();
+    // 1. Vérifier les permissions individuelles du JWT
+    let jwtPerms = {};
+    try { jwtPerms = JSON.parse(req.user.permissions || '{}'); } catch {}
+    if (jwtPerms[perm] === true) return next();
+    // 2. Vérifier les role_permissions sauvegardées en base (matrice)
+    try {
+      const db = getDb();
+      const row = db.prepare("SELECT value FROM settings WHERE key='role_permissions'").get();
+      if (row) {
+        const rolePerms = JSON.parse(row.value);
+        const permsForRole = rolePerms[req.user.role] || {};
+        if (permsForRole[perm] === true) return next();
+      }
+    } catch {}
+    return res.status(403).json({ error: 'Permission insuffisante' });
   };
 }
 

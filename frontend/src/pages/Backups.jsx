@@ -1,5 +1,7 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { usePerms } from '../hooks/usePerms.js';
+import { useI18n } from '../contexts/I18nContext.jsx';
+import AccessDenied from '../components/AccessDenied.jsx';
 import api from '../api.js';
 import { Modal, Alert, Spinner } from '../components/UI.jsx';
 
@@ -10,7 +12,15 @@ function statusBadge(s) {
   if (s === 'error') return <span className="badge badge-err"><span className="dot dot-err"/>Erreur</span>;
   return <span className="badge badge-muted">{s}</span>;
 }
-function fmtDate(dt) { return dt ? dt.slice(0,10) + ' ' + dt.slice(11,16) : '—'; }
+function fmtDate(dt) {
+  if (!dt) return '—';
+  if (!dt.includes('T') && !dt.endsWith('Z')) return dt.slice(0, 16);
+  const d = new Date(dt);
+  if (isNaN(d.getTime())) return dt.slice(0, 16).replace('T', ' ');
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+         ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
 function fmtSize(b) {
   if (!b) return '—';
   return b < 1024 ? `${b} o` : `${(b/1024).toFixed(1)} Ko`;
@@ -42,7 +52,7 @@ function ContentView({ backup, onClose }) {
             </div>
           </div>
           <div style={{ display:'flex', gap:8 }}>
-            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })} disabled={loading}>
+            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); api.logBackupCopy(backup.id).catch(()=>{}); })} disabled={loading}>
               {copied ? '✓ Copié' : 'Copier'}
             </button>
             <button className="btn btn-sm" onClick={onClose}>✕</button>
@@ -64,9 +74,8 @@ function ContentView({ backup, onClose }) {
             </div>
           )}
         </div>
-        <div className="modal-footer" style={{ flexShrink:0 }}>
+        <div className="modal-footer" style={{ flexShrink:0, justifyContent:'flex-end' }}>
           <span style={{ fontSize:11, color:'var(--muted)' }}>{content.split('\n').length} lignes · {fmtSize(backup.size_bytes)}</span>
-          <button className="btn" onClick={onClose}>Fermer</button>
         </div>
       </div>
     </div>
@@ -171,7 +180,6 @@ function DiffView({ idA, idB, onClose }) {
           </>}
         </div>
         <div className="modal-footer" style={{ flexShrink:0 }}>
-          <button className="btn" onClick={onClose}>Fermer</button>
         </div>
       </div>
     </div>
@@ -476,6 +484,7 @@ function getDistinctTypes(devices) {
 
 // ── DEVICE SECTION ────────────────────────────────────────────────────────────
 function DeviceSection({ device, compareMode, selected, onSelectCompare, onView, onDelete, defaultOpen }) {
+  const { t } = useI18n();
   const [open, setOpen]       = useState(false);
   const [backups, setBackups] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -514,13 +523,13 @@ function DeviceSection({ device, compareMode, selected, onSelectCompare, onView,
         <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
           {device.last_backup
             ? <>{statusBadge(device.last_backup.status)}<span className="cell-sub">v{device.last_backup.version} · {device.last_backup.created_at?.slice(0,10)}</span></>
-            : <span className="badge badge-muted">Aucun backup</span>}
+            : <span className="badge badge-muted">{t('backup.no_backup')}</span>}
         </div>
       </div>
       {open && (
         <div style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf)' }}>
           {loading ? <div style={{ padding:16, textAlign:'center' }}><Spinner /></div>
-          : backups.length === 0 ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>Aucun backup</div>
+          : backups.length === 0 ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>{t('backup.no_backup')}</div>
           : <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr style={{ background:'var(--surf2)' }}>
@@ -551,6 +560,7 @@ function DeviceSection({ device, compareMode, selected, onSelectCompare, onView,
 
 // ── SITE SECTION (draggable) ──────────────────────────────────────────────────
 function SiteSection({ site, devices, compareMode, selected, onSelectCompare, onView, onDelete, dragHandleProps, forceOpen }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
 
   // Dépliage automatique quand forceOpen change
@@ -587,7 +597,7 @@ function SiteSection({ site, devices, compareMode, selected, onSelectCompare, on
       {open && (
         <div>
           {siteDevices.length === 0
-            ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>Aucun équipement</div>
+            ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>{t('backup.no_devices')}</div>
             : siteDevices.map(d => (
                 <DeviceSection key={d.id} device={d}
                   compareMode={compareMode} selected={selected}
@@ -604,6 +614,8 @@ function SiteSection({ site, devices, compareMode, selected, onSelectCompare, on
 const PREF_KEY = 'site_order';
 
 export default function Backups() {
+  const { t } = useI18n();
+  const [countries, setCountries]   = useState([]);
   const [sites, setSites]           = useState([]);
   const [devices, setDevices]       = useState([]);
   const [orderedSites, setOrderedSites] = useState([]); // sites dans l'ordre de l'utilisateur
@@ -617,13 +629,16 @@ export default function Backups() {
   const { can } = usePerms();
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [filterType, setFilterType]       = useState(''); // filtre par type d'équipement
+  const [collapsedCountries, setCollapsedCountries] = useState(new Set());
+  const toggleCountry = cid => setCollapsedCountries(prev => { const n = new Set(prev); n.has(cid) ? n.delete(cid) : n.add(cid); return n; });
   const dragItemRef  = useRef(null);
   const dragOverRef  = useRef(null);
 
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([api.sites(), api.devices(), api.getPrefs()])
-      .then(([s, d, prefs]) => {
+    Promise.all([api.sites(), api.devices(), api.getPrefs(), api.getCountries(), api.getFeatureFlags()])
+      .then(([s, d, prefs, cs, ff]) => {
+        setCountries(ff.countries ? cs : []);
         setSites(s);
         setDevices(d);
         // Appliquer l'ordre sauvegardé, sinon tri alphabétique
@@ -664,7 +679,9 @@ export default function Backups() {
     setSelected(s => s.includes(id) ? s.filter(x => x !== id) : s.length < 2 ? [...s, id] : [s[1], id]);
   }
 
-  async function handleDelete(backup) { setConfirmDelete(backup); }
+  async function handleDelete(backup) {
+    setConfirmDelete(backup);
+  }
   async function confirmDeleteBackup() {
     if (!confirmDelete) return;
     try { await api.deleteBackup(confirmDelete.id); setConfirmDelete(null); load(); }
@@ -680,6 +697,7 @@ export default function Backups() {
     : devices;
   const filteredOrphan = orphanDevices.filter(d => !filterType || (d.device_type || '') === filterType);
 
+  if (!can('backup_read')) return <AccessDenied page="Backups" />;
   return (
     <main>
       <div className="page-header">
@@ -691,7 +709,7 @@ export default function Backups() {
           {compareMode ? (
             <>
               <span style={{ fontSize:12, color:'var(--muted)', alignSelf:'center' }}>{selected.length}/2 sélectionné{selected.length>1?'s':''}</span>
-              <button className="btn btn-primary" disabled={selected.length!==2} onClick={() => setDiff({ a:selected[0], b:selected[1] })}>Comparer</button>
+              <button className="btn btn-primary" disabled={selected.length!==2} onClick={() => setDiff({ a:selected[0], b:selected[1] })}>{t('backup.compare')}</button>
               <button className="btn" onClick={() => { setCompareMode(false); setSelected([]); }}>Annuler</button>
             </>
           ) : (
@@ -769,27 +787,83 @@ export default function Backups() {
         </div>
       ) : (
         <>
-          {orderedSites.map((site, index) => (
-            <div key={site.id}
-              draggable
-              onDragStart={() => onDragStart(index)}
-              onDragEnter={() => onDragEnter(index)}
-              onDragEnd={onDragEnd}
-              onDragOver={e => e.preventDefault()}
-              style={{ opacity: dragItemRef.current === index ? .5 : 1, transition:'opacity .15s' }}>
-              <SiteSection
-                site={site} devices={filteredDevices}
-                forceOpen={filterType ? filteredDevices.some(d => d.site_id === site.id) : undefined}
-                compareMode={compareMode} selected={selected}
-                onSelectCompare={toggleSelect} onView={setViewBackup}
-                onDelete={handleDelete}
-                dragHandleProps={{
-                  onMouseDown: e => e.stopPropagation(),
-                  draggable: false,
-                }}
-              />
-            </div>
-          ))}
+          {countries.length > 0 ? (
+            <>
+              {[...countries].sort((a,b)=>a.name.localeCompare(b.name)).map(country => {
+                const cSites = orderedSites.filter(s => s.country_id === country.id);
+                if (cSites.length === 0) return null;
+                const collapsed = collapsedCountries.has(country.id);
+                const devCnt = cSites.reduce((n,s) => n + devices.filter(d=>d.site_id===s.id).length, 0);
+                return (
+                  <div key={country.id} style={{marginBottom:8}}>
+                    <div onClick={() => toggleCountry(country.id)}
+                      style={{display:'flex',alignItems:'center',gap:10,padding:'9px 16px',
+                        background:'var(--acc)',color:'white',borderRadius:'var(--r)',
+                        cursor:'pointer',userSelect:'none',fontSize:13,fontWeight:700,
+                        boxShadow:'0 2px 8px rgba(0,0,0,.15)',marginBottom:collapsed?0:6}}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15,flexShrink:0}}>
+                        <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                      </svg>
+                      <span style={{flex:1}}>{country.name}</span>
+                      <span style={{fontSize:11,fontWeight:400,opacity:.85}}>{cSites.length} site{cSites.length!==1?'s':''} &middot; {devCnt} equip.</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                        style={{width:14,height:14,flexShrink:0,transition:'transform .2s',transform:collapsed?'rotate(-90deg)':'rotate(0deg)'}}>
+                        <polyline points="6 9 12 15 18 9"/>
+                      </svg>
+                    </div>
+                    {!collapsed && (
+                      <div style={{paddingLeft:6}}>
+                        {cSites.map(site => {
+                          const gi = orderedSites.indexOf(site);
+                          return (
+                            <div key={site.id} draggable
+                              onDragStart={() => onDragStart(gi)} onDragEnter={() => onDragEnter(gi)}
+                              onDragEnd={onDragEnd} onDragOver={e=>e.preventDefault()}
+                              style={{opacity: dragItemRef.current===gi && dragOverRef.current!==null ? 0.4 : 1}}>
+                              <SiteSection site={site} devices={devices.filter(d=>d.site_id===site.id)}
+                                compareMode={compareMode} selected={selected}
+                                onSelectCompare={toggleSelect} onView={setViewBackup} onDelete={handleDelete}
+                                forceOpen={!!filterType}
+                                dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}}/>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {orderedSites.filter(s=>!s.country_id).map((site,index) => (
+                <div key={site.id} draggable
+                  onDragStart={() => onDragStart(orderedSites.indexOf(site))}
+                  onDragEnter={() => onDragEnter(orderedSites.indexOf(site))}
+                  onDragEnd={onDragEnd} onDragOver={e=>e.preventDefault()}
+                  style={{opacity: dragItemRef.current===orderedSites.indexOf(site)&&dragOverRef.current!==null?0.4:1}}>
+                  <SiteSection site={site} devices={devices.filter(d=>d.site_id===site.id)}
+                    compareMode={compareMode} selected={selected}
+                    onSelectCompare={toggleSelect} onView={setViewBackup} onDelete={handleDelete}
+                    forceOpen={!!filterType}
+                    dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}}/>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              {orderedSites.map((site, index) => (
+                <div key={site.id} draggable
+                  onDragStart={() => onDragStart(index)} onDragEnter={() => onDragEnter(index)}
+                  onDragEnd={onDragEnd} onDragOver={e=>e.preventDefault()}
+                  style={{opacity: dragItemRef.current===index&&dragOverRef.current!==null?0.4:1}}>
+                  <SiteSection site={site} devices={devices.filter(d=>d.site_id===site.id)}
+                    compareMode={compareMode} selected={selected}
+                    onSelectCompare={toggleSelect} onView={setViewBackup} onDelete={handleDelete}
+                    forceOpen={!!filterType}
+                    dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}}/>
+                </div>
+              ))}
+            </>
+          )}
           {orphanDevices.length > 0 && (
             <SiteSection site={{ id:-1, name:'Sans site', location:'' }} devices={filteredOrphan}
               compareMode={compareMode} selected={selected}
@@ -805,7 +879,7 @@ export default function Backups() {
       {showUpload && <UploadModal devices={devices} onClose={() => setShowUpload(false)} onDone={() => { setShowUpload(false); load(); }} />}
       {confirmDelete && (
         <Modal title="Supprimer ce backup" onClose={() => setConfirmDelete(null)}
-          footer={<><button className="btn" onClick={() => setConfirmDelete(null)}>Annuler</button><button className="btn btn-danger" onClick={confirmDeleteBackup}>Supprimer</button></>}>
+          footer={<><button className="btn" onClick={() => setConfirmDelete(null)}>Annuler</button><button className="btn btn-danger" onClick={confirmDeleteBackup}>{t('backup.delete')}</button></>}>
           <p style={{ fontSize:13 }}>Supprimer le backup <strong>v{confirmDelete.version}</strong> de <strong>{confirmDelete.device_name}</strong> ?</p>
           <p style={{ fontSize:12, color:'var(--muted)', marginTop:8 }}>Cette action est irréversible. Les backups épinglés ne peuvent pas être supprimés.</p>
         </Modal>
