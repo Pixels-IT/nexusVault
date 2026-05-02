@@ -9,3 +9,4 @@ frontend/build/
 
 # Script de déploiement local (peut contenir des secrets)
 deploy-dev.sh
+deploy-main.sh
