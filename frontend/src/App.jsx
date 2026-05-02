@@ -16,7 +16,7 @@ import Scripts from './pages/Scripts.jsx';
 import Personnalisation from './pages/Personnalisation.jsx';
 import './index.css';
 
-const APP_VERSION = '2026-05-02_b139.377';
+const APP_VERSION = '2026-05-02_b141.379';
 
 // ── Banner avertissement session ───────────────────────────────────────────────
 function SessionWarning({ seconds: initialSeconds, onDismiss, onExpire }) {
