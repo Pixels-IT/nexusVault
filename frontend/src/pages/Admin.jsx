@@ -164,7 +164,8 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
   async function submit() {
     setError('');
     if (!data.username.trim()) return setError('Identifiant requis');
-    if (!data.email.trim())    return setError('Adresse e-mail obligatoire');
+    if (!data.email.trim()) return setError('Adresse e-mail obligatoire');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email.trim())) return setError('Email invalide (ex: nom@domaine.com)');
     if (!isNew && data.password && data.password.length < 14)
       return setError('Mot de passe : 14 caractères minimum');
     setLoading(true);
@@ -1373,7 +1374,6 @@ function SecurityCronTab() {
   const { t } = useI18n();
   const [cronHour,   setCronHour]   = useState('0');
   const [cronMinute, setCronMinute] = useState('5');
-  const [cronDay,    setCronDay]    = useState('1');
   const [cronStatus, setCronStatus] = useState(null);
   const [cronSaving, setCronSaving] = useState(false);
   const [cronMsg,    setCronMsg]    = useState('');
@@ -1383,7 +1383,6 @@ function SecurityCronTab() {
         setCronStatus(s);
         setCronHour(String(s.hour).padStart(2,'0'));
         setCronMinute(String(s.minute).padStart(2,'0'));
-        setCronDay(String(s.day ?? 1));
       })
       .catch(() => {});
   }, []);
@@ -1391,9 +1390,9 @@ function SecurityCronTab() {
   async function saveCron(e) {
     e.preventDefault(); setCronSaving(true); setCronMsg('');
     try {
-      const r = await api.cronConfig({ hour: parseInt(cronHour), minute: parseInt(cronMinute), day: parseInt(cronDay) });
+      const r = await api.cronConfig({ hour: parseInt(cronHour), minute: parseInt(cronMinute), day: 1 });
       setCronMsg('Configuration enregistrée.');
-      setCronStatus(prev => ({ ...prev, hour: parseInt(cronHour), minute: parseInt(cronMinute), day: parseInt(cronDay), next_run: r.next_run }));
+      setCronStatus(prev => ({ ...prev, hour: parseInt(cronHour), minute: parseInt(cronMinute), day: 1, next_run: r.next_run }));
     } catch (e) { setCronMsg('Erreur : ' + e.message); }
     finally { setCronSaving(false); }
   }
@@ -1427,17 +1426,7 @@ function SecurityCronTab() {
             <div>
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Configuration</div>
               <form onSubmit={saveCron} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ display:'flex', alignItems:'center', gap:6 }}>
-                    Jour du mois
-                    <span style={{ fontSize:10, background:'var(--warn-s)', color:'var(--warn)', padding:'1px 6px', borderRadius:10, fontWeight:600 }}>TEST</span>
-                  </label>
-                  <select className="form-control" value={cronDay} onChange={e => setCronDay(e.target.value)}>
-                    {Array.from({ length: 28 }, (_, i) => i + 1).map(d => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
-                </div>
+
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">Heure</label>
                   <select className="form-control" value={cronHour} onChange={e => setCronHour(e.target.value)}>
@@ -1479,10 +1468,6 @@ function SecurityCronTab() {
                       <span style={{ color: 'var(--ok)', fontWeight: 600 }}>{cronStatus.last_result}</span>
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span style={{ color: 'var(--muted)', minWidth: 100 }}>Planifié :</span>
-                    <span>Le 1er du mois à {String(cronStatus.hour).padStart(2,'0')}h{String(cronStatus.minute).padStart(2,'0')}</span>
-                  </div>
                 </div>
               ) : (
                 <div style={{ color: 'var(--muted)', fontSize: 12 }}>Chargement…</div>

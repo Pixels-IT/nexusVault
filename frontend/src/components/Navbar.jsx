@@ -167,12 +167,12 @@ export default function Navbar() {
 
         {/* DROITE — toggle thème + menu utilisateur */}
         <div className="nav-right">
+          <LangSwitcher />
           <button
             className={`theme-toggle ${dark ? 'on' : ''}`}
             onClick={toggle}
             title={dark ? 'Mode clair' : 'Mode sombre'}
           />
-          <LangSwitcher />
           <UserMenu user={user} logout={logout} />
         </div>
 

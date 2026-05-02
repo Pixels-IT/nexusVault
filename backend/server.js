@@ -765,6 +765,19 @@ app.post('/api/auth/logout', authMiddleware, (req, res) => {
 });
 
 // ── CONFIG BRUTE-FORCE ────────────────────────────────────────────────────────
+
+// FEATURE FLAGS
+app.get('/api/settings/feature-flags', authMiddleware, (req, res) => {
+  const db = getDb(); const row = db.prepare("SELECT value FROM settings WHERE key='feature_flags'").get();
+  res.json(row ? JSON.parse(row.value) : {});
+});
+app.put('/api/settings/feature-flags', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb(); const row = db.prepare("SELECT value FROM settings WHERE key='feature_flags'").get();
+  const updated = Object.assign(row ? JSON.parse(row.value) : {}, req.body);
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('feature_flags', ?)").run(JSON.stringify(updated));
+  res.json({ success: true, flags: updated });
+});
+
 app.get('/api/security/brute-config', authMiddleware, requireRole('admin'), (req, res) => {
   res.json(getBruteConfig(getDb()));
 });
@@ -904,16 +917,22 @@ function getCronConfig(db) {
   return { hour: 0, minute: 5, day: 1 }; // défaut : 00h05 le 1er du mois
 }
 
-function getNextRunInfo(hour, minute) {
-  // Calculer le prochain 1er du mois en heure locale (via nowLocal)
+function getNextRunInfo(hour, minute, day) {
+  const targetDay = day ?? 1;
   const localStr = nowLocal();
   const year  = parseInt(localStr.slice(0, 4));
   const month = parseInt(localStr.slice(5, 7));
-  const nextMonth = month === 12 ? 1 : month + 1;
-  const nextYear  = month === 12 ? year + 1 : year;
+  const curDay  = parseInt(localStr.slice(8, 10));
+  const curHour = parseInt(localStr.slice(11, 13));
+  const curMin  = parseInt(localStr.slice(14, 16));
   const hh = String(hour).padStart(2, '0');
   const mm = String(minute).padStart(2, '0');
-  return `${nextYear}-${String(nextMonth).padStart(2,'0')}-01 ${hh}:${mm}`;
+  const dd = String(targetDay).padStart(2, '0');
+  const stillThisMonth = curDay < targetDay || (curDay === targetDay && (curHour < hour || (curHour === hour && curMin < minute)));
+  if (stillThisMonth) return `${year}-${String(month).padStart(2,'0')}-${dd} ${hh}:${mm}`;
+  const nm = month === 12 ? 1 : month + 1;
+  const ny = month === 12 ? year + 1 : year;
+  return `${ny}-${String(nm).padStart(2,'0')}-${dd} ${hh}:${mm}`;
 }
 
 function scheduleMonthlyCron() {
@@ -925,7 +944,7 @@ function scheduleMonthlyCron() {
     const localMinute  = parseInt(localStr.slice(14, 16));
     const db = getDb();
     const cfg = getCronConfig(db);
-    cronState.nextRun = getNextRunInfo(cfg.hour, cfg.minute);
+    cronState.nextRun = getNextRunInfo(cfg.hour, cfg.minute, cfg.day);
 
     const targetDay = cfg.day ?? 1;
     logger.debug(`[CRON] tick ${localStr} — cfg jour=${targetDay} heure=${cfg.hour}h${String(cfg.minute).padStart(2,'0')}`);
@@ -984,7 +1003,7 @@ app.put('/api/cron/config', authMiddleware, requireRole('admin'), (req, res) => 
   const ip = getClientIp(req);
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cron_archive_time', ?)")
     .run(JSON.stringify({ hour: parseInt(hour ?? 0), minute: parseInt(minute ?? 5), day: parseInt(day ?? 1) }));
-  cronState.nextRun = getNextRunInfo(parseInt(hour ?? 0), parseInt(minute ?? 5));
+  cronState.nextRun = getNextRunInfo(parseInt(hour ?? 0), parseInt(minute ?? 5), parseInt(day ?? 1));
   // Propagation du jour dans le cronState
   audit(db, { userId: req.user.id, username: req.user.username, action: 'CRON_CONFIG_MODIFIÉ', category: 'admin', severity: 'info', detail: `Cron archivage: ${String(hour).padStart(2,'0')}h${String(minute).padStart(2,'0')}`, ip, success: 1 });
   res.json({ success: true, next_run: cronState.nextRun });
@@ -1066,13 +1085,57 @@ app.post('/api/users/:id/unlock', authMiddleware, requireRole('admin'), (req, re
 });
 
 // ── SITES ─────────────────────────────────────────────────────────────────────
+
+// PAYS CRUD
+app.get('/api/countries', authMiddleware, (req, res) => {
+  const rows = getDb().prepare('SELECT * FROM countries ORDER BY sort_order ASC, name ASC').all();
+  res.json(rows);
+});
+app.post('/api/countries', authMiddleware, requirePerm('config_write'), (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Nom requis' });
+  const db = getDb();
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) as m FROM countries').get().m;
+  const r = db.prepare('INSERT INTO countries (name, sort_order) VALUES (?, ?)').run(name.trim(), maxOrder + 1);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'PAYS_AJOUTE', category: 'config', severity: 'info', detail: name.trim(), ip: getClientIp(req), success: 1 });
+  res.json({ id: r.lastInsertRowid, name: name.trim(), sort_order: maxOrder + 1 });
+});
+app.put('/api/countries/:id', authMiddleware, requirePerm('config_write'), (req, res) => {
+  const { name, sort_order } = req.body;
+  const db = getDb();
+  if (name !== undefined) db.prepare('UPDATE countries SET name=? WHERE id=?').run(name.trim(), req.params.id);
+  if (sort_order !== undefined) db.prepare('UPDATE countries SET sort_order=? WHERE id=?').run(sort_order, req.params.id);
+  res.json({ success: true });
+});
+app.delete('/api/countries/:id', authMiddleware, requirePerm('config_write'), (req, res) => {
+  const db = getDb();
+  const country = db.prepare('SELECT name FROM countries WHERE id=?').get(req.params.id);
+  if (!country) return res.status(404).json({ error: 'Introuvable' });
+  db.prepare('UPDATE sites SET country_id=NULL WHERE country_id=?').run(req.params.id);
+  db.prepare('DELETE FROM countries WHERE id=?').run(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'PAYS_SUPPRIME', category: 'config', severity: 'warn', detail: country.name, ip: getClientIp(req), success: 1 });
+  res.json({ success: true });
+});
+app.put('/api/countries/reorder', authMiddleware, requirePerm('config_write'), (req, res) => {
+  const { order } = req.body;
+  const db = getDb();
+  const stmt = db.prepare('UPDATE countries SET sort_order=? WHERE id=?');
+  order.forEach((id, idx) => stmt.run(idx, id));
+  res.json({ success: true });
+});
+app.patch('/api/sites/:id/country', authMiddleware, requirePerm('config_write'), (req, res) => {
+  const { country_id } = req.body;
+  getDb().prepare('UPDATE sites SET country_id=? WHERE id=?').run(country_id || null, req.params.id);
+  res.json({ success: true });
+});
+
 app.get('/api/sites', authMiddleware, (req, res) => {
   const rows = getDb().prepare('SELECT * FROM sites ORDER BY rowid DESC').all();
   const db = getDb();
   res.json(rows.map(r => ({
     id: r.id, name: decrypt(r.name_enc), location: decrypt(r.location_enc),
     contact: decrypt(r.contact_enc), description: decrypt(r.description_enc),
-    created_at: r.created_at,
+    created_at: r.created_at, country_id: r.country_id || null,
     device_count: db.prepare('SELECT COUNT(*) as c FROM devices WHERE site_id = ?').get(r.id).c
   })));
 });

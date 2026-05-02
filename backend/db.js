@@ -17,6 +17,7 @@ function getDb() {
     db.pragma('foreign_keys = ON');
     initSchema();
   }
+  try { db.exec("ALTER TABLE sites ADD COLUMN country_id INTEGER REFERENCES countries(id) ON DELETE SET NULL"); } catch {}
   return db;
 }
 
@@ -59,7 +60,14 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
-    CREATE TABLE IF NOT EXISTS sites (
+    CREATE TABLE IF NOT EXISTS countries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+        CREATE TABLE IF NOT EXISTS sites (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name_enc TEXT NOT NULL,
       location_enc TEXT,

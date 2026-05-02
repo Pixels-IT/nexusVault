@@ -6,8 +6,8 @@ import { usePerms } from '../hooks/usePerms.js';
 
 // ── SITES ────────────────────────────────────────────────────────────────────
 
-function SiteModal({ site, onClose, onSave }) {
-  const [data, setData] = useState(site || { name: '', location: '', contact: '', description: '' });
+function SiteModal({ site, onClose, onSave, countries = [] }) {
+  const [data, setData] = useState({ name: '', location: '', contact: '', description: '', country_id: null, ...(site||{}) });
   const [error, setError] = useState('');
   const set = k => e => setData(d => ({ ...d, [k]: e.target.value }));
 
@@ -15,8 +15,8 @@ function SiteModal({ site, onClose, onSave }) {
     setError('');
     if (!data.name) return setError('Le nom est requis');
     try {
-      if (site) await api.updateSite(site.id, data);
-      else await api.createSite(data);
+      if (site) { await api.updateSite(site.id,data); await api.setSiteCountry(site.id,data.country_id||null).catch(()=>{}); }
+      else { const cr=await api.createSite(data); if(cr&&cr.id&&data.country_id) await api.setSiteCountry(cr.id,data.country_id).catch(()=>{}); }
       onSave();
     } catch (e) { setError(e.message); }
   }
@@ -29,11 +29,12 @@ function SiteModal({ site, onClose, onSave }) {
       <div className="form-group"><label className="form-label">Localisation</label><input className="form-control" value={data.location} onChange={set('location')} placeholder="Ville, Pays" /></div>
       <div className="form-group"><label className="form-label">Contact IT</label><input className="form-control" value={data.contact} onChange={set('contact')} placeholder="it@example.com" /></div>
       <div className="form-group"><label className="form-label">Description</label><input className="form-control" value={data.description} onChange={set('description')} placeholder="Optionnel" /></div>
+      {countries.length>0&&<div className="form-group"><label className="form-label">Pays</label><select className="form-control" value={data.country_id||''} onChange={e=>setData(d=>({...d,country_id:e.target.value?parseInt(e.target.value):null}))}><option value="">— Aucun —</option>{countries.map(ct=><option key={ct.id} value={ct.id}>{ct.name}</option>)}</select></div>}
     </Modal>
   );
 }
 
-function SitesTab() {
+function SitesTab({ countries = [] }) {
   const { can } = usePerms();
   const [sites, setSites] = useState([]);
   const [modal, setModal] = useState(null);
@@ -72,7 +73,7 @@ function SitesTab() {
           {sites.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucun site — ajoutez-en un</td></tr>}
         </tbody>
       </table>
-      {modal !== null && <SiteModal site={modal.id ? modal : null} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
+      {modal !== null && <SiteModal site={modal.id ? modal : null} countries={countries} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
       {confirm && <ConfirmModal message={`Supprimer le site "${confirm.name}" ?`} onConfirm={async () => { await api.deleteSite(confirm.id); setConfirm(null); load(); }} onCancel={() => setConfirm(null)} />}
     </div>
   );
@@ -310,70 +311,130 @@ function DevicesTab() {
   );
 }
 
-// ── CONFIG PAGE ───────────────────────────────────────────────────────────────
+
+// OPTIONS
+function OptionsTab({ onFlagsChange }) {
+  const { can } = usePerms();
+  const cw = can('config_write');
+  const [flags, setFlags] = useState(null);
+  const [msg, setMsg] = useState('');
+  const [countries, setCountries] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [drag, setDrag] = useState(null);
+  const [over, setOver] = useState(null);
+  const [sites, setSites] = useState([]);
+  const loadC = () => { api.getCountries().then(setCountries).catch(()=>{}); api.sites().then(setSites).catch(()=>{}); };
+  useEffect(() => { api.getFeatureFlags().then(f=>{setFlags(f);if(f.countries)loadC();}).catch(()=>setFlags({})); }, []);
+  const toggle = async key => {
+    const nf={...flags,[key]:!flags[key]}; setFlags(nf);
+    await api.setFeatureFlags(nf).catch(()=>{});
+    setMsg('Sauvegarde.'); setTimeout(()=>setMsg(''),2000);
+    if(nf.countries)loadC(); onFlagsChange&&onFlagsChange(nf);
+  };
+  const addC = async()=>{if(!newName.trim())return;await api.addCountry(newName.trim()).catch(()=>{});setNewName('');setAdding(false);loadC();};
+  const saveC = async()=>{if(!editing)return;await api.updateCountry(editing.id,{name:editing.name}).catch(()=>{});setEditing(null);loadC();};
+  const delC = async id=>{if(!window.confirm('Supprimer ce pays ?'))return;await api.deleteCountry(id).catch(()=>{});loadC();};
+  const dropC = async tid=>{ if(!drag||drag===tid){setDrag(null);setOver(null);return;} const list=[...countries];const fi=list.findIndex(x=>x.id===drag);const ti=list.findIndex(x=>x.id===tid);const [it]=list.splice(fi,1);list.splice(ti,0,it);setCountries(list);setDrag(null);setOver(null);await api.reorderCountries(list.map(x=>x.id)).catch(()=>{});loadC(); };
+  const cnt=cid=>sites.filter(s=>s.country_id===cid).length;
+  const una=sites.filter(s=>!s.country_id);
+  if(!flags)return <div style={{padding:24,color:'var(--muted)'}}>Chargement...</div>;
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:12}}>
+      <div className="card">
+        <div className="card-header"><div className="card-title">Options</div></div>
+        <div style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:10}}>
+          <label style={{display:'flex',alignItems:'flex-start',gap:12,cursor:'pointer',padding:'12px 14px',borderRadius:'var(--r)',background:flags.countries?'var(--acc-s)':'var(--surf2)',border:`1px solid ${flags.countries?'var(--acc)':'var(--brd)'}`,transition:'all .15s'}}>
+            <input type="checkbox" checked={!!flags.countries} onChange={()=>toggle('countries')} style={{marginTop:2,accentColor:'var(--acc)',width:16,height:16}}/>
+            <div><div style={{fontWeight:600,fontSize:13}}>Activer l'option Pays</div><div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>Regroupe les sites par pays dans Appareils et Backups.</div></div>
+          </label>
+          {msg&&<div className="alert alert-ok" style={{fontSize:12}}>{msg}</div>}
+        </div>
+      </div>
+      {flags.countries&&(
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Pays</div>
+            {cw&&!adding&&<button className="btn btn-primary" onClick={()=>setAdding(true)} style={{marginLeft:'auto',fontSize:12}}>+ Ajouter un pays</button>}
+          </div>
+          <div style={{padding:'10px 18px 16px'}}>
+            <p style={{fontSize:12,color:'var(--muted)',marginBottom:10}}>Glissez pour reordonner.</p>
+            {adding&&<div style={{display:'flex',gap:8,marginBottom:12,alignItems:'center'}}><input className="form-control" autoFocus value={newName} placeholder="Nom du pays" onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addC();if(e.key==='Escape'){setAdding(false);setNewName('');}}} style={{maxWidth:280}}/><button className="btn btn-primary" onClick={addC}>Ajouter</button><button className="btn" onClick={()=>{setAdding(false);setNewName('');}}>Annuler</button></div>}
+            {countries.length===0&&!adding?<div style={{textAlign:'center',color:'var(--muted)',fontSize:13,padding:'16px 0'}}>Aucun pays configure.</div>:
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              {countries.map(ct=>(
+                <div key={ct.id} draggable={cw} onDragStart={()=>setDrag(ct.id)} onDragOver={e=>{e.preventDefault();setOver(ct.id);}} onDrop={()=>dropC(ct.id)} onDragEnd={()=>{setDrag(null);setOver(null);}}
+                  style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',borderRadius:'var(--r)',cursor:cw?'grab':'default',background:over===ct.id?'var(--acc-s)':'var(--surf2)',border:`1px solid ${over===ct.id?'var(--acc)':'var(--brd)'}`}}>
+                  {cw&&<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13,color:'var(--muted)'}}><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/></svg>}
+                  {editing&&editing.id===ct.id?<input className="form-control" autoFocus value={editing.name} onChange={e=>setEditing(ed=>({...ed,name:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')saveC();if(e.key==='Escape')setEditing(null);}} style={{flex:1,maxWidth:250,height:28,padding:'3px 8px'}}/>:<span style={{flex:1,fontWeight:600,fontSize:13}}>{ct.name}</span>}
+                  <span style={{fontSize:11,color:'var(--muted)'}}>{cnt(ct.id)} site{cnt(ct.id)!==1?'s':''}</span>
+                  {cw&&<div style={{display:'flex',gap:4}}>{editing&&editing.id===ct.id?<><button className="btn btn-sm btn-primary" onClick={saveC}>&#10003;</button><button className="btn btn-sm" onClick={()=>setEditing(null)}>&#10005;</button></>:<><button className="btn btn-sm" onClick={()=>setEditing({id:ct.id,name:ct.name})}>Modifier</button><button className="btn btn-sm btn-danger" onClick={()=>delC(ct.id)}>Suppr.</button></>}</div>}
+                </div>
+              ))}
+            </div>}
+            {una.length>0&&<div style={{marginTop:14,padding:'10px 14px',background:'var(--warn-s)',border:'1px solid var(--warn)',borderRadius:'var(--r)'}}><div style={{fontSize:12,fontWeight:700,color:'var(--warn)',marginBottom:6}}>{una.length} site{una.length>1?'s':''} sans pays</div>{una.map(s=>(<div key={s.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:12,marginBottom:4}}><span style={{color:'var(--muted)'}}>&#8226; {s.name}</span>{cw&&<select className="form-control" style={{fontSize:11,height:24,padding:'0 4px',width:'auto'}} onChange={async e=>{if(e.target.value){await api.setSiteCountry(s.id,parseInt(e.target.value)).catch(()=>{});loadC();setSites(p=>p.map(x=>x.id===s.id?{...x,country_id:parseInt(e.target.value)}:x));}}}><option value="">Assigner...</option>{countries.map(ct=><option key={ct.id} value={ct.id}>{ct.name}</option>)}</select>}</div>))}</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const TABS = [
   { key: 'sites',   label: 'Sites',        icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg> },
   { key: 'models',  label: 'Modèles',      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M12 2L2 7l10 5 10-5-10-5z" /></svg> },
   { key: 'devices', label: 'Équipements',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="2" y="7" width="20" height="14" rx="2" /></svg> },
+  { key: 'options', label: 'Options', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg> },
 ];
 
 // Version embedded : tabs horizontaux + state local (pas de useSearchParams)
 export function ConfigEmbedded() {
   const [active, setActive] = useState('sites');
+  const [flags, setFlags] = useState({});
+  const [countries, setCountries] = useState([]);
+  const reload = () => api.getCountries().then(setCountries).catch(()=>{});
+  useEffect(() => { api.getFeatureFlags().then(f=>{setFlags(f);if(f.countries)reload();}).catch(()=>{}); }, []);
+  const tabs = [
+    ...TABS,
+  ];
   return (
     <div>
-      <div style={{ display: 'flex', gap: 2, marginBottom: 16, borderBottom: '1px solid var(--brd)' }}>
-        {TABS.map(t => (
-          <button key={t.key} onClick={() => setActive(t.key)} style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '9px 16px',
-            background: 'none', border: 'none',
-            borderBottom: active === t.key ? '2px solid var(--acc)' : '2px solid transparent',
-            color: active === t.key ? 'var(--acc)' : 'var(--muted)',
-            fontWeight: active === t.key ? 600 : 500,
-            fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font)',
-            marginBottom: -1, transition: 'color .15s, border-color .15s',
-          }}>
-            {t.icon}{t.label}
-          </button>
-        ))}
+      <div style={{display:'flex',gap:2,marginBottom:16,borderBottom:'1px solid var(--brd)'}}>
+        {tabs.map(t=><button key={t.key} onClick={()=>setActive(t.key)} style={{display:'flex',alignItems:'center',gap:6,padding:'9px 16px',background:'none',border:'none',borderBottom:active===t.key?'2px solid var(--acc)':'2px solid transparent',color:active===t.key?'var(--acc)':'var(--muted)',fontWeight:active===t.key?600:500,fontSize:13,cursor:'pointer',fontFamily:'var(--font)',marginBottom:-1,transition:'color .15s'}}>{t.icon}{t.label}</button>)}
       </div>
       <div>
-        {active === 'sites'   && <SitesTab />}
-        {active === 'models'  && <ModelsTab />}
-        {active === 'devices' && <DevicesTab />}
+        {active==='sites'&&<SitesTab countries={flags.countries?countries:[]}/>}
+        {active==='models'&&<ModelsTab/>}
+        {active==='devices'&&<DevicesTab/>}
+        {active==='options'&&<OptionsTab onFlagsChange={f=>{setFlags(f);if(f.countries)reload();}}/>}
       </div>
     </div>
   );
 }
-
-// Version standalone : sidebar à gauche + URL params
 export default function Config() {
   const [sp, setSp] = useSearchParams();
-  const active = sp.get('tab') || 'sites';
-  const setTab = t => setSp({ tab: t });
-
+  const active = sp.get('tab')||'sites';
+  const setTab = t=>setSp({tab:t});
+  const [flags, setFlags] = useState({});
+  const [countries, setCountries] = useState([]);
+  const reload = ()=>api.getCountries().then(setCountries).catch(()=>{});
+  useEffect(()=>{api.getFeatureFlags().then(f=>{setFlags(f);if(f.countries)reload();}).catch(()=>{});}, []);
+  const tabs = [
+    ...TABS,
+  ];
   return (
     <main>
-      <div className="page-header">
-        <div>
-          <div className="page-title">Appareils</div>
-          <div className="page-sub">Gestion des équipements, sites et modèles</div>
-        </div>
-      </div>
+      <div className="page-header"><div><div className="page-title">Appareils</div><div className="page-sub">Gestion des equipements, sites et modeles</div></div></div>
       <div className="config-layout">
         <div className="side-menu">
-          {TABS.map(t => (
-            <div key={t.key} className={`side-item ${active === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
-              {t.icon}{t.label}
-            </div>
-          ))}
+          {tabs.map(t=><div key={t.key} className={`side-item ${active===t.key?'active':''}`} onClick={()=>setTab(t.key)}>{t.icon}{t.label}</div>)}
         </div>
         <div>
-          {active === 'sites'   && <SitesTab />}
-          {active === 'models'  && <ModelsTab />}
-          {active === 'devices' && <DevicesTab />}
+          {active==='sites'&&<SitesTab countries={flags.countries?countries:[]}/>}
+          {active==='models'&&<ModelsTab/>}
+          {active==='devices'&&<DevicesTab/>}
+          {active==='options'&&<OptionsTab onFlagsChange={f=>{setFlags(f);if(f.countries)reload();}}/>}
         </div>
       </div>
     </main>
