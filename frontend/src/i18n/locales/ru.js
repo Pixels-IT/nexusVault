@@ -1,0 +1,20 @@
+// ru — Traductions partielles. Contribuez : frontend/src/i18n/locales/ru.js
+export default {
+  'auth.username': 'Имя пользователя',
+  'auth.password': 'Пароль',
+  'auth.login': 'Войти',
+  'auth.forgot': 'Забыли пароль?',
+  'dash.title': 'Панель управления',
+  'dash.subtitle': 'Обзор вашей среды',
+  'dash.backups': 'Резервные копии конфигурации',
+  'dash.devices': 'Устройства',
+  'dash.sites': 'Объекты',
+  'dash.models': 'Модели',
+  'dash.notes_total': 'Всего заметок',
+  'nav.dashboard': 'Панель',
+  'nav.backups': 'Резервы',
+  'nav.activity': 'Активность',
+  'nav.admin': 'Администрирование',
+  'nav.automatisation': 'Скрипты',
+  'lang.select': 'Изменить язык',
+};
