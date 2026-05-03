@@ -1,6 +1,5 @@
 # docker-compose.yml — utilise les images Docker Hub
 # Pour builder depuis les sources : docker compose -f docker-compose.git.yml up -d --build
-# Remplacer VOTRE_DOCKERHUB_USER par votre identifiant Docker Hub
 
 services:
 

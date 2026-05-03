@@ -1,8 +1,12 @@
+![Logo](screenshots/logo-login.png)
+
 # nexusVault — New EXperience for USer Vault — Environnement de Coffre-Fort IT
 
 Interface de coffre-fort des éléments critiques IT : configuration des équipements réseaux, suivi d'activité, scripts & automatisation.
 
 ---
+
+> 🇬🇧 [English version here](readme-uk.md)
 
 ## Pourquoi nexusVault ?
 
@@ -100,7 +104,7 @@ openssl rand -hex 32   # pour JWT_SECRET
 ### 3. Lancement
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 Accès : **http://localhost:8080** (ou le port configuré dans `APP_PORT`)
@@ -122,6 +126,7 @@ docker compose down -v
 ```
 
 ### 5. Screenshots
+
 ![Logo](screenshots/dashboard.png)
 ![Logo](screenshots/backup.png)
 ![Logo](screenshots/activity_tracking.png)

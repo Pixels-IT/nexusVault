@@ -9,7 +9,6 @@ frontend/build/
 
 # Script de déploiement local (peut contenir des secrets)
 deploy.sh
-deploy-dev.sh
 
 # Données de démonstration (peut contenir des données sensibles)
 seed.js
