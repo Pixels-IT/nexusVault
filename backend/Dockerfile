@@ -1,4 +1,4 @@
-FROM node:22-alpine
+FROM node:24-alpine
 
 # Outils de compilation + su-exec pour drop privileges + wget pour healthcheck
 RUN apk add --no-cache python3 make g++ wget su-exec
