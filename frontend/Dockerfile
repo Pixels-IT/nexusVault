@@ -10,7 +10,7 @@ RUN npm run build
 FROM nginx:alpine
 
 # Installer curl pour le healthcheck (wget ne supporte pas les options nécessaires dans certains contextes)
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl wget binutils busybox
 
 # Mot de passe root aléatoire
 RUN passwd -d root 2>/dev/null || true
