@@ -43,7 +43,23 @@ function HistoryModal({ entryId, onClose }) {
       .finally(() => setLoading(false));
   }, [entryId]);
 
-  const EVT_LABELS = { created: 'Création', updated: 'Modification', tag_changed: 'Tag modifié', preview_changed: 'Preview' };
+  const EVT_LABELS = {
+    created:       'Création',
+    updated:       'Modification',
+    tag_changed:   'Tag modifié',
+    preview_changed:'Preview',
+    file_added:    '📎 Fichier ajouté',
+    file_deleted:  '🗑 Fichier supprimé',
+    file_locked:   '🔒 Fichier verrouillé/déverrouillé',
+  };
+
+  const evtColor = (type) => {
+    if (type === 'created')      return 'var(--ok)';
+    if (type === 'file_added')   return '#16a34a';
+    if (type === 'file_deleted') return 'var(--err)';
+    if (type === 'file_locked')  return 'var(--warn)';
+    return 'var(--acc)';
+  };
 
   return (
     <Modal title="Historique de la note" onClose={onClose}
@@ -59,12 +75,12 @@ function HistoryModal({ entryId, onClose }) {
                 borderBottom: i < history.length-1 ? '1px solid var(--brd)' : 'none',
               }}>
                 <div style={{ flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
-                  <div style={{ width:8, height:8, borderRadius:'50%', background: h.event_type==='created' ? 'var(--ok)' : 'var(--acc)', marginTop:4 }}/>
+                  <div style={{ width:8, height:8, borderRadius:'50%', background: evtColor(h.event_type), marginTop:4 }}/>
                   {i < history.length-1 && <div style={{ width:1, flex:1, background:'var(--brd)' }}/>}
                 </div>
                 <div style={{ flex:1 }}>
                   <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:2 }}>
-                    <span style={{ fontSize:11, fontWeight:700, color: h.event_type==='created' ? 'var(--ok)' : 'var(--acc)' }}>
+                    <span style={{ fontSize:11, fontWeight:700, color: evtColor(h.event_type) }}>
                       {EVT_LABELS[h.event_type] || h.event_type}
                     </span>
                     <span style={{ fontSize:10, color:'var(--muted)', fontFamily:'var(--mono)' }}>
@@ -224,12 +240,6 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
     <Modal
       title={<div style={{display:'flex',alignItems:'center',gap:10,width:'100%'}}>
         <span>{isEdit ? 'Modifier la note' : 'Ajouter une note'}</span>
-        {totalFiles > 0 && (
-          <span style={{background:'var(--acc)',color:'white',fontSize:10,fontWeight:700,
-            padding:'2px 8px',borderRadius:10,marginLeft:4}}>
-            {totalFiles} fichier{totalFiles>1?'s':''}
-          </span>
-        )}
         {isEdit && (
           <button className="btn btn-sm" onClick={() => setShowHistory(true)}
             style={{marginLeft:'auto',marginRight:6,display:'flex',alignItems:'center',gap:4,fontSize:11,
@@ -395,127 +405,6 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
               </div>
             ))}
           </div>
-        </div>
-      )}
-    </Modal>
-    {showHistory && isEdit && <HistoryModal entryId={entry.id} onClose={() => setShowHistory(false)} />}
-    </>
-  );
-}
-
-  const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
-
-  // Auto-preview si mois futur
-  const isFutureMonth = () => {
-    const cy = now.getFullYear(), cm = now.getMonth() + 1;
-    return year > cy || (year === cy && month > cm);
-  };
-
-  async function submit() {
-    setError(''); setTagError(false);
-    if (!tagCode) { setTagError(true); return; }
-    if (!content.trim()) return setError('Le contenu est requis');
-    setLoading(true);
-    try {
-      const preview = isFutureMonth() ? true : isPreview;
-      if (isEdit) await api.updateEntry(entry.id, { tag_code: tagCode, content, is_preview: preview });
-      else        await api.createEntry({ year, month, tag_code: tagCode, content, is_preview: preview });
-      onSave();
-    } catch (e) { setError(e.message); }
-    finally { setLoading(false); }
-  }
-
-  return (
-    <>
-    <Modal
-      title={<div style={{display:'flex',alignItems:'center',gap:10,width:'100%'}}>
-        <span>{isEdit ? 'Modifier la note' : 'Ajouter une note'}</span>
-        {isEdit && (
-          <button className="btn btn-sm" onClick={() => setShowHistory(true)}
-            style={{marginLeft:'auto',marginRight:6,display:'flex',alignItems:'center',gap:4,fontSize:11,
-              borderColor:'var(--ok)',color:'var(--ok)'}}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
-              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
-            </svg>
-            {t('activity.history')}
-          </button>
-        )}
-      </div>}
-      onClose={onClose}
-      footer={
-        <div style={{ display:'flex', justifyContent:'flex-end', gap:8, width:'100%' }}>
-          <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
-          <button className="btn btn-primary" onClick={submit} disabled={loading || !tagCode}>
-            {loading ? 'Enregistrement…' : isEdit ? 'Modifier' : 'Ajouter'}
-          </button>
-        </div>
-      }
-    >
-      {error && <Alert type="err">{error}</Alert>}
-      {!isEdit && (
-        <div className="form-row">
-          <div className="form-group">
-            <label className="form-label">Année</label>
-            <select className="form-control" value={year} onChange={e => setYear(parseInt(e.target.value))}>
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Mois</label>
-            <select className="form-control" value={month} onChange={e => setMonth(parseInt(e.target.value))}>
-              {MONTHS.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
-            </select>
-          </div>
-        </div>
-      )}
-      <div className="form-group">
-        <label className="form-label">Tag</label>
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:6 }}>
-          {tags.map(t => (
-            <button key={t.code} onClick={() => { setTagCode(t.code); setTagError(false); }} style={{
-              display:'inline-flex', alignItems:'center', gap:6,
-              padding:'5px 12px', borderRadius:4, cursor:'pointer',
-              border: `2px solid ${tagCode===t.code ? t.color : 'var(--brd)'}`,
-              background: tagCode===t.code ? `rgba(${parseInt(t.color.slice(1,3),16)},${parseInt(t.color.slice(3,5),16)},${parseInt(t.color.slice(5,7),16)},0.12)` : 'var(--surf2)',
-              fontFamily:'var(--mono)', fontSize:11, fontWeight:700,
-              color: tagCode===t.code ? t.color : 'var(--muted)',
-            }}>
-              <span style={{ width:8, height:8, borderRadius:'50%', background:t.color, flexShrink:0 }}/>
-              {t.code}
-              <span style={{ fontSize:10, fontWeight:400, fontFamily:'var(--font)', color:'var(--muted)' }}>{t.label}</span>
-            </button>
-          ))}
-        </div>
-        {tagError && (
-          <div className="alert alert-warn" style={{ marginTop: 8, fontSize: 12 }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            {t('activity.tag_required')}
-          </div>
-        )}
-      </div>
-      <div className="form-group">
-        <label className="form-label">Description</label>
-        <textarea className="form-control" value={content} onChange={e => setContent(e.target.value)}
-          rows={4} placeholder="Ex: Mise à jour des serveurs Windows vers KB5..."
-          style={{ resize:'vertical', fontFamily:'var(--font)' }} autoFocus />
-      </div>
-      {/* Checkbox preview — visible seulement si pas auto-futur */}
-      {!isFutureMonth() && (
-        <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:4, padding:'8px 0', borderTop:'1px solid var(--brd)' }}>
-          <input type="checkbox" id="preview-check" checked={isPreview}
-            onChange={e => setIsPreview(e.target.checked)}
-            style={{ width:14, height:14, cursor:'pointer' }} />
-          <label htmlFor="preview-check" style={{ fontSize:12, color:'var(--muted)', cursor:'pointer', userSelect:'none' }}>
-            Note en avant-première (preview) — ne compte pas dans les statistiques
-          </label>
-        </div>
-      )}
-      {isFutureMonth() && (
-        <div style={{ fontSize:11, color:'var(--warn)', marginTop:6, display:'flex', alignItems:'center', gap:6 }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:12, height:12 }}>
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          Mois futur — marqué automatiquement en preview
         </div>
       )}
     </Modal>

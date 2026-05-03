@@ -86,6 +86,14 @@ export default function Login() {
   const [loading, setLoading]   = useState(false);
   const [showForgot, setShowForgot] = useState(false);
 
+  // États TOTP
+  const [step, setStep]           = useState('credentials'); // 'credentials' | 'totp' | 'totp-setup'
+  const [totpCode, setTotpCode]   = useState('');
+  const [setupToken, setSetupToken] = useState('');
+  const [qrData, setQrData]       = useState(null); // { qr, secret, username }
+  const [totpLoading, setTotpLoading] = useState(false);
+  const [totpError, setTotpError] = useState('');
+
   const passwordChanged = searchParams.get('changed') === '1';
 
   async function handleSubmit(e) {
@@ -94,6 +102,18 @@ export default function Login() {
     setLoading(true); setError('');
     try {
       const res = await api.login(username.trim(), password);
+      if (res.totp_required) {
+        setSetupToken(res.setup_token || '');
+        if (res.totp_setup) {
+          // Charger le QR code
+          setStep('totp-setup');
+          const qr = await api.totpSetupQr(res.setup_token);
+          setQrData(qr);
+        } else {
+          setStep('totp');
+        }
+        return;
+      }
       const user = login(res.token);
       if (user.must_change_password) navigate('/admin?tab=account&force=1');
       else navigate('/');
@@ -104,83 +124,163 @@ export default function Login() {
     }
   }
 
+  async function handleTotpSubmit(e) {
+    e.preventDefault();
+    if (totpCode.length !== 6) return;
+    setTotpLoading(true); setTotpError('');
+    try {
+      // Appeler login avec le code TOTP
+      const res = await api.login(username.trim(), password, totpCode);
+      const user = login(res.token);
+      if (user.must_change_password) navigate('/admin?tab=account&force=1');
+      else navigate('/');
+    } catch (err) {
+      setTotpError(err.message || 'Code invalide');
+    } finally {
+      setTotpLoading(false);
+    }
+  }
+
+  async function handleSetupVerify(e) {
+    e.preventDefault();
+    if (totpCode.length !== 6) return;
+    setTotpLoading(true); setTotpError('');
+    try {
+      const res = await api.totpSetupVerify(setupToken, totpCode);
+      const user = login(res.token);
+      if (user.must_change_password) navigate('/admin?tab=account&force=1');
+      else navigate('/');
+    } catch (err) {
+      setTotpError(err.message || 'Code invalide');
+    } finally {
+      setTotpLoading(false);
+    }
+  }
+
   return (
     <div style={{
       minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center',
       background:'var(--bg)', padding:'20px',
     }}>
-      {/* Boutons haut droite : LangSwitcher + ThemeToggle */}
+      {/* Boutons haut droite */}
       <div style={{position:'fixed', top:14, right:16, display:'flex', alignItems:'center', gap:8}}>
         <LangSwitcher />
-        <button
-          className={`theme-toggle ${dark ? 'on' : ''}`}
-          onClick={toggle}
-          title={dark ? 'Mode clair' : 'Mode sombre'}
-        />
+        <button className={`theme-toggle ${dark ? 'on' : ''}`} onClick={toggle} title={dark ? 'Mode clair' : 'Mode sombre'} />
       </div>
 
-      <div style={{width:'100%', maxWidth:440}}>
+      <div style={{width:'100%', maxWidth: step === 'totp-setup' ? 500 : 440}}>
 
-        {/* Card avec logo à l'intérieur */}
-        <div className="card" style={{padding:'32px 36px'}}>
-          {/* Logo */}
-          <div style={{textAlign:'center', marginBottom:24}}>
-            <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', maxWidth:260, height:'auto'}} />
+        {/* ── ÉTAPE 1 : IDENTIFIANTS ── */}
+        {step === 'credentials' && (
+          <div className="card" style={{padding:'32px 36px'}}>
+            <div style={{textAlign:'center', marginBottom:24}}>
+              <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', maxWidth:260, height:'auto'}} />
+            </div>
+            {passwordChanged && <div className="alert alert-ok" style={{fontSize:12, marginBottom:16}}>✓ {t('auth.password_changed')}</div>}
+            {error && <div className="alert alert-err" style={{fontSize:12, marginBottom:16}}>{error}</div>}
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label className="form-label">{t('auth.username')}</label>
+                <input className="form-control" type="text" value={username} onChange={e => setUsername(e.target.value)} autoFocus autoComplete="username" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">{t('auth.password')}</label>
+                <input className="form-control" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={loading}
+                style={{display:'block',width:'auto',minWidth:200,margin:'12px auto 0',textAlign:'center'}}>
+                {loading ? t('auth.logging_in') : t('auth.login')}
+              </button>
+            </form>
+            <div style={{textAlign:'center', marginTop:16}}>
+              <button type="button" style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--muted)',padding:0}}
+                onMouseEnter={e=>e.target.style.color='var(--acc)'} onMouseLeave={e=>e.target.style.color='var(--muted)'}
+                onClick={() => setShowForgot(true)}>{t('auth.forgot_link')}</button>
+            </div>
           </div>
-          {passwordChanged && (
-            <div className="alert alert-ok" style={{fontSize:12, marginBottom:16}}>
-              ✓ {t('auth.password_changed')}
-            </div>
-          )}
-          {error && (
-            <div className="alert alert-err" style={{fontSize:12, marginBottom:16}}>
-              {error}
-            </div>
-          )}
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label className="form-label">{t('auth.username')}</label>
-              <input
-                className="form-control"
-                type="text"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                autoFocus
-                autoComplete="username"
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">{t('auth.password')}</label>
-              <input
-                className="form-control"
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </div>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={loading}
-              style={{display:'block',width:'auto',minWidth:200,margin:'12px auto 0',textAlign:'center'}}
-            >
-              {loading ? t('auth.logging_in') : t('auth.login')}
-            </button>
-          </form>
+        )}
 
-          <div style={{textAlign:'center', marginTop:16}}>
-            <button
-              type="button"
-              style={{background:'none', border:'none', cursor:'pointer', fontSize:12, color:'var(--muted)', padding:0}}
-              onMouseEnter={e => e.target.style.color='var(--acc)'}
-              onMouseLeave={e => e.target.style.color='var(--muted)'}
-              onClick={() => setShowForgot(true)}
-            >
-              {t('auth.forgot_link')}
-            </button>
+        {/* ── ÉTAPE 2a : CODE TOTP ── */}
+        {step === 'totp' && (
+          <div className="card" style={{padding:'32px 36px'}}>
+            <div style={{textAlign:'center', marginBottom:24}}>
+              <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', maxWidth:260, height:'auto'}} />
+            </div>
+            <div style={{textAlign:'center', marginBottom:20}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" style={{width:40,height:40,marginBottom:8}}>
+                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                <line x1="12" y1="15" x2="12" y2="17"/>
+              </svg>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Authentification à deux facteurs</div>
+              <div style={{fontSize:12,color:'var(--muted)'}}>Saisissez le code à 6 chiffres de votre application d'authentification</div>
+            </div>
+            {totpError && <div className="alert alert-err" style={{fontSize:12, marginBottom:12}}>{totpError}</div>}
+            <form onSubmit={handleTotpSubmit}>
+              <div className="form-group">
+                <label className="form-label" style={{textAlign:'center',display:'block'}}>Code TOTP</label>
+                <input className="form-control" type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
+                  value={totpCode} onChange={e => setTotpCode(e.target.value.replace(/\D/g,''))}
+                  autoFocus placeholder="000000"
+                  style={{textAlign:'center', fontSize:24, letterSpacing:8, fontFamily:'var(--mono)'}} />
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={totpLoading || totpCode.length !== 6}
+                style={{display:'block',width:'auto',minWidth:200,margin:'12px auto 0',textAlign:'center'}}>
+                {totpLoading ? 'Vérification…' : 'Vérifier'}
+              </button>
+            </form>
+            <div style={{textAlign:'center', marginTop:12}}>
+              <button type="button" onClick={() => { setStep('credentials'); setTotpCode(''); setTotpError(''); }}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--muted)',padding:0}}>
+                ← Retour
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* ── ÉTAPE 2b : SETUP TOTP (premier scan QR) ── */}
+        {step === 'totp-setup' && (
+          <div className="card" style={{padding:'32px 36px'}}>
+            <div style={{textAlign:'center', marginBottom:20}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" style={{width:36,height:36,marginBottom:8}}>
+                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+              </svg>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Configuration du TOTP</div>
+              <div style={{fontSize:12,color:'var(--muted)'}}>Scannez ce QR code avec Google Authenticator, Authy ou une application similaire.</div>
+            </div>
+            {!qrData ? (
+              <div style={{textAlign:'center',padding:24,color:'var(--muted)'}}>Génération du QR code…</div>
+            ) : (
+              <>
+                <div style={{textAlign:'center',marginBottom:16}}>
+                  <img src={qrData.qr} alt="QR TOTP" style={{width:200,height:200,imageRendering:'pixelated',borderRadius:8,border:'4px solid var(--surf2)'}} />
+                </div>
+                <div style={{background:'var(--surf2)',borderRadius:'var(--r)',padding:'10px 14px',marginBottom:16,fontSize:11,fontFamily:'var(--mono)',textAlign:'center',wordBreak:'break-all',color:'var(--muted)'}}>
+                  Clé manuelle : <strong>{qrData.secret}</strong>
+                </div>
+                {totpError && <div className="alert alert-err" style={{fontSize:12,marginBottom:12}}>{totpError}</div>}
+                <form onSubmit={handleSetupVerify}>
+                  <div className="form-group">
+                    <label className="form-label" style={{textAlign:'center',display:'block'}}>Code de vérification (6 chiffres)</label>
+                    <input className="form-control" type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
+                      value={totpCode} onChange={e => setTotpCode(e.target.value.replace(/\D/g,''))}
+                      autoFocus placeholder="000000"
+                      style={{textAlign:'center',fontSize:24,letterSpacing:8,fontFamily:'var(--mono)'}} />
+                  </div>
+                  <button type="submit" className="btn btn-primary" disabled={totpLoading || totpCode.length !== 6}
+                    style={{display:'block',width:'auto',minWidth:220,margin:'12px auto 0',textAlign:'center'}}>
+                    {totpLoading ? 'Activation…' : 'Activer et se connecter'}
+                  </button>
+                </form>
+              </>
+            )}
+            <div style={{textAlign:'center',marginTop:12}}>
+              <button type="button" onClick={() => { setStep('credentials'); setTotpCode(''); setTotpError(''); setQrData(null); }}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--muted)',padding:0}}>
+                ← Retour
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Version */}
         <div style={{textAlign:'center', marginTop:12, fontSize:12, color:'var(--muted)', fontWeight:500, letterSpacing:'.2px'}}>

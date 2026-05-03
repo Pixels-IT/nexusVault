@@ -13,7 +13,11 @@ async function request(method, path, body) {
 }
 
 const api = {
-  login: (u, p) => request('POST', '/auth/login', { username: u, password: p }),
+  login: (u, p, totp_token) => {
+    const body = { username: u, password: p };
+    if (totp_token) body.totp_token = totp_token;
+    return request('POST', '/auth/login', body);
+  },
   changePassword: (cur, nw) => request('POST', '/auth/change-password', { currentPassword: cur, newPassword: nw }),
   stats: () => request('GET', '/stats'),
   // Account
@@ -50,6 +54,9 @@ const api = {
   getSettings: () => request('GET', '/settings'),
   updateSettings: (d) => request('PUT', '/settings', d),
   getPublicSettings: () => fetch('/api/settings/public').then(r => r.json()),
+  // TOTP
+  totpSetupQr:     (setup_token) => request('POST', '/auth/totp/setup-qr', { setup_token }),
+  totpSetupVerify: (setup_token, totp_token) => request('POST', '/auth/totp/setup-verify', { setup_token, totp_token }),
   getPrefs: () => request('GET', '/me/prefs'),
   // Activity
   activityTags: () => request('GET', '/activity/tags'),

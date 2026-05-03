@@ -4,6 +4,10 @@ const { sshExec } = require('./ssh');
 const cors = require('cors');
 const helmet = require('helmet');
 const bcrypt = require('bcryptjs');
+const { authenticator } = require('otplib');
+// Fenêtre de tolérance : ±2 intervalles de 30s = ±60s — compense les légères dérives d'horloge
+authenticator.options = { window: 2 };
+const QRCode = require('qrcode');
 const jwt = require('jsonwebtoken');
 const { getDb, encrypt, decrypt, audit } = require('./db');
 const { authMiddleware, requireRole, requirePerm, JWT_SECRET, getClientIp, checkWhitelist } = require('./auth');
@@ -154,6 +158,23 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ error: 'Identifiants incorrects' });
   }
 
+  // Verifier TOTP si requis
+  { const _ffRow=db.prepare("SELECT value FROM settings WHERE key='feature_flags'").get();
+    const _ff=_ffRow?JSON.parse(_ffRow.value):{};
+    if (_ff.totp_required) {
+      if (user.totp_enabled) {
+        const {totp_token}=req.body;
+        if (!totp_token) return res.json({totp_required:true,totp_setup:false});
+        if (!authenticator.verify({token:totp_token,secret:user.totp_secret})) {
+          audit(db,{userId:user.id,username:user.username,action:'TOTP_ECHEC',category:'auth',severity:'warn',detail:'Code TOTP invalide depuis '+ip,ip,success:0});
+          return res.status(401).json({error:'Code TOTP invalide'});
+        }
+      } else {
+        const sToken=jwt.sign({id:user.id,username:user.username,totp_setup_required:true},process.env.JWT_SECRET,{expiresIn:'15m'});
+        return res.json({totp_required:true,totp_setup:true,setup_token:sToken});
+      }
+    }
+  }
   // Connexion réussie : réinitialiser les compteurs
   db.prepare('UPDATE users SET failed_attempts=0, locked_until=NULL, last_login_at=? WHERE id=?').run(nowLocal(), user.id);
   const token = jwt.sign(
@@ -220,7 +241,7 @@ app.get('/api/users/for-activity', authMiddleware, (req, res) => {
 });
 
 app.get('/api/users', authMiddleware, requireRole('admin'), (req, res) => {
-  const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at, locked_until, failed_attempts FROM users ORDER BY id').all();
+  const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at, locked_until, failed_attempts, totp_enabled FROM users ORDER BY id').all();
   res.json(rows);
 });
 
@@ -294,13 +315,17 @@ app.post('/api/users', authMiddleware, requireRole('admin'), async (req, res) =>
 });
 
 app.put('/api/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
-  const { username, display_name, email, role, permissions, enabled, password } = req.body;
+  const { username, display_name, email, role, permissions, enabled, password, reset_totp } = req.body;
   const ip = getClientIp(req);
   const db = getDb();
   if (password) {
     if (password.length < 14) return res.status(400).json({ error: 'Mot de passe: 14 caractères minimum' });
     const hash = bcrypt.hashSync(password, 12);
     db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?`).run(hash, nowLocal(), req.params.id);
+  }
+  if (reset_totp) {
+    db.prepare('UPDATE users SET totp_secret=NULL, totp_enabled=0 WHERE id=?').run(req.params.id);
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'TOTP_REINITIALISE', category: 'auth', severity: 'warn', detail: `TOTP réinitialisé pour user ID ${req.params.id}`, ip, success: 1 });
   }
   // Vérifier qu'on ne désactive pas/ne rétrograde pas le dernier admin actif
   const targetUser = db.prepare('SELECT role, enabled FROM users WHERE id = ?').get(req.params.id);
@@ -1679,6 +1704,41 @@ app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
 });
 
 
+// TOTP ROUTES
+app.post('/api/auth/totp/setup-qr', (req, res) => {
+  const { setup_token } = req.body;
+  if (!setup_token) return res.status(400).json({ error: 'setup_token requis' });
+  let p; try { p = jwt.verify(setup_token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
+  if (!p.totp_setup_required) return res.status(403).json({ error: 'Non autorisé' });
+  const db = getDb();
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(p.id);
+  if (!user) return res.status(404).json({ error: 'Introuvable' });
+  const secret = authenticator.generateSecret();
+  const otpauth = authenticator.keyuri(user.username, 'NexusVault', secret);
+  db.prepare('UPDATE users SET totp_secret=? WHERE id=?').run(secret, user.id);
+  QRCode.toDataURL(otpauth, { margin: 1, width: 256 })
+    .then(qr => res.json({ secret, qr, username: user.username }))
+    .catch(() => res.status(500).json({ error: 'Erreur génération QR' }));
+});
+
+app.post('/api/auth/totp/setup-verify', (req, res) => {
+  const { setup_token, totp_token } = req.body;
+  if (!setup_token || !totp_token) return res.status(400).json({ error: 'Champs requis' });
+  const db = getDb(); const ip = getClientIp(req);
+  let p; try { p = jwt.verify(setup_token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
+  if (!p.totp_setup_required) return res.status(403).json({ error: 'Non autorisé' });
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(p.id);
+  if (!user) return res.status(404).json({ error: 'Introuvable' });
+  if (!authenticator.verify({ token: totp_token, secret: user.totp_secret }))
+    return res.status(401).json({ error: 'Code TOTP invalide — vérifiez l\'heure de votre appareil' });
+  db.prepare('UPDATE users SET totp_enabled=1, failed_attempts=0, locked_until=NULL, last_login_at=? WHERE id=?').run(nowLocal(), user.id);
+  const tok = jwt.sign(
+    { id: user.id, username: user.username, displayName: user.display_name, email: user.email, role: user.role, permissions: user.permissions || '{}', mustChangePassword: user.must_change_password === 1 },
+    JWT_SECRET, { expiresIn: '8h' }
+  );
+  audit(db, { userId: user.id, username: user.username, action: 'TOTP_CONFIGURE', category: 'auth', severity: 'info', detail: 'TOTP configuré et activé', ip, success: 1 });
+  res.json({ token: tok, mustChangePassword: user.must_change_password === 1 });
+});
 
 // FICHIERS JOINTS AU SUIVI D'ACTIVITE
 app.get('/api/activity/entries/:id/files', authMiddleware, (req, res) => {
@@ -1689,35 +1749,53 @@ app.get('/api/activity/entries/:id/files', authMiddleware, (req, res) => {
 app.post('/api/activity/entries/:id/files', authMiddleware, (req, res) => {
   const {filename,mimetype,data}=req.body;
   if (!filename||!data) return res.status(400).json({error:'filename et data requis'});
-  const db=getDb();
+  const db=getDb(); const ip=getClientIp(req);
   const entry=db.prepare('SELECT id FROM activity_entries WHERE id=?').get(req.params.id);
   if (!entry) return res.status(404).json({error:'Note introuvable'});
   const size=Math.round((data.length*3)/4);
   const r=db.prepare('INSERT INTO activity_files (entry_id,filename,mimetype,size_bytes,data,locked,uploaded_by) VALUES (?,?,?,?,?,0,?)').run(req.params.id,encrypt(filename),mimetype||'application/octet-stream',size,encrypt(data),req.user.id);
+  // Historique de la note
+  db.prepare('INSERT INTO activity_entry_history (entry_id,event_type,detail,changed_by,changed_at) VALUES (?,?,?,?,?)').run(parseInt(req.params.id),'file_added',`Fichier ajouté : ${filename} (${(size/1024).toFixed(1)} Ko)`,req.user.id,nowLocal());
+  // Audit global
+  audit(db,{userId:req.user.id,username:req.user.username,action:'FICHIER_AJOUTE',category:'activity',severity:'info',detail:`Note #${req.params.id} — ${filename}`,ip,success:1});
   res.json({id:r.lastInsertRowid,filename,mimetype,size_bytes:size,locked:0,uploaded_at:new Date().toISOString()});
 });
 app.put('/api/activity/files/:id/lock', authMiddleware, (req, res) => {
-  const db=getDb();
-  const row=db.prepare('SELECT id,locked FROM activity_files WHERE id=?').get(req.params.id);
+  const db=getDb(); const ip=getClientIp(req);
+  const row=db.prepare('SELECT id,locked,filename,entry_id FROM activity_files WHERE id=?').get(req.params.id);
   if (!row) return res.status(404).json({error:'Fichier introuvable'});
-  db.prepare('UPDATE activity_files SET locked=? WHERE id=?').run(row.locked?0:1,req.params.id);
-  res.json({success:true,locked:row.locked?0:1});
+  const newLock=row.locked?0:1;
+  const fname=decrypt(row.filename);
+  db.prepare('UPDATE activity_files SET locked=? WHERE id=?').run(newLock,req.params.id);
+  const action=newLock?'verrouillé':'déverrouillé';
+  // Historique de la note
+  db.prepare('INSERT INTO activity_entry_history (entry_id,event_type,detail,changed_by,changed_at) VALUES (?,?,?,?,?)').run(row.entry_id,'file_locked',`Fichier ${action} : ${fname} (par ${req.user.username})`,req.user.id,nowLocal());
+  // Audit global
+  audit(db,{userId:req.user.id,username:req.user.username,action:newLock?'FICHIER_VERROUILLE':'FICHIER_DEVERROUILLE',category:'activity',severity:'info',detail:`Note #${row.entry_id} — ${fname}`,ip,success:1});
+  res.json({success:true,locked:newLock});
 });
 app.delete('/api/activity/files/:id', authMiddleware, (req, res) => {
-  const db=getDb();
-  const row=db.prepare('SELECT locked,filename FROM activity_files WHERE id=?').get(req.params.id);
+  const db=getDb(); const ip=getClientIp(req);
+  const row=db.prepare('SELECT locked,filename,entry_id FROM activity_files WHERE id=?').get(req.params.id);
   if (!row) return res.status(404).json({error:'Fichier introuvable'});
   if (row.locked) return res.status(403).json({error:'Fichier verrouille'});
+  const fname=decrypt(row.filename);
   db.prepare('DELETE FROM activity_files WHERE id=?').run(req.params.id);
+  // Historique de la note
+  db.prepare('INSERT INTO activity_entry_history (entry_id,event_type,detail,changed_by,changed_at) VALUES (?,?,?,?,?)').run(row.entry_id,'file_deleted',`Fichier supprimé : ${fname} (par ${req.user.username})`,req.user.id,nowLocal());
+  // Audit global
+  audit(db,{userId:req.user.id,username:req.user.username,action:'FICHIER_SUPPRIME',category:'activity',severity:'warn',detail:`Note #${row.entry_id} — ${fname}`,ip,success:1});
   res.json({success:true});
 });
 app.get('/api/activity/files/:id/download', authMiddleware, (req, res) => {
-  const db=getDb();
+  const db=getDb(); const ip=getClientIp(req);
   const row=db.prepare('SELECT * FROM activity_files WHERE id=?').get(req.params.id);
   if (!row) return res.status(404).json({error:'Fichier introuvable'});
+  const fname=decrypt(row.filename);
   const buf=Buffer.from(decrypt(row.data),'base64');
-  const filename=decrypt(row.filename);
-  res.setHeader('Content-Disposition','attachment; filename="'+filename+'"');
+  // Audit global
+  audit(db,{userId:req.user.id,username:req.user.username,action:'FICHIER_TELECHARGE',category:'activity',severity:'info',detail:`Note #${row.entry_id} — ${fname}`,ip,success:1});
+  res.setHeader('Content-Disposition','attachment; filename="'+fname+'"');
   res.setHeader('Content-Type',row.mimetype);
   res.send(buf);
 });

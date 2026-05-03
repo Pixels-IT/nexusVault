@@ -153,8 +153,9 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
     enabled: user.enabled !== 0,
     password: '',
     unlock: false,
+    reset_totp: false,
   } : {
-    username: '', display_name: '', email: '', role: 'viewer', enabled: true, password: '',
+    username: '', display_name: '', email: '', role: 'viewer', enabled: true, password: '', reset_totp: false,
   });
   const [error, setError]     = useState('');
   const [loading, setLoading] = useState(false);
@@ -182,6 +183,7 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
         const payload = { ...data };
         if (!payload.password) delete payload.password;
         delete payload.permissions;
+        delete payload.unlock;
         await api.updateUser(user.id, payload);
         if (data.unlock) await api.unlockUser(user.id);
       }
@@ -276,6 +278,30 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
               onChange={e => setData(d => ({ ...d, unlock: e.target.checked }))} />
             Déverrouiller
           </label>
+        </div>
+      )}
+
+      {/* Reset TOTP — uniquement si l'utilisateur a le TOTP activé */}
+      {!isNew && !!user?.totp_enabled && (
+        <div className="alert alert-ok" style={{ margin: '8px 0 0 0', fontSize: 12, background: 'var(--acc-s)', borderColor: 'var(--acc)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}>
+            <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+          </svg>
+          <span style={{ color: 'var(--acc)', fontWeight: 600 }}>TOTP activé</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', cursor: 'pointer', fontSize: 11 }}>
+            <input type="checkbox" checked={data.reset_totp}
+              onChange={e => setData(d => ({ ...d, reset_totp: e.target.checked }))}
+              style={{ accentColor: 'var(--warn)' }} />
+            <span style={{ color: 'var(--warn)', fontWeight: 600 }}>Réinitialiser le TOTP</span>
+          </label>
+        </div>
+      )}
+      {!isNew && !user?.totp_enabled && (
+        <div style={{ margin: '8px 0 0 0', fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 12, height: 12 }}>
+            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+          </svg>
+          TOTP non configuré
         </div>
       )}
     </Modal>
@@ -1242,6 +1268,27 @@ function SecurityOidcTab() {
   const [msg, setMsg]       = useState('');
   const [err, setErr]       = useState('');
 
+  // ── TOTP ─────────────────────────────────────────────────────────────────────
+  const [totpRequired, setTotpRequired] = useState(false);
+  const [totpSaving, setTotpSaving]     = useState(false);
+  const [totpMsg, setTotpMsg]           = useState('');
+
+  useEffect(() => {
+    api.getFeatureFlags().then(f => setTotpRequired(!!f.totp_required)).catch(() => {});
+  }, []);
+
+  async function toggleTotp() {
+    const newVal = !totpRequired;
+    setTotpSaving(true); setTotpMsg('');
+    try {
+      await api.setFeatureFlags({ totp_required: newVal });
+      setTotpRequired(newVal);
+      setTotpMsg(newVal ? 'TOTP obligatoire activé.' : 'TOTP désactivé.');
+      setTimeout(() => setTotpMsg(''), 3000);
+    } catch (e) { setTotpMsg('Erreur : ' + e.message); }
+    finally { setTotpSaving(false); }
+  }
+
   useEffect(() => {
     api.oidcConfig().then(d => { if (d) setCfg(prev => ({ ...prev, ...d })); }).catch(() => {});
   }, []);
@@ -1266,6 +1313,42 @@ function SecurityOidcTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* ── TOTP ── */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+              <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><line x1="12" y1="15" x2="12" y2="17"/>
+            </svg>
+            Authentification à deux facteurs (TOTP)
+          </div>
+        </div>
+        <div style={{padding:'14px 18px', display:'flex', flexDirection:'column', gap:10}}>
+          <label style={{display:'flex', alignItems:'flex-start', gap:12, cursor:'pointer', padding:'12px 14px', borderRadius:'var(--r)',
+            background: totpRequired ? 'var(--acc-s)' : 'var(--surf2)',
+            border: `1px solid ${totpRequired ? 'var(--acc)' : 'var(--brd)'}`, transition:'all .15s'}}>
+            <input type="checkbox" checked={totpRequired} onChange={toggleTotp} disabled={totpSaving}
+              style={{marginTop:2, accentColor:'var(--acc)', width:16, height:16}} />
+            <div>
+              <div style={{fontWeight:600, fontSize:13}}>Rendre le TOTP obligatoire</div>
+              <div style={{fontSize:12, color:'var(--muted)', marginTop:2}}>
+                Quand cette option est activée, tous les utilisateurs doivent configurer une application d'authentification (Google Authenticator, Authy…) lors de leur prochaine connexion.
+              </div>
+            </div>
+          </label>
+          {totpMsg && <div className={`alert ${totpRequired || totpMsg.startsWith('Erreur') ? (totpMsg.startsWith('Erreur') ? 'alert-err' : 'alert-ok') : 'alert-warn'}`} style={{fontSize:12}}>{totpMsg}</div>}
+          {totpRequired && (
+            <div className="alert alert-warn" style={{fontSize:12}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13,flexShrink:0}}>
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              Les utilisateurs sans TOTP configuré seront invités à scanner un QR code lors de leur prochaine connexion. Pour réinitialiser le TOTP d'un utilisateur, rendez-vous dans <strong>Utilisateurs</strong> → modifier le compte → <em>Réinitialiser le TOTP</em>.
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="card">
         <div className="card-header">
           <div className="card-title">

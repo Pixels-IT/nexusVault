@@ -311,7 +311,7 @@ tr:hover td { background: var(--surf2); }
   background: var(--surf);
   border: 1px solid var(--brd);
   border-radius: var(--rl);
-  width: 480px; max-width: calc(100vw - 40px);
+  width: 600px; max-width: calc(100vw - 40px);
   max-height: 90vh;
   overflow-y: auto;
 }
