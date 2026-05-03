@@ -5,8 +5,7 @@ import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useI18n } from '../contexts/I18nContext.jsx';
 import LangSwitcher from '../components/LangSwitcher.jsx';
 import api from '../api.js';
-
-const APP_VERSION = '2026-05-03_b152.391';
+import { APP_VERSION } from '../version.js';
 
 // ── MODAL MOT DE PASSE OUBLIÉ ─────────────────────────────────────────────────
 function ForgotPasswordModal({ onClose }) {
@@ -184,7 +183,7 @@ export default function Login() {
         </div>
 
         {/* Version */}
-        <div style={{textAlign:'center', marginTop:12, fontSize:10, color:'var(--muted)'}}>
+        <div style={{textAlign:'center', marginTop:12, fontSize:12, color:'var(--muted)', fontWeight:500, letterSpacing:'.2px'}}>
           {APP_VERSION}
         </div>
       </div>

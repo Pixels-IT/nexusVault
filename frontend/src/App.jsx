@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
 import { ThemeProvider } from './contexts/ThemeContext.jsx';
 import { I18nProvider } from './contexts/I18nContext.jsx';
 import { useSessionTimeout } from './hooks/useSessionTimeout.js';
 import Navbar from './components/Navbar.jsx';
+import Footer from './components/Footer.jsx';
 import Login from './pages/Login.jsx';
 import Config from './pages/Config.jsx';
 import Backups from './pages/Backups.jsx';
@@ -12,9 +13,6 @@ import Activity from './pages/Activity.jsx';
 import Admin from './pages/Admin.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Scripts from './pages/Scripts.jsx';
-
-
-const APP_VERSION = '2026-05-03_b152.391';
 
 // ── SESSION WARNING ────────────────────────────────────────────────────────────
 function SessionWarning({ seconds: initialSeconds, onDismiss, onExpire }) {
@@ -66,12 +64,17 @@ function AppInner({ children }) {
   const [warnSec, setWarnSec] = useState(null);
   const { logout } = useAuth();
 
-  useSessionTimeout({
-    onWarn:   (s) => setWarnSec(s),
-    onExpire: ()  => setWarnSec(null),
-  });
+  const handleWarn     = useCallback((s) => setWarnSec(s),  []);
+  const handleExpireTimer = useCallback(() => setWarnSec(null), []);
+  const handleSessionExpire = useCallback(() => {
+    setWarnSec(null);
+    logout('timeout');
+  }, [logout]);
 
-  const handleSessionExpire = () => { setWarnSec(null); logout('timeout'); };
+  useSessionTimeout({
+    onWarn:   handleWarn,
+    onExpire: handleExpireTimer,
+  });
 
   return (
     <>
@@ -79,7 +82,7 @@ function AppInner({ children }) {
       <div style={{ minHeight:'calc(100vh - var(--nav) - var(--footer-h))', paddingBottom:16 }}>
         {children}
       </div>
-
+      <Footer />
       <SessionWarning seconds={warnSec} onDismiss={() => setWarnSec(null)} onExpire={handleSessionExpire} />
     </>
   );

@@ -1679,6 +1679,49 @@ app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
 });
 
 
+
+// FICHIERS JOINTS AU SUIVI D'ACTIVITE
+app.get('/api/activity/entries/:id/files', authMiddleware, (req, res) => {
+  const db=getDb();
+  const rows=db.prepare('SELECT id,filename,mimetype,size_bytes,locked,uploaded_at,uploaded_by FROM activity_files WHERE entry_id=? ORDER BY uploaded_at ASC').all(req.params.id);
+  res.json(rows.map(r=>({...r,filename:decrypt(r.filename)})));
+});
+app.post('/api/activity/entries/:id/files', authMiddleware, (req, res) => {
+  const {filename,mimetype,data}=req.body;
+  if (!filename||!data) return res.status(400).json({error:'filename et data requis'});
+  const db=getDb();
+  const entry=db.prepare('SELECT id FROM activity_entries WHERE id=?').get(req.params.id);
+  if (!entry) return res.status(404).json({error:'Note introuvable'});
+  const size=Math.round((data.length*3)/4);
+  const r=db.prepare('INSERT INTO activity_files (entry_id,filename,mimetype,size_bytes,data,locked,uploaded_by) VALUES (?,?,?,?,?,0,?)').run(req.params.id,encrypt(filename),mimetype||'application/octet-stream',size,encrypt(data),req.user.id);
+  res.json({id:r.lastInsertRowid,filename,mimetype,size_bytes:size,locked:0,uploaded_at:new Date().toISOString()});
+});
+app.put('/api/activity/files/:id/lock', authMiddleware, (req, res) => {
+  const db=getDb();
+  const row=db.prepare('SELECT id,locked FROM activity_files WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({error:'Fichier introuvable'});
+  db.prepare('UPDATE activity_files SET locked=? WHERE id=?').run(row.locked?0:1,req.params.id);
+  res.json({success:true,locked:row.locked?0:1});
+});
+app.delete('/api/activity/files/:id', authMiddleware, (req, res) => {
+  const db=getDb();
+  const row=db.prepare('SELECT locked,filename FROM activity_files WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({error:'Fichier introuvable'});
+  if (row.locked) return res.status(403).json({error:'Fichier verrouille'});
+  db.prepare('DELETE FROM activity_files WHERE id=?').run(req.params.id);
+  res.json({success:true});
+});
+app.get('/api/activity/files/:id/download', authMiddleware, (req, res) => {
+  const db=getDb();
+  const row=db.prepare('SELECT * FROM activity_files WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({error:'Fichier introuvable'});
+  const buf=Buffer.from(decrypt(row.data),'base64');
+  const filename=decrypt(row.filename);
+  res.setHeader('Content-Disposition','attachment; filename="'+filename+'"');
+  res.setHeader('Content-Type',row.mimetype);
+  res.send(buf);
+});
+
 // ── SUIVI D'ACTIVITÉ — AUDIT EXPORT ──────────────────────────────────────────
 app.post('/api/activity/export-audit', authMiddleware, (req, res) => {
   const { mode, year, month, filterTag, count, target_user } = req.body;

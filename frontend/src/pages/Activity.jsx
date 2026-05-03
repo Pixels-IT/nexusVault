@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import api from '../api.js';
 import { useI18n } from '../contexts/I18nContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -89,13 +89,319 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
   const now = new Date();
   const [year,      setYear]     = useState(entry?.year  || defaultYear  || now.getFullYear());
   const [month,     setMonth]    = useState(entry?.month || defaultMonth || now.getMonth() + 1);
-  const [tagCode,   setTagCode]  = useState(entry?.tag_code || '');  // pas de pré-sélection
+  const [tagCode,   setTagCode]  = useState(entry?.tag_code || '');
   const [content,   setContent]  = useState(entry?.content || '');
   const [isPreview, setIsPreview] = useState(entry?.is_preview ? true : false);
   const [tagError,  setTagError]  = useState(false);
   const [loading,   setLoading]  = useState(false);
   const [error,     setError]    = useState('');
   const [showHistory, setShowHistory] = useState(false);
+
+  // Fichiers joints
+  const [files,      setFiles]      = useState([]);
+  const [filesLoaded, setFilesLoaded] = useState(false);
+  const [fileError,  setFileError]  = useState('');
+  const fileInputRef = useRef(null);
+
+  const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
+
+  // Charger les fichiers existants si édition
+  useEffect(() => {
+    if (!isEdit || filesLoaded) return;
+    api.getEntryFiles(entry.id)
+      .then(f => { setFiles(f); setFilesLoaded(true); })
+      .catch(() => setFilesLoaded(true));
+  }, [isEdit, entry, filesLoaded]);
+
+  const isFutureMonth = () => {
+    const cy = now.getFullYear(), cm = now.getMonth() + 1;
+    return year > cy || (year === cy && month > cm);
+  };
+
+  async function submit() {
+    setError(''); setTagError(false);
+    if (!tagCode) { setTagError(true); return; }
+    if (!content.trim()) return setError('Le contenu est requis');
+    setLoading(true);
+    try {
+      const preview = isFutureMonth() ? true : isPreview;
+      let entryId = entry?.id;
+      if (isEdit) await api.updateEntry(entry.id, { tag_code: tagCode, content, is_preview: preview });
+      else {
+        const r = await api.createEntry({ year, month, tag_code: tagCode, content, is_preview: preview });
+        entryId = r.id;
+      }
+      // Uploader les fichiers en attente
+      for (const f of files.filter(f => f._pending)) {
+        await api.uploadEntryFile(entryId, { filename: f.filename, mimetype: f.mimetype, data: f.data });
+      }
+      onSave();
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  function handleFileSelect(e) {
+    const selected = Array.from(e.target.files);
+    setFileError('');
+    selected.forEach(file => {
+      if (file.size > 10 * 1024 * 1024) { setFileError(`${file.name} dépasse 10 Mo`); return; }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const b64 = ev.target.result.split(',')[1];
+        setFiles(prev => [...prev, {
+          _pending: true,
+          _tempId: Date.now() + Math.random(),
+          filename: file.name,
+          mimetype: file.type || 'application/octet-stream',
+          size_bytes: file.size,
+          data: b64,
+          locked: 0,
+          uploaded_at: new Date().toISOString(),
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  }
+
+  async function toggleLock(f) {
+    if (f._pending) {
+      setFiles(prev => prev.map(x => x._tempId === f._tempId ? { ...x, locked: x.locked ? 0 : 1 } : x));
+      return;
+    }
+    try {
+      const r = await api.lockEntryFile(f.id);
+      setFiles(prev => prev.map(x => x.id === f.id ? { ...x, locked: r.locked } : x));
+    } catch {}
+  }
+
+  async function deleteFile(f) {
+    if (f.locked) { setFileError('Déverrouillez le fichier avant de le supprimer.'); return; }
+    if (f._pending) {
+      setFiles(prev => prev.filter(x => x._tempId !== f._tempId));
+      return;
+    }
+    try {
+      await api.deleteEntryFile(f.id);
+      setFiles(prev => prev.filter(x => x.id !== f.id));
+    } catch (e) { setFileError(e.message); }
+  }
+
+  function downloadFile(f) {
+    if (f._pending) {
+      const a = document.createElement('a');
+      a.href = 'data:' + f.mimetype + ';base64,' + f.data;
+      a.download = f.filename; a.click();
+      return;
+    }
+    const token = localStorage.getItem('dp_token');
+    const a = document.createElement('a');
+    a.href = `/api/activity/files/${f.id}/download`;
+    a.download = f.filename;
+    // Fetch avec auth
+    fetch(a.href, { headers: { Authorization: 'Bearer ' + token } })
+      .then(r => r.blob())
+      .then(blob => { a.href = URL.createObjectURL(blob); a.click(); })
+      .catch(() => {});
+  }
+
+  function fmtSize(b) {
+    if (b < 1024) return b + ' o';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' Ko';
+    return (b/(1024*1024)).toFixed(1) + ' Mo';
+  }
+
+  function fmtDate(s) {
+    if (!s) return '';
+    const d = new Date(s);
+    return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
+  }
+
+  const totalFiles = files.length;
+
+  return (
+    <>
+    <Modal
+      title={<div style={{display:'flex',alignItems:'center',gap:10,width:'100%'}}>
+        <span>{isEdit ? 'Modifier la note' : 'Ajouter une note'}</span>
+        {totalFiles > 0 && (
+          <span style={{background:'var(--acc)',color:'white',fontSize:10,fontWeight:700,
+            padding:'2px 8px',borderRadius:10,marginLeft:4}}>
+            {totalFiles} fichier{totalFiles>1?'s':''}
+          </span>
+        )}
+        {isEdit && (
+          <button className="btn btn-sm" onClick={() => setShowHistory(true)}
+            style={{marginLeft:'auto',marginRight:6,display:'flex',alignItems:'center',gap:4,fontSize:11,
+              borderColor:'var(--ok)',color:'var(--ok)'}}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+            </svg>
+            {t('activity.history')}
+          </button>
+        )}
+      </div>}
+      onClose={onClose}
+      hideClose={true}
+      width="720px"
+      footer={
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%' }}>
+          {/* Bouton Fichiers à gauche */}
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <button className="btn" onClick={() => fileInputRef.current?.click()}
+              style={{display:'flex',alignItems:'center',gap:6,background:'#16a34a',color:'white',
+                border:'none',fontSize:12,fontWeight:600}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+              </svg>
+              Fichiers {files.length > 0 && <span style={{background:'rgba(255,255,255,.3)',borderRadius:8,padding:'0 6px',fontSize:11}}>{files.length}</span>}
+            </button>
+            <input ref={fileInputRef} type="file" multiple style={{display:'none'}} onChange={handleFileSelect}/>
+          </div>
+          {/* Boutons Annuler / Sauvegarder à droite */}
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
+            <button className="btn btn-primary" onClick={submit} disabled={loading || !tagCode}>
+              {loading ? 'Enregistrement…' : isEdit ? 'Modifier' : 'Ajouter'}
+            </button>
+          </div>
+        </div>
+      }
+    >
+      {error && <Alert type="err">{error}</Alert>}
+      {!isEdit && (
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Année</label>
+            <select className="form-control" value={year} onChange={e => setYear(parseInt(e.target.value))}>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Mois</label>
+            <select className="form-control" value={month} onChange={e => setMonth(parseInt(e.target.value))}>
+              {MONTHS.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+      <div className="form-group">
+        <label className="form-label">Tag</label>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:6 }}>
+          {tags.map(t => (
+            <button key={t.code} onClick={() => { setTagCode(t.code); setTagError(false); }} style={{
+              display:'inline-flex', alignItems:'center', gap:6,
+              padding:'5px 12px', borderRadius:4, cursor:'pointer',
+              border: `2px solid ${tagCode===t.code ? t.color : 'var(--brd)'}`,
+              background: tagCode===t.code ? `rgba(${parseInt(t.color.slice(1,3),16)},${parseInt(t.color.slice(3,5),16)},${parseInt(t.color.slice(5,7),16)},0.12)` : 'var(--surf2)',
+              fontFamily:'var(--mono)', fontSize:11, fontWeight:700,
+              color: tagCode===t.code ? t.color : 'var(--muted)',
+            }}>
+              <span style={{ width:8, height:8, borderRadius:'50%', background:t.color, flexShrink:0 }}/>
+              {t.code}
+              <span style={{ fontSize:10, fontWeight:400, fontFamily:'var(--font)', color:'var(--muted)' }}>{t.label}</span>
+            </button>
+          ))}
+        </div>
+        {tagError && (
+          <div className="alert alert-warn" style={{ marginTop: 8, fontSize: 12 }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            {t('activity.tag_required')}
+          </div>
+        )}
+      </div>
+      <div className="form-group">
+        <label className="form-label">Description</label>
+        <textarea className="form-control" value={content} onChange={e => setContent(e.target.value)}
+          rows={4} placeholder="Ex: Mise à jour des serveurs Windows vers KB5..."
+          style={{ resize:'vertical', fontFamily:'var(--font)' }} autoFocus />
+      </div>
+      {!isFutureMonth() && (
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:4, padding:'8px 0', borderTop:'1px solid var(--brd)' }}>
+          <input type="checkbox" id="preview-check" checked={isPreview}
+            onChange={e => setIsPreview(e.target.checked)}
+            style={{ width:14, height:14, cursor:'pointer' }} />
+          <label htmlFor="preview-check" style={{ fontSize:12, color:'var(--muted)', cursor:'pointer', userSelect:'none' }}>
+            Note en avant-première (preview) — ne compte pas dans les statistiques
+          </label>
+        </div>
+      )}
+      {isFutureMonth() && (
+        <div style={{ fontSize:11, color:'var(--warn)', marginTop:6, display:'flex', alignItems:'center', gap:6 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:12, height:12 }}>
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          Mois futur — marqué automatiquement en preview
+        </div>
+      )}
+
+      {/* Section fichiers */}
+      {files.length > 0 && (
+        <div style={{marginTop:12, borderTop:'1px solid var(--brd)', paddingTop:10}}>
+          <div style={{fontSize:12,fontWeight:600,color:'var(--muted)',marginBottom:8}}>
+            Fichiers joints ({files.length})
+          </div>
+          {fileError && <div className="alert alert-err" style={{fontSize:11,marginBottom:8}}>{fileError}</div>}
+          <div style={{display:'flex',flexDirection:'column',gap:4}}>
+            {files.map((f, i) => (
+              <div key={f.id || f._tempId || i} style={{
+                display:'flex',alignItems:'center',gap:8,padding:'6px 10px',
+                background:'var(--surf2)',borderRadius:'var(--r)',
+                border:'1px solid var(--brd)',fontSize:12,
+              }}>
+                {/* Icône fichier */}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  style={{width:14,height:14,color:'var(--muted)',flexShrink:0}}>
+                  <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+                  <polyline points="13 2 13 9 20 9"/>
+                </svg>
+                {/* Nom + infos */}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.filename}</div>
+                  <div style={{fontSize:10,color:'var(--muted)'}}>{fmtSize(f.size_bytes)} · {fmtDate(f.uploaded_at)}{f._pending && ' · en attente'}</div>
+                </div>
+                {/* Lock badge */}
+                {f.locked ? <span style={{fontSize:10,background:'var(--warn-s)',color:'var(--warn)',padding:'1px 6px',borderRadius:8,fontWeight:600}}>Verrouillé</span> : null}
+                {/* Boutons */}
+                <div style={{display:'flex',gap:4,flexShrink:0}}>
+                  {/* Télécharger */}
+                  <button title="Télécharger" onClick={() => downloadFile(f)}
+                    style={{background:'none',border:'none',cursor:'pointer',padding:3,color:'var(--muted)',display:'flex'}}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                  </button>
+                  {/* Lock/Unlock */}
+                  <button title={f.locked ? 'Déverrouiller' : 'Verrouiller'} onClick={() => toggleLock(f)}
+                    style={{background:'none',border:'none',cursor:'pointer',padding:3,color:f.locked?'var(--warn)':'var(--muted)',display:'flex'}}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                      {f.locked
+                        ? <><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>
+                        : <><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></>
+                      }
+                    </svg>
+                  </button>
+                  {/* Supprimer */}
+                  <button title={f.locked ? 'Déverrouillez avant de supprimer' : 'Supprimer'} onClick={() => deleteFile(f)}
+                    disabled={!!f.locked}
+                    style={{background:'none',border:'none',cursor:f.locked?'not-allowed':'pointer',padding:3,
+                      color:f.locked?'var(--brd)':'var(--err)',display:'flex'}}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                      <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+    {showHistory && isEdit && <HistoryModal entryId={entry.id} onClose={() => setShowHistory(false)} />}
+    </>
+  );
+}
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
