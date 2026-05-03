@@ -7,7 +7,7 @@ import api from '../api.js';
 import LangSwitcher from '../components/LangSwitcher.jsx';
 
 // Version du logiciel : date de build au format AAAA-MM-JJ
-const APP_VERSION = '2026-05-02_b143.381';
+const APP_VERSION = '2026-05-03_b147.386';
 
 
 // ── MODAL MOT DE PASSE OUBLIÉ ─────────────────────────────────────────────────

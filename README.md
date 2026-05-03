@@ -100,7 +100,7 @@ openssl rand -hex 32   # pour JWT_SECRET
 ### 3. Lancement
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 Accès : **http://localhost:8080** (ou le port configuré dans `APP_PORT`)
@@ -120,6 +120,12 @@ docker compose down
 # Arrêter ET supprimer les données (⚠️ irréversible)
 docker compose down -v
 ```
+
+### 5. Screenshots
+![Logo](screenshots/dashboard.png)
+![Logo](screenshots/backup.png)
+![Logo](screenshots/activity_tracking.png)
+![Logo](screenshots/admin.png)
 
 ---
 
@@ -243,60 +249,22 @@ docker compose up -d
 
 ---
 
-## Sauvegarde des données
+## Sauvegarde des donnees
 
-Les données SQLite sont stockées dans le volume Docker `nexusvault-data`. Pour sauvegarder :
-
-```bash
-docker run --rm -v nexusvault-data:/data -v $(pwd):/backup alpine \
-  tar czf /backup/nexusvault-backup-$(date +%Y%m%d).tar.gz /data
-```
+Les donnees SQLite sont stockees dans un volume Docker dont le nom inclut le nom du repertoire projet.
 
 
-## Restauration d'une sauvegarde
 
-Pour restaurer une sauvegarde sur une installation propre (même machine ou machine différente).
 
-> ⚠️ La `ENCRYPTION_KEY` dans `.env` doit être **identique** à celle de l'instance source — c'est la même clé qui chiffre la base SQLite et toutes les colonnes sensibles. Sans elle, les données (backups, noms de sites, équipements) seront illisibles.
-
-### Procédure
-
-**1. Préparer l'installation**
-```bash
-cp .env.example .env
-# Éditer .env en renseignant la même ENCRYPTION_KEY que l'instance d'origine
-```
-
-**2. Démarrer une première fois pour créer le volume Docker**
-```bash
-docker compose up -d --build
-docker compose down
-```
-
-**3. Restaurer la sauvegarde dans le volume**
-```bash
-docker run --rm \
-  -v nexusvault-data:/data \
-  -v $(pwd):/backup \
-  alpine \
-  tar xzf /backup/nexusvault-backup-YYYYMMDD.tar.gz -C /
-```
-
-**4. Relancer**
-```bash
-docker compose up -d
-```
-
-### Notes
-
-- Le `JWT_SECRET` peut être différent — les utilisateurs devront simplement se reconnecter.
-- Pour vérifier le nom exact du volume sur votre machine :
-```bash
-docker volume ls | grep nexusvault
-```
-- Le message `tar: removing leading '/' from member names` lors de la **sauvegarde** est un avertissement informatif normal — l'archive est créée correctement.
 
 ---
+
+## Restauration
+
+Remplacer VOLUME_NAME par le nom trouve avec docker volume ls.
+La ENCRYPTION_KEY doit etre identique a celle de l instance source.
+
+
 
 ## Réinitialisation d'un mot de passe
 

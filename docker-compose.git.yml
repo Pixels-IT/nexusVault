@@ -1,11 +1,15 @@
-# docker-compose.yml — utilise les images Docker Hub
+# docker-compose.git.yml — builder depuis les sources locales
+# Usage : docker compose -f docker-compose.git.yml up -d --build
+
 # Pour builder depuis les sources : docker compose -f docker-compose.git.yml up -d --build
 # Remplacer VOTRE_DOCKERHUB_USER par votre identifiant Docker Hub
 
 services:
 
   backend:
-    image: VOTRE_DOCKERHUB_USER/nexusvault-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: nexusvault-backend
     restart: unless-stopped
     environment:
@@ -31,7 +35,11 @@ services:
       start_period: 60s
 
   frontend:
-    image: VOTRE_DOCKERHUB_USER/nexusvault-frontend:latest
+    build:
+      context: ./frontend
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
+      dockerfile: Dockerfile
     container_name: nexusvault-frontend
     restart: unless-stopped
     ports:

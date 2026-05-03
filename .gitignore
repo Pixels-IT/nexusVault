@@ -8,5 +8,8 @@ frontend/build/
 *.db-wal
 
 # Script de déploiement local (peut contenir des secrets)
+deploy.sh
 deploy-dev.sh
-deploy-main.sh
+
+# Données de démonstration (peut contenir des données sensibles)
+seed.js
