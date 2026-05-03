@@ -120,14 +120,14 @@ export default function Login() {
         />
       </div>
 
-      <div style={{width:'100%', maxWidth:520}}>
-        {/* Logo */}
-        <div style={{textAlign:'center', marginBottom:32}}>
-          <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', maxWidth:480, height:'auto'}} />
-        </div>
+      <div style={{width:'100%', maxWidth:440}}>
 
-        {/* Card */}
-        <div className="card" style={{padding:'36px 40px'}}>
+        {/* Card avec logo à l'intérieur */}
+        <div className="card" style={{padding:'32px 36px'}}>
+          {/* Logo */}
+          <div style={{textAlign:'center', marginBottom:24}}>
+            <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', maxWidth:260, height:'auto'}} />
+          </div>
           {passwordChanged && (
             <div className="alert alert-ok" style={{fontSize:12, marginBottom:16}}>
               ✓ {t('auth.password_changed')}
@@ -164,7 +164,7 @@ export default function Login() {
               type="submit"
               className="btn btn-primary"
               disabled={loading}
-              style={{width:'100%', justifyContent:'center', marginTop:8}}
+              style={{display:'block',width:'auto',minWidth:200,margin:'12px auto 0',textAlign:'center'}}
             >
               {loading ? t('auth.logging_in') : t('auth.login')}
             </button>
