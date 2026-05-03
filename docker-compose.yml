@@ -5,7 +5,7 @@
 services:
 
   backend:
-    image: VOTRE_DOCKERHUB_USER/nexusvault-backend:latest
+    image: pixelsia/nexusvault-backend:latest
     container_name: nexusvault-backend
     restart: unless-stopped
     environment:
@@ -31,7 +31,7 @@ services:
       start_period: 60s
 
   frontend:
-    image: VOTRE_DOCKERHUB_USER/nexusvault-frontend:latest
+    image: pixelsia/nexusvault-frontend:latest
     container_name: nexusvault-frontend
     restart: unless-stopped
     ports:
