@@ -901,6 +901,10 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
       const tagColors = {};
       tags.forEach(t => { tagColors[t.code] = t.color; });
 
+      // Charger le logo PDF si défini
+      let pdfLogo = null;
+      try { const lr = await api.getPdfLogo(); pdfLogo = lr.logo || null; } catch {}
+
       // Grouper par année > mois
       const grouped = {};
       filtered.forEach(e => {
@@ -1016,11 +1020,12 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;font-size:12px;color:#1e293b;background:#fff}
-.header{background:linear-gradient(135deg,#0d47a1 0%,#1976d2 50%,#26c6da 100%);padding:28px 32px;display:flex;justify-content:space-between;align-items:center}
-.header-logo{color:white;font-size:22px;font-weight:800;letter-spacing:1px}
-.header-logo span{opacity:.7}
-.header-right{text-align:right;color:rgba(255,255,255,.85);font-size:11px}
-.header-right .scope{font-size:15px;font-weight:700;color:white;margin-bottom:4px}
+.header{background:#f8fafc;border-bottom:2px solid #e2e8f0;padding:20px 32px;display:flex;justify-content:space-between;align-items:center}
+.header-logo{font-size:22px;font-weight:800;letter-spacing:1px;color:#1e293b}
+.header-logo span{color:#2196f3}
+.header-logo img{max-height:60px;max-width:220px;object-fit:contain;display:block}
+.header-right{text-align:right;color:#64748b;font-size:11px}
+.header-right .scope{font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px}
 .meta-bar{background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:10px 32px;display:flex;gap:24px;font-size:11px;color:#64748b}
 .meta-item{display:flex;align-items:center;gap:5px}
 .meta-dot{width:6px;height:6px;border-radius:50%;background:#2196f3;display:inline-block}
@@ -1053,7 +1058,7 @@ tr:not(.yr-row):not(.mo-row):nth-child(even){background:#fafafa}
 </head>
 <body>
 <div class="header">
-  <div class="header-logo">NEXUS<span>VAULT</span></div>
+  <div class="header-logo">${pdfLogo ? `<img src="${pdfLogo}" alt="Logo"/>` : 'NEXUS<span>VAULT</span>'}</div>
   <div class="header-right">
     <div class="scope">Suivi d'activité — ${who}</div>
     <div>${modeLabel}</div>

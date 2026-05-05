@@ -1728,14 +1728,21 @@ function ActivityOptionsTab() {
   const [msg, setMsg]               = useState('');
 
   // Import CSV
-  const [csvFile, setCsvFile]       = useState(null);
-  const [importing, setImporting]   = useState(false);
+  const [csvFile, setCsvFile]         = useState(null);
+  const [importing, setImporting]     = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [importError, setImportError]   = useState('');
   const fileInputRef = useRef(null);
 
+  // Logo PDF
+  const [logoPreview, setLogoPreview]   = useState(null);
+  const [logoSaving, setLogoSaving]     = useState(false);
+  const [logoMsg, setLogoMsg]           = useState('');
+  const logoInputRef = useRef(null);
+
   useEffect(() => {
     api.getFeatureFlags().then(f => setCustomDate(!!f.activity_custom_date)).catch(() => {});
+    api.getPdfLogo().then(r => setLogoPreview(r.logo || null)).catch(() => {});
   }, []);
 
   async function toggle() {
@@ -1763,6 +1770,48 @@ function ActivityOptionsTab() {
     finally { setImporting(false); }
   }
 
+  function handleLogoFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setLogoMsg('Fichier invalide — image requise.'); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        if (img.height > 120) {
+          setLogoMsg(`Image trop haute (${img.height}px). Maximum 120px de hauteur.`);
+          return;
+        }
+        setLogoPreview(ev.target.result);
+        setLogoMsg('');
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  async function saveLogo() {
+    setLogoSaving(true); setLogoMsg('');
+    try {
+      await api.setPdfLogo(logoPreview);
+      setLogoMsg('Logo sauvegardé.');
+      setTimeout(() => setLogoMsg(''), 3000);
+    } catch (e) { setLogoMsg('Erreur : ' + e.message); }
+    finally { setLogoSaving(false); }
+  }
+
+  async function deleteLogo() {
+    setLogoSaving(true); setLogoMsg('');
+    try {
+      await api.setPdfLogo(null);
+      setLogoPreview(null);
+      setLogoMsg('Logo supprimé.');
+      setTimeout(() => setLogoMsg(''), 3000);
+    } catch (e) { setLogoMsg('Erreur : ' + e.message); }
+    finally { setLogoSaving(false); }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Card date cosmétique */}
@@ -1788,12 +1837,63 @@ function ActivityOptionsTab() {
               <div style={{ fontWeight: 600, fontSize: 13 }}>Permettre la modification de la date d'affichage</div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                 Quand cette option est activée, un champ date apparaît dans le formulaire d'édition d'une note.
-                Cette date est purement cosmétique : elle modifie uniquement l'affichage dans la liste des suivis
-                (TAG · date · extrait). La date réelle de création et l'historique de la note ne sont pas affectés.
+                Cette date est purement cosmétique : elle modifie uniquement l'affichage dans la liste des suivis.
               </div>
             </div>
           </label>
           {msg && <div className={`alert ${msg.startsWith('Erreur') ? 'alert-err' : 'alert-ok'}`} style={{ fontSize: 12 }}>{msg}</div>}
+        </div>
+      </div>
+
+      {/* Card logo PDF */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            Logo pour l'export PDF
+          </div>
+        </div>
+        <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            Ce logo remplace le texte "NEXUSVAULT" dans l'en-tête des exports PDF.
+            <br/><strong>Contrainte :</strong> hauteur max 120px recommandée.
+          </div>
+
+          {/* Prévisualisation */}
+          <div style={{ background: 'var(--surf2)', borderRadius: 'var(--r)', padding: '16px 20px',
+            border: '1px solid var(--brd)', display: 'flex', alignItems: 'center', gap: 16, minHeight: 70 }}>
+            {logoPreview
+              ? <img src={logoPreview} alt="Logo PDF" style={{ maxHeight: 60, maxWidth: 240, objectFit: 'contain' }} />
+              : <span style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Aucun logo — texte "NEXUSVAULT" utilisé</span>
+            }
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn" style={{ borderColor: 'var(--ok)', color: 'var(--ok)', display: 'flex', alignItems: 'center', gap: 6 }}
+              onClick={() => logoInputRef.current?.click()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              {logoPreview ? 'Changer le logo' : 'Uploader un logo'}
+            </button>
+            <input ref={logoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoFile} />
+
+            {logoPreview && (
+              <>
+                <button className="btn btn-primary" onClick={saveLogo} disabled={logoSaving}>
+                  {logoSaving ? 'Sauvegarde…' : 'Sauvegarder'}
+                </button>
+                <button className="btn" onClick={deleteLogo} disabled={logoSaving}
+                  style={{ borderColor: 'var(--err)', color: 'var(--err)' }}>
+                  Supprimer le logo
+                </button>
+              </>
+            )}
+          </div>
+          {logoMsg && <div className={`alert ${logoMsg.startsWith('Erreur') || logoMsg.includes('trop') ? 'alert-err' : 'alert-ok'}`} style={{ fontSize: 12 }}>{logoMsg}</div>}
         </div>
       </div>
 
@@ -1811,8 +1911,8 @@ function ActivityOptionsTab() {
           <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surf2)', borderRadius: 'var(--r)', padding: '10px 12px', fontFamily: 'var(--mono)', lineHeight: 1.8 }}>
             Format attendu (séparateur <strong>;</strong>) :<br/>
             <span style={{ color: 'var(--acc)' }}>ANNEE;MOIS;JOUR;TAG;NOTE</span><br/>
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Exemple : 2026;01;15;SECU;Mise à jour du firewall</span><br/>
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Si le TAG n'existe pas, il sera créé avec le libellé "A définir".</span>
+            <span style={{ fontSize: 11 }}>Exemple : 2026;01;15;SECU;Mise à jour du firewall</span><br/>
+            <span style={{ fontSize: 11 }}>Si le TAG n'existe pas, il sera créé automatiquement. Si la date est future, la note sera en preview.</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1837,7 +1937,7 @@ function ActivityOptionsTab() {
           {csvFile && (
             <button className="btn btn-primary" onClick={handleImport} disabled={importing}
               style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {importing ? 'Import en cours…' : 'Lancer l\'import'}
+              {importing ? 'Import en cours…' : "Lancer l'import"}
             </button>
           )}
 
@@ -1846,11 +1946,11 @@ function ActivityOptionsTab() {
               <strong>✓ Import terminé</strong>
               <span>{importResult.imported} note(s) importée(s), {importResult.skipped} ignorée(s)</span>
               {importResult.tagsCreated?.length > 0 && (
-                <span>Tags créés : <strong>{importResult.tagsCreated.join(', ')}</strong> (libellé "A définir", couleur noire)</span>
+                <span>Tags créés : <strong>{importResult.tagsCreated.join(', ')}</strong></span>
               )}
               {importResult.errors?.length > 0 && (
                 <details style={{ marginTop: 4 }}>
-                  <summary style={{ cursor: 'pointer', fontSize: 11 }}>{importResult.errors.length} ligne(s) ignorée(s) — détails</summary>
+                  <summary style={{ cursor: 'pointer', fontSize: 11 }}>{importResult.errors.length} ligne(s) ignorée(s)</summary>
                   <div style={{ marginTop: 4, fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.6 }}>
                     {importResult.errors.map((e, i) => <div key={i}>{e}</div>)}
                   </div>
@@ -1871,6 +1971,7 @@ function ActivityTagsTab() {
   const [editTag, setEditTag] = useState(null);
   const [error, setError]     = useState('');
   const [confirm, setConfirm] = useState(null);
+  const [usageError, setUsageError] = useState(null); // { tagCode, usages[] }
 
   const load = () => api.activityTags().then(setTags).catch(() => {});
   useEffect(() => { load(); }, []);
@@ -1985,8 +2086,48 @@ function ActivityTagsTab() {
         </table>
       </div>
       {confirm && <ConfirmModal message={`Supprimer le tag "${confirm.code}" ?`}
-        onConfirm={async () => { await api.deleteTag(confirm.id); setConfirm(null); load(); }}
+        onConfirm={async () => {
+          try {
+            await api.deleteTag(confirm.id);
+            setConfirm(null); load();
+          } catch (e) {
+            if (e.status === 409 || (e.usages)) {
+              setUsageError({ tagCode: confirm.code, usages: e.usages || [] });
+            } else {
+              setError(e.message);
+            }
+            setConfirm(null);
+          }
+        }}
         onCancel={() => setConfirm(null)} />}
+
+      {usageError && (
+        <Modal title={`Tag [${usageError.tagCode}] — impossible de supprimer`} onClose={() => setUsageError(null)}
+          footer={<button className="btn" onClick={() => setUsageError(null)}>Fermer</button>}>
+          <div className="alert alert-err" style={{ fontSize: 12, marginBottom: 12 }}>
+            Ce tag est utilisé dans des notes et ne peut pas être supprimé.
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--muted)' }}>
+            Notes utilisant ce tag ({usageError.usages.length}{usageError.usages.length >= 20 ? '+' : ''}) :
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
+            {usageError.usages.map((u, i) => (
+              <div key={i} style={{ background: 'var(--surf2)', borderRadius: 'var(--r)', padding: '7px 10px',
+                border: '1px solid var(--brd)', fontSize: 12 }}>
+                <span style={{ color: 'var(--muted)', marginRight: 8 }}>
+                  {u.date.slice(8,10)}/{u.date.slice(5,7)}/{u.date.slice(0,4)}
+                </span>
+                {u.excerpt}{u.excerpt.length >= 60 ? '…' : ''}
+              </div>
+            ))}
+          </div>
+          {usageError.usages.length >= 20 && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+              Seules les 20 premières notes sont affichées.
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

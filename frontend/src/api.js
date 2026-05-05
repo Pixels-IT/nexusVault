@@ -8,7 +8,12 @@ async function request(method, path, body) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${BASE}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error || `Erreur ${res.status}`);
+    err.status = res.status;
+    if (data.usages) err.usages = data.usages;
+    throw err;
+  }
   return data;
 }
 
@@ -58,6 +63,8 @@ const api = {
   totpSetupQr:     (setup_token) => request('POST', '/auth/totp/setup-qr', { setup_token }),
   totpSetupVerify: (setup_token, totp_token) => request('POST', '/auth/totp/setup-verify', { setup_token, totp_token }),
   importActivityCsv: (csv) => request('POST', '/activity/import-csv', { csv }),
+  getPdfLogo: () => request('GET', '/settings/pdf-logo'),
+  setPdfLogo: (logo) => request('PUT', '/settings/pdf-logo', { logo }),
   getPrefs: () => request('GET', '/me/prefs'),
   // Activity
   activityTags: () => request('GET', '/activity/tags'),

@@ -804,6 +804,25 @@ app.put('/api/settings/feature-flags', authMiddleware, requireRole('admin'), (re
   res.json({ success: true, flags: updated });
 });
 
+// Logo PDF — stocké en base64 dans settings
+app.get('/api/settings/pdf-logo', authMiddleware, (req, res) => {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key='pdf_logo'").get();
+  res.json({ logo: row ? row.value : null });
+});
+app.put('/api/settings/pdf-logo', authMiddleware, requireRole('admin'), (req, res) => {
+  const { logo } = req.body; // base64 data URL ou null pour supprimer
+  const db = getDb();
+  if (logo === null || logo === '') {
+    db.prepare("DELETE FROM settings WHERE key='pdf_logo'").run();
+  } else {
+    if (!logo.startsWith('data:image/')) return res.status(400).json({ error: 'Format image invalide' });
+    if (logo.length > 500000) return res.status(400).json({ error: 'Image trop lourde (max ~375 Ko)' });
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('pdf_logo', ?)").run(logo);
+  }
+  audit(db, { userId: req.user.id, username: req.user.username, action: logo ? 'LOGO_PDF_MODIFIE' : 'LOGO_PDF_SUPPRIME', category: 'admin', severity: 'info', detail: logo ? 'Logo PDF mis à jour' : 'Logo PDF supprimé', ip: getClientIp(req), success: 1 });
+  res.json({ success: true });
+});
+
 app.get('/api/security/brute-config', authMiddleware, requireRole('admin'), (req, res) => {
   res.json(getBruteConfig(getDb()));
 });
@@ -1608,8 +1627,23 @@ app.put('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), 
 app.delete('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), (req, res) => {
   const db = getDb(); const ip = getClientIp(req);
   const tag = db.prepare('SELECT code, label FROM activity_tags WHERE id=?').get(req.params.id);
+  if (!tag) return res.status(404).json({ error: 'Tag introuvable' });
+  // Vérifier si le tag est utilisé
+  const usages = db.prepare(
+    'SELECT ae.id, ae.year, ae.month, ae.created_at, ae.content FROM activity_entries ae WHERE ae.tag_code=? ORDER BY ae.year DESC, ae.month DESC LIMIT 20'
+  ).all(tag.code);
+  if (usages.length > 0) {
+    return res.status(409).json({
+      error: `Le tag [${tag.code}] est utilisé dans ${usages.length} note(s) et ne peut pas être supprimé.`,
+      usages: usages.map(e => ({
+        id: e.id, year: e.year, month: e.month,
+        date: (e.created_at||'').slice(0,10),
+        excerpt: (e.content||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60),
+      })),
+    });
+  }
   db.prepare('DELETE FROM activity_tags WHERE id=?').run(req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_SUPPRIMÉ', category: 'suivi', severity: 'warn', detail: `Tag [${tag?.code || req.params.id}] "${tag?.label || ''}" supprimé`, ip, success: 1 });
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_SUPPRIMÉ', category: 'suivi', severity: 'warn', detail: `Tag [${tag.code}] "${tag.label}" supprimé`, ip, success: 1 });
   res.json({ success: true });
 });
 
@@ -1821,7 +1855,7 @@ app.post('/api/activity/import-csv', authMiddleware, requirePerm('activity_tags'
   const lines = csv.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
   const results = { imported: 0, skipped: 0, errors: [], tagsCreated: [] };
 
-  const insertEntry = db.prepare('INSERT INTO activity_entries (user_id, year, month, tag_code, content, created_at, updated_at) VALUES (?,?,?,?,?,?,?)');
+  const insertEntry = db.prepare('INSERT INTO activity_entries (user_id, year, month, tag_code, content, is_preview, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)');
   const insertTag   = db.prepare("INSERT INTO activity_tags (code, label, color) VALUES (?,?,?)");
   const insertHist  = db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)');
 
@@ -1851,8 +1885,11 @@ app.post('/api/activity/import-csv', authMiddleware, requirePerm('activity_tags'
       // Construire la date
       const pad = n => String(n).padStart(2,'0');
       const createdAt = `${year}-${pad(month)}-${pad(day)} 00:00:00`;
-
-      const r = insertEntry.run(req.user.id, year, month, tag, note.trim(), createdAt, createdAt);
+      // Preview automatique si date future
+      const today = new Date(); today.setHours(0,0,0,0);
+      const entryDate = new Date(year, month-1, day);
+      const isPreview = entryDate > today ? 1 : 0;
+      const r = insertEntry.run(req.user.id, year, month, tag, note.trim(), isPreview, createdAt, createdAt);
       insertHist.run(r.lastInsertRowid, 'created', `[${tag}] Import CSV — ${note.trim().replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60)}`, req.user.id, nowLocal());
       results.imported++;
     }
