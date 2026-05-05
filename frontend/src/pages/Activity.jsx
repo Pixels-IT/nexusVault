@@ -99,7 +99,7 @@ function HistoryModal({ entryId, onClose }) {
   );
 }
 
-function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave }) {
+function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, customDateEnabled }) {
   const { t } = useI18n();
   const isEdit = !!entry;
   const now = new Date();
@@ -108,6 +108,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
   const [tagCode,   setTagCode]  = useState(entry?.tag_code || '');
   const [content,   setContent]  = useState(entry?.content || '');
   const [isPreview, setIsPreview] = useState(entry?.is_preview ? true : false);
+  const [displayDate, setDisplayDate] = useState(entry?.display_date || '');
   const [tagError,  setTagError]  = useState(false);
   const [loading,   setLoading]  = useState(false);
   const [error,     setError]    = useState('');
@@ -142,7 +143,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
     try {
       const preview = isFutureMonth() ? true : isPreview;
       let entryId = entry?.id;
-      if (isEdit) await api.updateEntry(entry.id, { tag_code: tagCode, content, is_preview: preview });
+      if (isEdit) await api.updateEntry(entry.id, { tag_code: tagCode, content, is_preview: preview, display_date: customDateEnabled ? (displayDate || null) : undefined });
       else {
         const r = await api.createEntry({ year, month, tag_code: tagCode, content, is_preview: preview });
         entryId = r.id;
@@ -235,6 +236,8 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
 
   const totalFiles = files.length;
 
+  const [showFilesModal, setShowFilesModal] = useState(false);
+
   return (
     <>
     <Modal
@@ -256,19 +259,22 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
       width="720px"
       footer={
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%' }}>
-          {/* Bouton Fichiers à gauche */}
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             <button className="btn" onClick={() => fileInputRef.current?.click()}
-              style={{display:'flex',alignItems:'center',gap:6,background:'#16a34a',color:'white',
-                border:'none',fontSize:12,fontWeight:600}}>
+              style={{borderColor:'var(--ok)',color:'var(--ok)',display:'flex',alignItems:'center',gap:6}}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-              </svg>
-              Fichiers {files.length > 0 && <span style={{background:'rgba(255,255,255,.3)',borderRadius:8,padding:'0 6px',fontSize:11}}>{files.length}</span>}
-            </button>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>Importer</button>
             <input ref={fileInputRef} type="file" multiple style={{display:'none'}} onChange={handleFileSelect}/>
+            <button className="btn" onClick={() => setShowFilesModal(true)}
+              style={{display:'flex',alignItems:'center',gap:6}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+              </svg>
+              Fichiers
+              {files.length > 0 && <span style={{background:'var(--acc)',color:'white',borderRadius:10,padding:'1px 7px',fontSize:11,fontWeight:700,marginLeft:2}}>{files.length}</span>}
+            </button>
           </div>
-          {/* Boutons Annuler / Sauvegarder à droite */}
           <div style={{display:'flex',gap:8}}>
             <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
             <button className="btn btn-primary" onClick={submit} disabled={loading || !tagCode}>
@@ -321,99 +327,253 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
         )}
       </div>
       <div className="form-group">
-        <label className="form-label">Description</label>
-        <textarea className="form-control" value={content} onChange={e => setContent(e.target.value)}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+          <label className="form-label" style={{ marginBottom:0 }}>Description</label>
+          <button type="button"
+            title="Entourer la sélection avec [secret]...[/secret]"
+            onClick={() => {
+              const ta = document.getElementById('entry-textarea');
+              if (!ta) return;
+              const start = ta.selectionStart, end = ta.selectionEnd;
+              const selected = content.slice(start, end);
+              const before = content.slice(0, start);
+              const after  = content.slice(end);
+              const newContent = selected
+                ? `${before}[secret]${selected}[/secret]${after}`
+                : `${before}[secret][/secret]${after}`;
+              setContent(newContent);
+              setTimeout(() => {
+                ta.focus();
+                const newPos = selected ? start + 8 + selected.length + 9 : start + 8;
+                ta.setSelectionRange(newPos, newPos);
+              }, 10);
+            }}
+            style={{ display:'flex', alignItems:'center', gap:4, background:'none',
+              border:'1px solid var(--brd)', borderRadius:'var(--r)',
+              padding:'2px 8px', cursor:'pointer', fontSize:11,
+              color:'var(--muted)', fontFamily:'var(--mono)' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:11,height:11}}>
+              <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            [secret]
+          </button>
+        </div>
+        <textarea id="entry-textarea" className="form-control" value={content} onChange={e => setContent(e.target.value)}
           rows={4} placeholder="Ex: Mise à jour des serveurs Windows vers KB5..."
           style={{ resize:'vertical', fontFamily:'var(--font)' }} autoFocus />
       </div>
-      {!isFutureMonth() && (
-        <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:4, padding:'8px 0', borderTop:'1px solid var(--brd)' }}>
-          <input type="checkbox" id="preview-check" checked={isPreview}
-            onChange={e => setIsPreview(e.target.checked)}
-            style={{ width:14, height:14, cursor:'pointer' }} />
-          <label htmlFor="preview-check" style={{ fontSize:12, color:'var(--muted)', cursor:'pointer', userSelect:'none' }}>
-            Note en avant-première (preview) — ne compte pas dans les statistiques
-          </label>
+      {/* ── OPTIONS ── preview + date cosmétique regroupés */}
+      <div style={{ marginTop:8, borderTop:'1px solid var(--brd)', paddingTop:10 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'.06em', textTransform:'uppercase', marginBottom:8 }}>
+          Options
         </div>
-      )}
-      {isFutureMonth() && (
-        <div style={{ fontSize:11, color:'var(--warn)', marginTop:6, display:'flex', alignItems:'center', gap:6 }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:12, height:12 }}>
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          Mois futur — marqué automatiquement en preview
-        </div>
-      )}
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
 
-      {/* Section fichiers */}
-      {files.length > 0 && (
-        <div style={{marginTop:12, borderTop:'1px solid var(--brd)', paddingTop:10}}>
-          <div style={{fontSize:12,fontWeight:600,color:'var(--muted)',marginBottom:8}}>
-            Fichiers joints ({files.length})
-          </div>
-          {fileError && <div className="alert alert-err" style={{fontSize:11,marginBottom:8}}>{fileError}</div>}
-          <div style={{display:'flex',flexDirection:'column',gap:4}}>
-            {files.map((f, i) => (
-              <div key={f.id || f._tempId || i} style={{
-                display:'flex',alignItems:'center',gap:8,padding:'6px 10px',
-                background:'var(--surf2)',borderRadius:'var(--r)',
-                border:'1px solid var(--brd)',fontSize:12,
-              }}>
-                {/* Icône fichier */}
+          {/* Preview */}
+          {!isFutureMonth() ? (
+            <label style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 10px', borderRadius:'var(--r)',
+              background: isPreview ? 'var(--acc-s)' : 'var(--surf2)',
+              border: `1px solid ${isPreview ? 'var(--acc)' : 'var(--brd)'}`,
+              cursor:'pointer', transition:'all .12s' }}>
+              <input type="checkbox" checked={isPreview} onChange={e => setIsPreview(e.target.checked)}
+                style={{ width:14, height:14, accentColor:'var(--acc)', cursor:'pointer', flexShrink:0 }} />
+              <span style={{ fontSize:12, color: isPreview ? 'var(--acc)' : 'var(--txt)', userSelect:'none' }}>
+                Note en avant-première <span style={{ color:'var(--muted)', fontWeight:400 }}>— ne compte pas dans les statistiques</span>
+              </span>
+            </label>
+          ) : (
+            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:'var(--r)',
+              background:'var(--warn-s)', border:'1px solid var(--warn)', fontSize:12, color:'var(--warn)' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:13, height:13, flexShrink:0 }}>
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              Mois futur — marqué automatiquement en preview
+            </div>
+          )}
+
+          {/* Date d'affichage cosmétique */}
+          {customDateEnabled && isEdit && (
+            <div style={{ padding:'8px 10px', borderRadius:'var(--r)',
+              background: displayDate ? 'var(--acc-s)' : 'var(--surf2)',
+              border: `1px solid ${displayDate ? 'var(--acc)' : 'var(--brd)'}`,
+              transition:'all .12s' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom: displayDate ? 8 : 0 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                  style={{width:14,height:14,color:'var(--muted)',flexShrink:0}}>
-                  <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
-                  <polyline points="13 2 13 9 20 9"/>
+                  style={{ width:13, height:13, color: displayDate ? 'var(--acc)' : 'var(--muted)', flexShrink:0 }}>
+                  <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
                 </svg>
-                {/* Nom + infos */}
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.filename}</div>
-                  <div style={{fontSize:10,color:'var(--muted)'}}>{fmtSize(f.size_bytes)} · {fmtDate(f.uploaded_at)}{f._pending && ' · en attente'}</div>
-                </div>
-                {/* Lock badge */}
-                {f.locked ? <span style={{fontSize:10,background:'var(--warn-s)',color:'var(--warn)',padding:'1px 6px',borderRadius:8,fontWeight:600}}>Verrouillé</span> : null}
-                {/* Boutons */}
-                <div style={{display:'flex',gap:4,flexShrink:0}}>
-                  {/* Télécharger */}
-                  <button title="Télécharger" onClick={() => downloadFile(f)}
-                    style={{background:'none',border:'none',cursor:'pointer',padding:3,color:'var(--muted)',display:'flex'}}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                <span style={{ fontSize:12, color: displayDate ? 'var(--acc)' : 'var(--txt)', flex:1, userSelect:'none' }}>
+                  Date d'affichage <span style={{ color:'var(--muted)', fontWeight:400 }}>— cosmétique, ne modifie pas l'historique</span>
+                </span>
+                {displayDate && (
+                  <button type="button" onClick={() => setDisplayDate('')}
+                    style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:'var(--muted)',
+                      display:'flex', alignItems:'center', gap:3, padding:'2px 6px', borderRadius:4 }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:11,height:11}}>
+                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
+                    Réinitialiser
                   </button>
-                  {/* Lock/Unlock */}
-                  <button title={f.locked ? 'Déverrouiller' : 'Verrouiller'} onClick={() => toggleLock(f)}
-                    style={{background:'none',border:'none',cursor:'pointer',padding:3,color:f.locked?'var(--warn)':'var(--muted)',display:'flex'}}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
-                      {f.locked
-                        ? <><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>
-                        : <><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></>
-                      }
-                    </svg>
-                  </button>
-                  {/* Supprimer */}
-                  <button title={f.locked ? 'Déverrouillez avant de supprimer' : 'Supprimer'} onClick={() => deleteFile(f)}
-                    disabled={!!f.locked}
-                    style={{background:'none',border:'none',cursor:f.locked?'not-allowed':'pointer',padding:3,
-                      color:f.locked?'var(--brd)':'var(--err)',display:'flex'}}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
-                      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                      <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-                    </svg>
-                  </button>
-                </div>
+                )}
               </div>
-            ))}
-          </div>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <input type="date" value={displayDate} onChange={e => setDisplayDate(e.target.value)}
+                  style={{
+                    background: 'var(--surf)', color: 'var(--txt)', border: '1px solid var(--brd)',
+                    borderRadius: 'var(--r)', padding: '5px 10px', fontSize: 12,
+                    fontFamily: 'var(--font)', cursor: 'pointer', outline: 'none',
+                  }} />
+                {displayDate && (
+                  <span style={{ fontSize:11, color:'var(--muted)' }}>
+                    Affiché comme <strong style={{ color:'var(--acc)' }}>
+                      {new Date(displayDate + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' })}
+                    </strong>
+                    {entry?.created_at && <span> · réel : {entry.created_at.slice(8,10)}/{entry.created_at.slice(5,7)}</span>}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
         </div>
-      )}
+      </div>
+
     </Modal>
     {showHistory && isEdit && <HistoryModal entryId={entry.id} onClose={() => setShowHistory(false)} />}
+    {showFilesModal && (
+      <FilesModal
+        entryId={isEdit ? entry.id : null}
+        files={files}
+        setFiles={setFiles}
+        fileError={fileError}
+        setFileError={setFileError}
+        onClose={() => setShowFilesModal(false)}
+        fmtSize={fmtSize}
+        fmtDate={fmtDate}
+        toggleLock={toggleLock}
+        deleteFile={deleteFile}
+        downloadFile={downloadFile}
+      />
+    )}
     </>
   );
 }
 
 // ── LIGNE D'ENTRÉE ────────────────────────────────────────────────────────────
+
+// Masque le contenu entre balises [secret]...[/secret] par des ●●●●●
+function renderMasked(text) {
+  if (!text || !text.includes('[secret]')) return text;
+  const parts = [];
+  const regex = /\[secret\]([\s\S]*?)\[\/secret\]/gi;
+  let last = 0, match, key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) parts.push(<span key={key++}>{text.slice(last, match.index)}</span>);
+    parts.push(
+      <span key={key++} title="Contenu masqué — visible en édition"
+        style={{ fontFamily:'var(--mono)', letterSpacing:2, color:'var(--muted)', cursor:'default',
+          background:'var(--surf2)', borderRadius:4, padding:'1px 5px', fontSize:'0.85em',
+          border:'1px solid var(--brd)' }}>
+        ●●●●●
+      </span>
+    );
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push(<span key={key++}>{text.slice(last)}</span>);
+  return parts.length > 0 ? parts : text;
+}
+// ── MODAL FICHIERS JOINTS ─────────────────────────────────────────────────────
+function FilesModal({ entryId, files, setFiles, fileError, setFileError, onClose, fmtSize, fmtDate, toggleLock, deleteFile, downloadFile }) {
+  return (
+    <Modal
+      title={
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+          </svg>
+          Fichiers joints
+          {files.length > 0 && (
+            <span style={{background:'var(--acc)',color:'white',borderRadius:10,padding:'1px 8px',fontSize:11,fontWeight:700}}>
+              {files.length}
+            </span>
+          )}
+        </div>
+      }
+      onClose={onClose}
+      footer={<button className="btn" onClick={onClose}>Fermer</button>}
+    >
+      {fileError && <div className="alert alert-err" style={{fontSize:11,marginBottom:10}}>{fileError}</div>}
+      {files.length === 0 ? (
+        <div style={{textAlign:'center',padding:'28px 0',color:'var(--muted)',fontSize:13}}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{width:36,height:36,marginBottom:8,opacity:.4}}>
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+          </svg>
+          <div>Aucun fichier joint</div>
+          <div style={{fontSize:11,marginTop:4}}>Utilisez le bouton "Importer" pour ajouter des fichiers.</div>
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          {files.map((f, i) => (
+            <div key={f.id || f._tempId || i} style={{
+              display:'flex',alignItems:'center',gap:10,padding:'8px 12px',
+              background:'var(--surf2)',borderRadius:'var(--r)',
+              border:'1px solid var(--brd)',fontSize:12,
+            }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                style={{width:16,height:16,color:'var(--muted)',flexShrink:0}}>
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+              </svg>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.filename}</div>
+                <div style={{fontSize:10,color:'var(--muted)'}}>
+                  {fmtSize(f.size_bytes)} · {fmtDate(f.uploaded_at)}
+                  {f._pending && <span style={{color:'var(--warn)',marginLeft:4}}>• en attente d'enregistrement</span>}
+                </div>
+              </div>
+              {!!f.locked && (
+                <span style={{fontSize:10,background:'var(--warn-s)',color:'var(--warn)',padding:'2px 8px',borderRadius:8,fontWeight:600,flexShrink:0}}>
+                  Verrouillé
+                </span>
+              )}
+              <div style={{display:'flex',gap:4,flexShrink:0}}>
+                <button title="Télécharger" onClick={() => downloadFile(f)}
+                  style={{background:'none',border:'none',cursor:'pointer',padding:4,color:'var(--muted)',display:'flex',borderRadius:4}}
+                  onMouseEnter={e=>e.currentTarget.style.color='var(--acc)'}
+                  onMouseLeave={e=>e.currentTarget.style.color='var(--muted)'}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                </button>
+                <button title={f.locked ? 'Déverrouiller' : 'Verrouiller'} onClick={() => toggleLock(f)}
+                  style={{background:'none',border:'none',cursor:'pointer',padding:4,
+                    color:f.locked?'var(--warn)':'var(--muted)',display:'flex',borderRadius:4}}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+                    {f.locked
+                      ? <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>
+                      : <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></>
+                    }
+                  </svg>
+                </button>
+                <button title={f.locked ? 'Déverrouillez avant de supprimer' : 'Supprimer'}
+                  onClick={() => { deleteFile(f).then ? deleteFile(f).then(()=>{if(fileError)setFileError('');}) : deleteFile(f); }}
+                  disabled={!!f.locked}
+                  style={{background:'none',border:'none',cursor:f.locked?'not-allowed':'pointer',padding:4,
+                    color:f.locked?'var(--brd)':'var(--err)',display:'flex',borderRadius:4}}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
   const tag = tags.find(t => t.code === entry.tag_code);
   const isPreview = !!entry.is_preview;
@@ -440,15 +600,15 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
             <span style={{ fontSize: 8, fontWeight: 800, color: '#f76707', fontFamily: 'var(--mono)', letterSpacing: '.5px' }}>PRV</span>
           </div>
           <TagBadge tag={tag} />
-          {entry.created_at && (
-            <span style={{ fontSize:11, color:'rgba(247,103,7,0.7)', whiteSpace:'nowrap' }}>
-              {(entry.created_at||'').slice(8,10)}/{(entry.created_at||'').slice(5,7)}
+          {(entry.display_date || entry.created_at) && (
+            <span style={{ fontSize:11, color:'rgba(247,103,7,0.7)', whiteSpace:'nowrap', fontStyle: 'normal' }} title={entry.display_date ? 'Date cosmétique (réelle: '+(entry.created_at||'').slice(8,10)+'/'+(entry.created_at||'').slice(5,7)+')' : ''}>
+              {entry.display_date ? (entry.display_date.slice(8,10)+'/'+entry.display_date.slice(5,7)) : ((entry.created_at||'').slice(8,10)+'/'+(entry.created_at||'').slice(5,7))}
             </span>
           )}
           <span style={{ color:'rgba(247,103,7,0.5)', fontSize:11 }}>—</span>
         </div>
         <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, fontStyle: 'italic', alignSelf:'center' }}>
-          {entry.content}
+          {renderMasked(entry.content)}
         </div>
         {canEdit && (
           <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginTop: 2 }}>
@@ -471,15 +631,15 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
     >
       <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, alignSelf:'center' }}>
         <TagBadge tag={tag} />
-        {entry.created_at && (
-          <span style={{ fontSize:11, color:'var(--muted)', whiteSpace:'nowrap' }}>
-            {(entry.created_at||'').slice(8,10)}/{(entry.created_at||'').slice(5,7)}
+        {(entry.display_date || entry.created_at) && (
+          <span style={{ fontSize:11, color:'var(--muted)', whiteSpace:'nowrap', fontStyle: 'normal' }} title={entry.display_date ? 'Date cosmétique (réelle: '+(entry.created_at||'').slice(8,10)+'/'+(entry.created_at||'').slice(5,7)+')' : ''}>
+            {entry.display_date ? (entry.display_date.slice(8,10)+'/'+entry.display_date.slice(5,7)) : ((entry.created_at||'').slice(8,10)+'/'+(entry.created_at||'').slice(5,7))}
           </span>
         )}
         <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>
       </div>
       <div style={{ flex: 1, fontSize: 13, color: 'var(--txt)', lineHeight: 1.6, alignSelf:'center' }}>
-        {entry.content}
+        {renderMasked(entry.content)}
       </div>
       {canEdit && (
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
@@ -492,7 +652,7 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
 }
 
 // ── MOIS SECTION ──────────────────────────────────────────────────────────────
-function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
+function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateEnabled }) {
     const { t } = useI18n();
   const [entries, setEntries]   = useState([]);
   const [loading, setLoading]   = useState(false);
@@ -618,7 +778,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
       )}
 
       {editEntry && (
-        <EntryModal tags={tags} entry={editEntry} onClose={() => setEditEntry(null)}
+        <EntryModal tags={tags} entry={editEntry} customDateEnabled={customDateEnabled} onClose={() => setEditEntry(null)}
           onSave={() => { setEditEntry(null); load(); }} />
       )}
       {delEntry && (
@@ -633,7 +793,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
 }
 
 // ── ANNÉE SECTION ─────────────────────────────────────────────────────────────
-function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle }) {
+function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle, customDateEnabled }) {
     const { t } = useI18n();
   const [open, setOpen] = useState(isOpenDefault || false);
   const [yearCount, setYearCount] = useState(null);
@@ -691,7 +851,7 @@ function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onTo
       {open && (
         <div>
           {months.map(m => (
-            <MonthSection key={m} year={year} month={m} tags={tags} onAdd={onAdd} userId={userId} filterTag={filterTag} />
+            <MonthSection key={m} year={year} month={m} tags={tags} onAdd={onAdd} userId={userId} filterTag={filterTag} customDateEnabled={customDateEnabled} />
           ))}
         </div>
       )}
@@ -797,17 +957,26 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
       // Lignes du tableau
       let rows = '';
       Object.keys(grouped).sort((a,b)=>b-a).forEach(yr => {
-        rows += `<tr class="yr-row"><td colspan="2">${yr}</td></tr>`;
+        rows += `<tr class="yr-row"><td colspan="3">${yr}</td></tr>`;
         Object.keys(grouped[yr]).sort().forEach(mo => {
-          rows += `<tr class="mo-row"><td colspan="2">${MONTHS[parseInt(mo)-1]}</td></tr>`;
+          rows += `<tr class="mo-row"><td colspan="3">${MONTHS[parseInt(mo)-1]}</td></tr>`;
           grouped[yr][mo].forEach(e => {
             const col = tagColors[e.tag_code] || '#066fd1';
             const r = parseInt(col.slice(1,3),16), g=parseInt(col.slice(3,5),16), b=parseInt(col.slice(5,7),16);
+            // Date d'affichage (cosmétique si définie, sinon date réelle)
+            const dispDate = e.display_date || e.created_at || '';
+            const dateStr = dispDate ? `${dispDate.slice(8,10)}/${dispDate.slice(5,7)}/${dispDate.slice(0,4)}` : '';
+            // Contenu complet avec sauts de ligne + secrets masqués
+            const safeContent = e.content
+              .replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/\n/g,'<br>')
+              .replace(/\[secret\][\s\S]*?\[\/secret\]/gi, '<span style="background:#f1f5f9;color:#64748b;font-family:monospace;padding:1px 4px;border-radius:3px;font-size:10px;border:1px solid #cbd5e1">●●●●●</span>');
             rows += `<tr>
-              <td style="width:80px;padding:5px 8px;vertical-align:top;">
+              <td style="width:70px;padding:6px 8px;vertical-align:top;white-space:nowrap;font-size:10px;color:#64748b">${dateStr}</td>
+              <td style="width:70px;padding:6px 8px;vertical-align:top;text-align:center;">
                 <span style="display:inline-block;background:rgba(${r},${g},${b},0.1);color:${col};border:1px solid ${col};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;font-family:monospace">${e.tag_code}</span>
               </td>
-              <td style="padding:5px 8px;font-size:11px;line-height:1.6;color:#1e293b">${e.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td>
+              <td style="padding:6px 8px;font-size:11px;line-height:1.7;color:#1e293b">${safeContent}</td>
             </tr>`;
           });
         });
@@ -1009,13 +1178,17 @@ export default function Activity() {
   const [filterTag, setFilterTag]   = useState('');
   const [tags, setTags]         = useState([]);
   const [users, setUsers]       = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null); // null = soi-même
+  const [selectedUser, setSelectedUser] = useState(null);
   const [years, setYears]       = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [addModal, setAddModal] = useState(null); // { year, month, onSaved }
+  const [addModal, setAddModal] = useState(null);
   const [showExport, setShowExport] = useState(false);
-  // Persister l'état ouvert/fermé des années (clé = year)
   const [openYears, setOpenYears] = useState({});
+  const [customDateEnabled, setCustomDateEnabled] = useState(false);
+
+  useEffect(() => {
+    api.getFeatureFlags().then(f => setCustomDateEnabled(!!f.activity_custom_date)).catch(() => {});
+  }, []);
 
   const canViewAll = isAdmin || can('activity_read');
   const targetUserId = canViewAll && selectedUser ? selectedUser : null;
@@ -1136,6 +1309,7 @@ export default function Activity() {
           <YearSection key={y} year={y} tags={tags} onAdd={openAdd} userId={targetUserId} filterTag={filterTag}
             isOpenDefault={!!openYears[y]}
             onToggle={isOpen => setOpenYears(prev => ({ ...prev, [y]: isOpen }))}
+            customDateEnabled={customDateEnabled}
           />
         ))
       )}
@@ -1145,6 +1319,7 @@ export default function Activity() {
           tags={tags}
           defaultYear={addModal.year}
           defaultMonth={addModal.month}
+          customDateEnabled={customDateEnabled}
           onClose={() => setAddModal(null)}
           onSave={() => {
             addModal.onSaved?.();

@@ -27,6 +27,11 @@ En cas de compromission, les attaquants ont tout sous la main !
 
 ### Suivi d'activités
 - **Suivi d'activité par utilisateurs des équipes IT par TAG avec filtrage**
+- **Export PDF du journal d'activité avec filtrage**
+- **Fichiers joints par note : upload, verrouillage, suppression, téléchargement**
+- **Balise `[secret]...[/secret]` pour masquer les données sensibles** (mots de passe, clés…) — affichage en `●●●●●` sur la liste, visible uniquement en édition
+- **Date d'affichage cosmétique** (option Admin → Suivi → Options) : modifier la date affichée sans toucher à l'historique réel
+- **TOTP obligatoire** configurable par l'admin (Admin → Sécurité → Authentification)
 - **Création de TAG personnalisés avec couleurs : SECU, ADM, NETWORK, etc.**
 - **Export PDF du suivi d'activité avec filtrage**
 
@@ -331,3 +336,22 @@ Une fois activée :
 ---
 
 *Version courante : consultez `.build_meta` pour le numéro de build exact.*
+
+---
+
+## Balise `[secret]` — Masquage de données sensibles
+
+Dans les notes de suivi d'activité, entourez les données sensibles avec la balise `[secret]` :
+
+```
+MDP serveur : [secret]MonMotDePasse123![/secret]
+Clé API : [secret]sk-xxxxxxxxxxxxxxxxxxxx[/secret]
+```
+
+**Comportement :**
+- **Page Suivi d'activité** : le contenu s'affiche comme `●●●●●` (fond orange), non lisible par les observateurs
+- **Modal d'édition** : le texte réel est visible et modifiable normalement
+- **Export PDF** : les données masquées apparaissent comme `●●●●●`
+
+> ⚠️ Les données sont stockées **en clair** dans la base chiffrée. Le masquage est uniquement visuel sur l'interface.
+

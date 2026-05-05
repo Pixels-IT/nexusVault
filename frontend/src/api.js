@@ -57,6 +57,7 @@ const api = {
   // TOTP
   totpSetupQr:     (setup_token) => request('POST', '/auth/totp/setup-qr', { setup_token }),
   totpSetupVerify: (setup_token, totp_token) => request('POST', '/auth/totp/setup-verify', { setup_token, totp_token }),
+  importActivityCsv: (csv) => request('POST', '/activity/import-csv', { csv }),
   getPrefs: () => request('GET', '/me/prefs'),
   // Activity
   activityTags: () => request('GET', '/activity/tags'),

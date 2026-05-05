@@ -29,6 +29,11 @@ If compromised, attackers have everything at their fingertips!
 - **IT team activity tracking per user via TAGs with filtering**
 - **Custom TAGs with colors: SECU, ADM, NETWORK, etc.**
 - **PDF export of activity log with filtering**
+- **File attachments per note: upload, lock, delete, download**
+- **`[secret]...[/secret]` tag to mask sensitive data** (passwords, keys…) — displayed as `●●●●●` in the list, visible only when editing
+- **Cosmetic display date** (option Admin → Activity → Options): change the displayed date without affecting the real history
+- **Mandatory TOTP** configurable by admin (Admin → Security → Authentication)
+- **PDF export of activity log with filtering**
 
 ### Audit Log
 - **Full audit: Login OK/NOK, Add/Delete/View/Edit**
@@ -388,3 +393,22 @@ Once enabled:
 ---
 
 *Current version: see `.build_meta` for the exact build number.*
+
+---
+
+## `[secret]` Tag — Masking Sensitive Data
+
+In activity tracking notes, wrap sensitive information with the `[secret]` tag:
+
+```
+Server password: [secret]MyPassword123![/secret]
+API key: [secret]sk-xxxxxxxxxxxxxxxxxxxx[/secret]
+```
+
+**Behavior:**
+- **Activity page**: the content is displayed as `●●●●●` (orange background), not readable by onlookers
+- **Edit modal**: the real text is visible and editable normally
+- **PDF export**: masked data appears as `●●●●●`
+
+> ⚠️ Data is stored **in plain text** in the encrypted database. The masking is visual only on the interface.
+

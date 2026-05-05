@@ -59,7 +59,8 @@ const PORT = process.env.PORT || 3001;
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 
 // Helper : heure locale formatée pour SQLite (respecte TZ du conteneur)
@@ -170,7 +171,7 @@ app.post('/api/auth/login', (req, res) => {
           return res.status(401).json({error:'Code TOTP invalide'});
         }
       } else {
-        const sToken=jwt.sign({id:user.id,username:user.username,totp_setup_required:true},process.env.JWT_SECRET,{expiresIn:'15m'});
+        const sToken=jwt.sign({id:user.id,username:user.username,totp_setup_required:true},JWT_SECRET,{expiresIn:'15m'});
         return res.json({totp_required:true,totp_setup:true,setup_token:sToken});
       }
     }
@@ -1665,31 +1666,43 @@ app.post('/api/activity/entries', authMiddleware, (req, res) => {
   ).run(req.user.id, noteYear, noteMonth, tag_code.toUpperCase(), content.trim(), previewFlag);
   const newId = r.lastInsertRowid;
   // Historique : création
-  db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(newId, 'created', `[${tag_code.toUpperCase()}] ${content.trim().slice(0,80)}${content.length>80?'…':''}`, req.user.id, nowLocal());
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_AJOUTÉ', category: 'suivi', severity: 'info', detail: (() => { const _d = nowLocal().slice(0,10); const _dd = _d.slice(8,10); const _mm = _d.slice(5,7); const _txt = (content||'').slice(0,60); return `${tag_code} · ${_dd}/${_mm} · ${_txt}${_txt.length===60?'…':''}${previewFlag?' (preview)':''}`; })(), ip: getClientIp(req), success: 1 });
+  db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(newId, 'created', `[${tag_code.toUpperCase()}] ${content.trim().replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,80)}${content.length>80?'…':''}`, req.user.id, nowLocal());
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_AJOUTÉ', category: 'suivi', severity: 'info', detail: (() => { const _d = nowLocal().slice(0,10); const _dd = _d.slice(8,10); const _mm = _d.slice(5,7); const _txt = (content||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60); return `${tag_code} · ${_dd}/${_mm} · ${_txt}${_txt.length===60?'…':''}${previewFlag?' (preview)':''}`; })(), ip: getClientIp(req), success: 1 });
   res.json({ id: newId, is_preview: previewFlag });
 });
 
 app.put('/api/activity/entries/:id', authMiddleware, (req, res) => {
-  const { tag_code, content, is_preview } = req.body;
+  const { tag_code, content, is_preview, display_date } = req.body;
   const db = getDb();
   const entry = db.prepare('SELECT * FROM activity_entries WHERE id=?').get(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Introuvable' });
   if (entry.user_id !== req.user.id)
     return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres notes' });
   const newPreview = is_preview === undefined ? entry.is_preview : (is_preview ? 1 : 0);
-  db.prepare('UPDATE activity_entries SET tag_code=?, content=?, is_preview=?, updated_at=? WHERE id=?').run(tag_code.toUpperCase(), content.trim(), newPreview, nowLocal(), req.params.id);
+  // display_date : null = utiliser la date réelle, sinon stocker la date cosmétique (format YYYY-MM-DD)
+  const newDisplayDate = display_date !== undefined ? (display_date || null) : entry.display_date;
+  db.prepare('UPDATE activity_entries SET tag_code=?, content=?, is_preview=?, display_date=?, updated_at=? WHERE id=?').run(tag_code.toUpperCase(), content.trim(), newPreview, newDisplayDate, nowLocal(), req.params.id);
   // Historique : modification
   const changes = [];
   if (entry.tag_code !== tag_code.toUpperCase()) changes.push(`Tag: ${entry.tag_code} → ${tag_code.toUpperCase()}`);
   if (entry.content !== content.trim()) changes.push('Contenu modifié');
   if (entry.is_preview !== newPreview) changes.push(newPreview ? 'Marqué preview' : 'Preview retirée (validée)');
+  if (newDisplayDate !== entry.display_date) {
+    const oldDisp = entry.display_date ? `${entry.display_date.slice(8,10)}/${entry.display_date.slice(5,7)}/${entry.display_date.slice(0,4)}` : 'date réelle';
+    const newDisp = newDisplayDate ? `${newDisplayDate.slice(8,10)}/${newDisplayDate.slice(5,7)}/${newDisplayDate.slice(0,4)}` : 'date réelle (réinitialisée)';
+    changes.push(`Date d'affichage: ${oldDisp} → ${newDisp}`);
+  }
   db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(parseInt(req.params.id), 'updated', changes.length ? changes.join(' | ') : 'Modification sans changement détecté', req.user.id, nowLocal());
-  // Audit SUIVI_MODIFIÉ
-  const _txt2 = (content||'').trim().slice(0, 60);
+  // Audit SUIVI_MODIFIÉ — inclut le changement de date cosmétique si applicable
+  // Masquer les balises [secret] dans l'audit
+  const maskSecrets = s => (s||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi, '[secret]');
+  const _txt2 = maskSecrets((content||'').trim()).slice(0, 60);
   const _d2 = entry.created_at ? entry.created_at.slice(0,10) : nowLocal().slice(0,10);
+  const _dateChange = (newDisplayDate !== entry.display_date)
+    ? ` · Date affichage: ${newDisplayDate ? newDisplayDate.slice(8,10)+'/'+newDisplayDate.slice(5,7)+'/'+newDisplayDate.slice(0,4) : 'réinitialisée'}`
+    : '';
   audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_MODIFIÉ', category: 'suivi', severity: 'info',
-    detail: `${tag_code.toUpperCase()} · ${_d2.slice(8,10)}/${_d2.slice(5,7)} · ${_txt2}${_txt2.length===60?'…':''}`, ip: getClientIp(req), success: 1 });
+    detail: `${tag_code.toUpperCase()} · ${_d2.slice(8,10)}/${_d2.slice(5,7)} · ${_txt2}${_txt2.length===60?'…':''}${_dateChange}`, ip: getClientIp(req), success: 1 });
   res.json({ success: true });
 });
 
@@ -1708,7 +1721,7 @@ app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
 app.post('/api/auth/totp/setup-qr', (req, res) => {
   const { setup_token } = req.body;
   if (!setup_token) return res.status(400).json({ error: 'setup_token requis' });
-  let p; try { p = jwt.verify(setup_token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
+  let p; try { p = jwt.verify(setup_token, JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
   if (!p.totp_setup_required) return res.status(403).json({ error: 'Non autorisé' });
   const db = getDb();
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(p.id);
@@ -1725,7 +1738,7 @@ app.post('/api/auth/totp/setup-verify', (req, res) => {
   const { setup_token, totp_token } = req.body;
   if (!setup_token || !totp_token) return res.status(400).json({ error: 'Champs requis' });
   const db = getDb(); const ip = getClientIp(req);
-  let p; try { p = jwt.verify(setup_token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
+  let p; try { p = jwt.verify(setup_token, JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
   if (!p.totp_setup_required) return res.status(403).json({ error: 'Non autorisé' });
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(p.id);
   if (!user) return res.status(404).json({ error: 'Introuvable' });
@@ -1798,6 +1811,64 @@ app.get('/api/activity/files/:id/download', authMiddleware, (req, res) => {
   res.setHeader('Content-Disposition','attachment; filename="'+fname+'"');
   res.setHeader('Content-Type',row.mimetype);
   res.send(buf);
+});
+
+// ── SUIVI D'ACTIVITÉ — IMPORT CSV ─────────────────────────────────────────────
+app.post('/api/activity/import-csv', authMiddleware, requirePerm('activity_tags'), (req, res) => {
+  const { csv } = req.body;
+  if (!csv) return res.status(400).json({ error: 'Contenu CSV manquant' });
+  const db = getDb(); const ip = getClientIp(req);
+  const lines = csv.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  const results = { imported: 0, skipped: 0, errors: [], tagsCreated: [] };
+
+  const insertEntry = db.prepare('INSERT INTO activity_entries (user_id, year, month, tag_code, content, created_at, updated_at) VALUES (?,?,?,?,?,?,?)');
+  const insertTag   = db.prepare("INSERT INTO activity_tags (code, label, color) VALUES (?,?,?)");
+  const insertHist  = db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)');
+
+  const txn = db.transaction(() => {
+    for (let i = 0; i < lines.length; i++) {
+      const parts = lines[i].split(';');
+      if (parts.length < 5) { results.errors.push(`Ligne ${i+1}: format invalide (${parts.length} champs)`); results.skipped++; continue; }
+      const [yearStr, monthStr, dayStr, tagRaw, ...noteParts] = parts;
+      const year  = parseInt(yearStr);
+      const month = parseInt(monthStr);
+      const day   = parseInt(dayStr);
+      const tag   = (tagRaw || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 20);
+      const note  = noteParts.join(';').trim();
+
+      if (!year || year < 2000 || year > 2100) { results.errors.push(`Ligne ${i+1}: année invalide (${yearStr})`); results.skipped++; continue; }
+      if (!month || month < 1 || month > 12)   { results.errors.push(`Ligne ${i+1}: mois invalide (${monthStr})`); results.skipped++; continue; }
+      if (!day   || day < 1   || day > 31)     { results.errors.push(`Ligne ${i+1}: jour invalide (${dayStr})`);   results.skipped++; continue; }
+      if (!tag)  { results.errors.push(`Ligne ${i+1}: TAG vide`); results.skipped++; continue; }
+      if (!note) { results.errors.push(`Ligne ${i+1}: note vide`); results.skipped++; continue; }
+
+      // Créer le TAG s'il n'existe pas
+      const existingTag = db.prepare('SELECT code FROM activity_tags WHERE code=?').get(tag);
+      if (!existingTag) {
+        try { insertTag.run(tag, 'A définir', '#000000'); results.tagsCreated.push(tag); } catch {}
+      }
+
+      // Construire la date
+      const pad = n => String(n).padStart(2,'0');
+      const createdAt = `${year}-${pad(month)}-${pad(day)} 00:00:00`;
+
+      const r = insertEntry.run(req.user.id, year, month, tag, note.trim(), createdAt, createdAt);
+      insertHist.run(r.lastInsertRowid, 'created', `[${tag}] Import CSV — ${note.trim().replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60)}`, req.user.id, nowLocal());
+      results.imported++;
+    }
+  });
+
+  try {
+    txn();
+    const tagInfo = results.tagsCreated.length ? ` · Tags créés: ${results.tagsCreated.join(', ')}` : '';
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_IMPORTÉ', category: 'suivi', severity: 'info',
+      detail: `Import CSV — ${results.imported} note(s) importée(s), ${results.skipped} ignorée(s)${tagInfo}`, ip, success: 1 });
+    res.json({ success: true, ...results });
+  } catch (e) {
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_IMPORT_ÉCHEC', category: 'suivi', severity: 'warn',
+      detail: `Import CSV échoué : ${e.message}`, ip, success: 0 });
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── SUIVI D'ACTIVITÉ — AUDIT EXPORT ──────────────────────────────────────────

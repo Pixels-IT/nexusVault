@@ -233,6 +233,7 @@ function initSchema() {
   try { db.exec("ALTER TABLE users ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT"); } catch {}
   try { db.exec("ALTER TABLE activity_entries ADD COLUMN is_preview INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE activity_entries ADD COLUMN display_date TEXT"); } catch {}
   try { db.exec("ALTER TABLE backups ADD COLUMN pinned INTEGER DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN totp_secret TEXT"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}

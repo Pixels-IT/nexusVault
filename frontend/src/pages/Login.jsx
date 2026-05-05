@@ -172,7 +172,7 @@ export default function Login() {
 
         {/* ── ÉTAPE 1 : IDENTIFIANTS ── */}
         {step === 'credentials' && (
-          <div className="card" style={{padding:'32px 36px'}}>
+          <div className="card" style={{padding:'32px 36px 16px 36px'}}>
             <div style={{textAlign:'center', marginBottom:24}}>
               <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', maxWidth:260, height:'auto'}} />
             </div>
@@ -196,6 +196,10 @@ export default function Login() {
               <button type="button" style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--muted)',padding:0}}
                 onMouseEnter={e=>e.target.style.color='var(--acc)'} onMouseLeave={e=>e.target.style.color='var(--muted)'}
                 onClick={() => setShowForgot(true)}>{t('auth.forgot_link')}</button>
+            </div>
+            {/* Version */}
+            <div style={{textAlign:'center', marginTop:24, fontSize:12, color:'var(--muted)', fontWeight:500, letterSpacing:'.2px', marginBottom:0}}>
+              {APP_VERSION}
             </div>
           </div>
         )}
@@ -282,10 +286,6 @@ export default function Login() {
           </div>
         )}
 
-        {/* Version */}
-        <div style={{textAlign:'center', marginTop:12, fontSize:12, color:'var(--muted)', fontWeight:500, letterSpacing:'.2px'}}>
-          {APP_VERSION}
-        </div>
       </div>
 
       {showForgot && <ForgotPasswordModal onClose={() => setShowForgot(false)} />}
