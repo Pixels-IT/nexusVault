@@ -174,7 +174,19 @@ function initSchema() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
-    CREATE TABLE IF NOT EXISTS activity_tags (
+    CREATE TABLE IF NOT EXISTS activity_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_id INTEGER NOT NULL REFERENCES activity_entries(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT DEFAULT 'application/octet-stream',
+      size_bytes INTEGER DEFAULT 0,
+      data TEXT NOT NULL,
+      locked INTEGER DEFAULT 0,
+      uploaded_at TEXT DEFAULT (datetime('now','localtime')),
+      uploaded_by INTEGER REFERENCES users(id)
+    );
+
+        CREATE TABLE IF NOT EXISTS activity_tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT NOT NULL UNIQUE,
       label TEXT NOT NULL,
@@ -221,7 +233,10 @@ function initSchema() {
   try { db.exec("ALTER TABLE users ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT"); } catch {}
   try { db.exec("ALTER TABLE activity_entries ADD COLUMN is_preview INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE activity_entries ADD COLUMN display_date TEXT"); } catch {}
   try { db.exec("ALTER TABLE backups ADD COLUMN pinned INTEGER DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN totp_secret TEXT"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}
 
   // Admin par défaut
   const adminExists = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');

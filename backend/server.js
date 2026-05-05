@@ -4,6 +4,10 @@ const { sshExec } = require('./ssh');
 const cors = require('cors');
 const helmet = require('helmet');
 const bcrypt = require('bcryptjs');
+const { authenticator } = require('otplib');
+// Fenêtre de tolérance : ±2 intervalles de 30s = ±60s — compense les légères dérives d'horloge
+authenticator.options = { window: 2 };
+const QRCode = require('qrcode');
 const jwt = require('jsonwebtoken');
 const { getDb, encrypt, decrypt, audit } = require('./db');
 const { authMiddleware, requireRole, requirePerm, JWT_SECRET, getClientIp, checkWhitelist } = require('./auth');
@@ -55,7 +59,8 @@ const PORT = process.env.PORT || 3001;
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 
 // Helper : heure locale formatée pour SQLite (respecte TZ du conteneur)
@@ -154,6 +159,23 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ error: 'Identifiants incorrects' });
   }
 
+  // Verifier TOTP si requis
+  { const _ffRow=db.prepare("SELECT value FROM settings WHERE key='feature_flags'").get();
+    const _ff=_ffRow?JSON.parse(_ffRow.value):{};
+    if (_ff.totp_required) {
+      if (user.totp_enabled) {
+        const {totp_token}=req.body;
+        if (!totp_token) return res.json({totp_required:true,totp_setup:false});
+        if (!authenticator.verify({token:totp_token,secret:user.totp_secret})) {
+          audit(db,{userId:user.id,username:user.username,action:'TOTP_ECHEC',category:'auth',severity:'warn',detail:'Code TOTP invalide depuis '+ip,ip,success:0});
+          return res.status(401).json({error:'Code TOTP invalide'});
+        }
+      } else {
+        const sToken=jwt.sign({id:user.id,username:user.username,totp_setup_required:true},JWT_SECRET,{expiresIn:'15m'});
+        return res.json({totp_required:true,totp_setup:true,setup_token:sToken});
+      }
+    }
+  }
   // Connexion réussie : réinitialiser les compteurs
   db.prepare('UPDATE users SET failed_attempts=0, locked_until=NULL, last_login_at=? WHERE id=?').run(nowLocal(), user.id);
   const token = jwt.sign(
@@ -220,7 +242,7 @@ app.get('/api/users/for-activity', authMiddleware, (req, res) => {
 });
 
 app.get('/api/users', authMiddleware, requireRole('admin'), (req, res) => {
-  const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at, locked_until, failed_attempts FROM users ORDER BY id').all();
+  const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at, locked_until, failed_attempts, totp_enabled FROM users ORDER BY id').all();
   res.json(rows);
 });
 
@@ -294,13 +316,17 @@ app.post('/api/users', authMiddleware, requireRole('admin'), async (req, res) =>
 });
 
 app.put('/api/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
-  const { username, display_name, email, role, permissions, enabled, password } = req.body;
+  const { username, display_name, email, role, permissions, enabled, password, reset_totp } = req.body;
   const ip = getClientIp(req);
   const db = getDb();
   if (password) {
     if (password.length < 14) return res.status(400).json({ error: 'Mot de passe: 14 caractères minimum' });
     const hash = bcrypt.hashSync(password, 12);
     db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?`).run(hash, nowLocal(), req.params.id);
+  }
+  if (reset_totp) {
+    db.prepare('UPDATE users SET totp_secret=NULL, totp_enabled=0 WHERE id=?').run(req.params.id);
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'TOTP_REINITIALISE', category: 'auth', severity: 'warn', detail: `TOTP réinitialisé pour user ID ${req.params.id}`, ip, success: 1 });
   }
   // Vérifier qu'on ne désactive pas/ne rétrograde pas le dernier admin actif
   const targetUser = db.prepare('SELECT role, enabled FROM users WHERE id = ?').get(req.params.id);
@@ -776,6 +802,25 @@ app.put('/api/settings/feature-flags', authMiddleware, requireRole('admin'), (re
   const updated = Object.assign(row ? JSON.parse(row.value) : {}, req.body);
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('feature_flags', ?)").run(JSON.stringify(updated));
   res.json({ success: true, flags: updated });
+});
+
+// Logo PDF — stocké en base64 dans settings
+app.get('/api/settings/pdf-logo', authMiddleware, (req, res) => {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key='pdf_logo'").get();
+  res.json({ logo: row ? row.value : null });
+});
+app.put('/api/settings/pdf-logo', authMiddleware, requireRole('admin'), (req, res) => {
+  const { logo } = req.body; // base64 data URL ou null pour supprimer
+  const db = getDb();
+  if (logo === null || logo === '') {
+    db.prepare("DELETE FROM settings WHERE key='pdf_logo'").run();
+  } else {
+    if (!logo.startsWith('data:image/')) return res.status(400).json({ error: 'Format image invalide' });
+    if (logo.length > 500000) return res.status(400).json({ error: 'Image trop lourde (max ~375 Ko)' });
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('pdf_logo', ?)").run(logo);
+  }
+  audit(db, { userId: req.user.id, username: req.user.username, action: logo ? 'LOGO_PDF_MODIFIE' : 'LOGO_PDF_SUPPRIME', category: 'admin', severity: 'info', detail: logo ? 'Logo PDF mis à jour' : 'Logo PDF supprimé', ip: getClientIp(req), success: 1 });
+  res.json({ success: true });
 });
 
 app.get('/api/security/brute-config', authMiddleware, requireRole('admin'), (req, res) => {
@@ -1582,8 +1627,23 @@ app.put('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), 
 app.delete('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), (req, res) => {
   const db = getDb(); const ip = getClientIp(req);
   const tag = db.prepare('SELECT code, label FROM activity_tags WHERE id=?').get(req.params.id);
+  if (!tag) return res.status(404).json({ error: 'Tag introuvable' });
+  // Vérifier si le tag est utilisé
+  const usages = db.prepare(
+    'SELECT ae.id, ae.year, ae.month, ae.created_at, ae.content FROM activity_entries ae WHERE ae.tag_code=? ORDER BY ae.year DESC, ae.month DESC LIMIT 20'
+  ).all(tag.code);
+  if (usages.length > 0) {
+    return res.status(409).json({
+      error: `Le tag [${tag.code}] est utilisé dans ${usages.length} note(s) et ne peut pas être supprimé.`,
+      usages: usages.map(e => ({
+        id: e.id, year: e.year, month: e.month,
+        date: (e.created_at||'').slice(0,10),
+        excerpt: (e.content||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60),
+      })),
+    });
+  }
   db.prepare('DELETE FROM activity_tags WHERE id=?').run(req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_SUPPRIMÉ', category: 'suivi', severity: 'warn', detail: `Tag [${tag?.code || req.params.id}] "${tag?.label || ''}" supprimé`, ip, success: 1 });
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_SUPPRIMÉ', category: 'suivi', severity: 'warn', detail: `Tag [${tag.code}] "${tag.label}" supprimé`, ip, success: 1 });
   res.json({ success: true });
 });
 
@@ -1640,31 +1700,43 @@ app.post('/api/activity/entries', authMiddleware, (req, res) => {
   ).run(req.user.id, noteYear, noteMonth, tag_code.toUpperCase(), content.trim(), previewFlag);
   const newId = r.lastInsertRowid;
   // Historique : création
-  db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(newId, 'created', `[${tag_code.toUpperCase()}] ${content.trim().slice(0,80)}${content.length>80?'…':''}`, req.user.id, nowLocal());
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_AJOUTÉ', category: 'suivi', severity: 'info', detail: (() => { const _d = nowLocal().slice(0,10); const _dd = _d.slice(8,10); const _mm = _d.slice(5,7); const _txt = (content||'').slice(0,60); return `${tag_code} · ${_dd}/${_mm} · ${_txt}${_txt.length===60?'…':''}${previewFlag?' (preview)':''}`; })(), ip: getClientIp(req), success: 1 });
+  db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(newId, 'created', `[${tag_code.toUpperCase()}] ${content.trim().replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,80)}${content.length>80?'…':''}`, req.user.id, nowLocal());
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_AJOUTÉ', category: 'suivi', severity: 'info', detail: (() => { const _d = nowLocal().slice(0,10); const _dd = _d.slice(8,10); const _mm = _d.slice(5,7); const _txt = (content||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60); return `${tag_code} · ${_dd}/${_mm} · ${_txt}${_txt.length===60?'…':''}${previewFlag?' (preview)':''}`; })(), ip: getClientIp(req), success: 1 });
   res.json({ id: newId, is_preview: previewFlag });
 });
 
 app.put('/api/activity/entries/:id', authMiddleware, (req, res) => {
-  const { tag_code, content, is_preview } = req.body;
+  const { tag_code, content, is_preview, display_date } = req.body;
   const db = getDb();
   const entry = db.prepare('SELECT * FROM activity_entries WHERE id=?').get(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Introuvable' });
   if (entry.user_id !== req.user.id)
     return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres notes' });
   const newPreview = is_preview === undefined ? entry.is_preview : (is_preview ? 1 : 0);
-  db.prepare('UPDATE activity_entries SET tag_code=?, content=?, is_preview=?, updated_at=? WHERE id=?').run(tag_code.toUpperCase(), content.trim(), newPreview, nowLocal(), req.params.id);
+  // display_date : null = utiliser la date réelle, sinon stocker la date cosmétique (format YYYY-MM-DD)
+  const newDisplayDate = display_date !== undefined ? (display_date || null) : entry.display_date;
+  db.prepare('UPDATE activity_entries SET tag_code=?, content=?, is_preview=?, display_date=?, updated_at=? WHERE id=?').run(tag_code.toUpperCase(), content.trim(), newPreview, newDisplayDate, nowLocal(), req.params.id);
   // Historique : modification
   const changes = [];
   if (entry.tag_code !== tag_code.toUpperCase()) changes.push(`Tag: ${entry.tag_code} → ${tag_code.toUpperCase()}`);
   if (entry.content !== content.trim()) changes.push('Contenu modifié');
   if (entry.is_preview !== newPreview) changes.push(newPreview ? 'Marqué preview' : 'Preview retirée (validée)');
+  if (newDisplayDate !== entry.display_date) {
+    const oldDisp = entry.display_date ? `${entry.display_date.slice(8,10)}/${entry.display_date.slice(5,7)}/${entry.display_date.slice(0,4)}` : 'date réelle';
+    const newDisp = newDisplayDate ? `${newDisplayDate.slice(8,10)}/${newDisplayDate.slice(5,7)}/${newDisplayDate.slice(0,4)}` : 'date réelle (réinitialisée)';
+    changes.push(`Date d'affichage: ${oldDisp} → ${newDisp}`);
+  }
   db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)').run(parseInt(req.params.id), 'updated', changes.length ? changes.join(' | ') : 'Modification sans changement détecté', req.user.id, nowLocal());
-  // Audit SUIVI_MODIFIÉ
-  const _txt2 = (content||'').trim().slice(0, 60);
+  // Audit SUIVI_MODIFIÉ — inclut le changement de date cosmétique si applicable
+  // Masquer les balises [secret] dans l'audit
+  const maskSecrets = s => (s||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi, '[secret]');
+  const _txt2 = maskSecrets((content||'').trim()).slice(0, 60);
   const _d2 = entry.created_at ? entry.created_at.slice(0,10) : nowLocal().slice(0,10);
+  const _dateChange = (newDisplayDate !== entry.display_date)
+    ? ` · Date affichage: ${newDisplayDate ? newDisplayDate.slice(8,10)+'/'+newDisplayDate.slice(5,7)+'/'+newDisplayDate.slice(0,4) : 'réinitialisée'}`
+    : '';
   audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_MODIFIÉ', category: 'suivi', severity: 'info',
-    detail: `${tag_code.toUpperCase()} · ${_d2.slice(8,10)}/${_d2.slice(5,7)} · ${_txt2}${_txt2.length===60?'…':''}`, ip: getClientIp(req), success: 1 });
+    detail: `${tag_code.toUpperCase()} · ${_d2.slice(8,10)}/${_d2.slice(5,7)} · ${_txt2}${_txt2.length===60?'…':''}${_dateChange}`, ip: getClientIp(req), success: 1 });
   res.json({ success: true });
 });
 
@@ -1678,6 +1750,163 @@ app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
+
+// TOTP ROUTES
+app.post('/api/auth/totp/setup-qr', (req, res) => {
+  const { setup_token } = req.body;
+  if (!setup_token) return res.status(400).json({ error: 'setup_token requis' });
+  let p; try { p = jwt.verify(setup_token, JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
+  if (!p.totp_setup_required) return res.status(403).json({ error: 'Non autorisé' });
+  const db = getDb();
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(p.id);
+  if (!user) return res.status(404).json({ error: 'Introuvable' });
+  const secret = authenticator.generateSecret();
+  const otpauth = authenticator.keyuri(user.username, 'NexusVault', secret);
+  db.prepare('UPDATE users SET totp_secret=? WHERE id=?').run(secret, user.id);
+  QRCode.toDataURL(otpauth, { margin: 1, width: 256 })
+    .then(qr => res.json({ secret, qr, username: user.username }))
+    .catch(() => res.status(500).json({ error: 'Erreur génération QR' }));
+});
+
+app.post('/api/auth/totp/setup-verify', (req, res) => {
+  const { setup_token, totp_token } = req.body;
+  if (!setup_token || !totp_token) return res.status(400).json({ error: 'Champs requis' });
+  const db = getDb(); const ip = getClientIp(req);
+  let p; try { p = jwt.verify(setup_token, JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
+  if (!p.totp_setup_required) return res.status(403).json({ error: 'Non autorisé' });
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(p.id);
+  if (!user) return res.status(404).json({ error: 'Introuvable' });
+  if (!authenticator.verify({ token: totp_token, secret: user.totp_secret }))
+    return res.status(401).json({ error: 'Code TOTP invalide — vérifiez l\'heure de votre appareil' });
+  db.prepare('UPDATE users SET totp_enabled=1, failed_attempts=0, locked_until=NULL, last_login_at=? WHERE id=?').run(nowLocal(), user.id);
+  const tok = jwt.sign(
+    { id: user.id, username: user.username, displayName: user.display_name, email: user.email, role: user.role, permissions: user.permissions || '{}', mustChangePassword: user.must_change_password === 1 },
+    JWT_SECRET, { expiresIn: '8h' }
+  );
+  audit(db, { userId: user.id, username: user.username, action: 'TOTP_CONFIGURE', category: 'auth', severity: 'info', detail: 'TOTP configuré et activé', ip, success: 1 });
+  res.json({ token: tok, mustChangePassword: user.must_change_password === 1 });
+});
+
+// FICHIERS JOINTS AU SUIVI D'ACTIVITE
+app.get('/api/activity/entries/:id/files', authMiddleware, (req, res) => {
+  const db=getDb();
+  const rows=db.prepare('SELECT id,filename,mimetype,size_bytes,locked,uploaded_at,uploaded_by FROM activity_files WHERE entry_id=? ORDER BY uploaded_at ASC').all(req.params.id);
+  res.json(rows.map(r=>({...r,filename:decrypt(r.filename)})));
+});
+app.post('/api/activity/entries/:id/files', authMiddleware, (req, res) => {
+  const {filename,mimetype,data}=req.body;
+  if (!filename||!data) return res.status(400).json({error:'filename et data requis'});
+  const db=getDb(); const ip=getClientIp(req);
+  const entry=db.prepare('SELECT id FROM activity_entries WHERE id=?').get(req.params.id);
+  if (!entry) return res.status(404).json({error:'Note introuvable'});
+  const size=Math.round((data.length*3)/4);
+  const r=db.prepare('INSERT INTO activity_files (entry_id,filename,mimetype,size_bytes,data,locked,uploaded_by) VALUES (?,?,?,?,?,0,?)').run(req.params.id,encrypt(filename),mimetype||'application/octet-stream',size,encrypt(data),req.user.id);
+  // Historique de la note
+  db.prepare('INSERT INTO activity_entry_history (entry_id,event_type,detail,changed_by,changed_at) VALUES (?,?,?,?,?)').run(parseInt(req.params.id),'file_added',`Fichier ajouté : ${filename} (${(size/1024).toFixed(1)} Ko)`,req.user.id,nowLocal());
+  // Audit global
+  audit(db,{userId:req.user.id,username:req.user.username,action:'FICHIER_AJOUTE',category:'activity',severity:'info',detail:`Note #${req.params.id} — ${filename}`,ip,success:1});
+  res.json({id:r.lastInsertRowid,filename,mimetype,size_bytes:size,locked:0,uploaded_at:new Date().toISOString()});
+});
+app.put('/api/activity/files/:id/lock', authMiddleware, (req, res) => {
+  const db=getDb(); const ip=getClientIp(req);
+  const row=db.prepare('SELECT id,locked,filename,entry_id FROM activity_files WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({error:'Fichier introuvable'});
+  const newLock=row.locked?0:1;
+  const fname=decrypt(row.filename);
+  db.prepare('UPDATE activity_files SET locked=? WHERE id=?').run(newLock,req.params.id);
+  const action=newLock?'verrouillé':'déverrouillé';
+  // Historique de la note
+  db.prepare('INSERT INTO activity_entry_history (entry_id,event_type,detail,changed_by,changed_at) VALUES (?,?,?,?,?)').run(row.entry_id,'file_locked',`Fichier ${action} : ${fname} (par ${req.user.username})`,req.user.id,nowLocal());
+  // Audit global
+  audit(db,{userId:req.user.id,username:req.user.username,action:newLock?'FICHIER_VERROUILLE':'FICHIER_DEVERROUILLE',category:'activity',severity:'info',detail:`Note #${row.entry_id} — ${fname}`,ip,success:1});
+  res.json({success:true,locked:newLock});
+});
+app.delete('/api/activity/files/:id', authMiddleware, (req, res) => {
+  const db=getDb(); const ip=getClientIp(req);
+  const row=db.prepare('SELECT locked,filename,entry_id FROM activity_files WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({error:'Fichier introuvable'});
+  if (row.locked) return res.status(403).json({error:'Fichier verrouille'});
+  const fname=decrypt(row.filename);
+  db.prepare('DELETE FROM activity_files WHERE id=?').run(req.params.id);
+  // Historique de la note
+  db.prepare('INSERT INTO activity_entry_history (entry_id,event_type,detail,changed_by,changed_at) VALUES (?,?,?,?,?)').run(row.entry_id,'file_deleted',`Fichier supprimé : ${fname} (par ${req.user.username})`,req.user.id,nowLocal());
+  // Audit global
+  audit(db,{userId:req.user.id,username:req.user.username,action:'FICHIER_SUPPRIME',category:'activity',severity:'warn',detail:`Note #${row.entry_id} — ${fname}`,ip,success:1});
+  res.json({success:true});
+});
+app.get('/api/activity/files/:id/download', authMiddleware, (req, res) => {
+  const db=getDb(); const ip=getClientIp(req);
+  const row=db.prepare('SELECT * FROM activity_files WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({error:'Fichier introuvable'});
+  const fname=decrypt(row.filename);
+  const buf=Buffer.from(decrypt(row.data),'base64');
+  // Audit global
+  audit(db,{userId:req.user.id,username:req.user.username,action:'FICHIER_TELECHARGE',category:'activity',severity:'info',detail:`Note #${row.entry_id} — ${fname}`,ip,success:1});
+  res.setHeader('Content-Disposition','attachment; filename="'+fname+'"');
+  res.setHeader('Content-Type',row.mimetype);
+  res.send(buf);
+});
+
+// ── SUIVI D'ACTIVITÉ — IMPORT CSV ─────────────────────────────────────────────
+app.post('/api/activity/import-csv', authMiddleware, requirePerm('activity_tags'), (req, res) => {
+  const { csv } = req.body;
+  if (!csv) return res.status(400).json({ error: 'Contenu CSV manquant' });
+  const db = getDb(); const ip = getClientIp(req);
+  const lines = csv.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  const results = { imported: 0, skipped: 0, errors: [], tagsCreated: [] };
+
+  const insertEntry = db.prepare('INSERT INTO activity_entries (user_id, year, month, tag_code, content, is_preview, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)');
+  const insertTag   = db.prepare("INSERT INTO activity_tags (code, label, color) VALUES (?,?,?)");
+  const insertHist  = db.prepare('INSERT INTO activity_entry_history (entry_id, event_type, detail, changed_by, changed_at) VALUES (?,?,?,?,?)');
+
+  const txn = db.transaction(() => {
+    for (let i = 0; i < lines.length; i++) {
+      const parts = lines[i].split(';');
+      if (parts.length < 5) { results.errors.push(`Ligne ${i+1}: format invalide (${parts.length} champs)`); results.skipped++; continue; }
+      const [yearStr, monthStr, dayStr, tagRaw, ...noteParts] = parts;
+      const year  = parseInt(yearStr);
+      const month = parseInt(monthStr);
+      const day   = parseInt(dayStr);
+      const tag   = (tagRaw || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 20);
+      const note  = noteParts.join(';').trim();
+
+      if (!year || year < 2000 || year > 2100) { results.errors.push(`Ligne ${i+1}: année invalide (${yearStr})`); results.skipped++; continue; }
+      if (!month || month < 1 || month > 12)   { results.errors.push(`Ligne ${i+1}: mois invalide (${monthStr})`); results.skipped++; continue; }
+      if (!day   || day < 1   || day > 31)     { results.errors.push(`Ligne ${i+1}: jour invalide (${dayStr})`);   results.skipped++; continue; }
+      if (!tag)  { results.errors.push(`Ligne ${i+1}: TAG vide`); results.skipped++; continue; }
+      if (!note) { results.errors.push(`Ligne ${i+1}: note vide`); results.skipped++; continue; }
+
+      // Créer le TAG s'il n'existe pas
+      const existingTag = db.prepare('SELECT code FROM activity_tags WHERE code=?').get(tag);
+      if (!existingTag) {
+        try { insertTag.run(tag, 'A définir', '#000000'); results.tagsCreated.push(tag); } catch {}
+      }
+
+      // Construire la date
+      const pad = n => String(n).padStart(2,'0');
+      const createdAt = `${year}-${pad(month)}-${pad(day)} 00:00:00`;
+      // Preview automatique si date future
+      const today = new Date(); today.setHours(0,0,0,0);
+      const entryDate = new Date(year, month-1, day);
+      const isPreview = entryDate > today ? 1 : 0;
+      const r = insertEntry.run(req.user.id, year, month, tag, note.trim(), isPreview, createdAt, createdAt);
+      insertHist.run(r.lastInsertRowid, 'created', `[${tag}] Import CSV — ${note.trim().replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60)}`, req.user.id, nowLocal());
+      results.imported++;
+    }
+  });
+
+  try {
+    txn();
+    const tagInfo = results.tagsCreated.length ? ` · Tags créés: ${results.tagsCreated.join(', ')}` : '';
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_IMPORTÉ', category: 'suivi', severity: 'info',
+      detail: `Import CSV — ${results.imported} note(s) importée(s), ${results.skipped} ignorée(s)${tagInfo}`, ip, success: 1 });
+    res.json({ success: true, ...results });
+  } catch (e) {
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_IMPORT_ÉCHEC', category: 'suivi', severity: 'warn',
+      detail: `Import CSV échoué : ${e.message}`, ip, success: 0 });
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ── SUIVI D'ACTIVITÉ — AUDIT EXPORT ──────────────────────────────────────────
 app.post('/api/activity/export-audit', authMiddleware, (req, res) => {

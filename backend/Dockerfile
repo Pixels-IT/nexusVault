@@ -1,7 +1,7 @@
-FROM node:22-alpine
+FROM node:24-alpine
 
 # Outils de compilation + su-exec pour drop privileges + wget pour healthcheck
-RUN apk add --no-cache python3 make g++ wget su-exec
+RUN apk add --no-cache python3 make g++ su-exec wget binutils busybox
 
 # Créer utilisateur non-root avec mot de passe root complexe
 RUN addgroup -S app-nexus && adduser -S -G app-nexus app-nexus && \

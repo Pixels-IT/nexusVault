@@ -311,10 +311,23 @@ tr:hover td { background: var(--surf2); }
   background: var(--surf);
   border: 1px solid var(--brd);
   border-radius: var(--rl);
-  width: 480px; max-width: calc(100vw - 40px);
+  width: 600px; max-width: calc(100vw - 40px);
   max-height: 90vh;
   overflow-y: auto;
+  overflow-x: hidden;
+  resize: none;
+  scrollbar-width: auto;
+  scrollbar-color: var(--acc) var(--surf2);
 }
+.modal::-webkit-scrollbar { width: 8px; }
+.modal::-webkit-scrollbar-track { background: var(--surf2); border-radius: 4px; }
+.modal::-webkit-scrollbar-thumb { background: var(--brd); border-radius: 4px; }
+.modal::-webkit-scrollbar-thumb:hover { background: var(--acc); }
+
+textarea::-webkit-scrollbar { width: 8px; }
+textarea::-webkit-scrollbar-track { background: var(--surf2); border-radius: 4px; }
+textarea::-webkit-scrollbar-thumb { background: var(--brd); border-radius: 4px; }
+textarea::-webkit-scrollbar-thumb:hover { background: var(--acc); }
 
 .modal-header {
   padding: 16px 20px;
@@ -348,11 +361,28 @@ tr:hover td { background: var(--surf2); }
   font-size: 13px;
   font-family: var(--font);
   transition: border-color .15s;
+  color-scheme: inherit;
 }
 .form-control:focus { outline: none; border-color: var(--acc); }
 .form-control.error { border-color: var(--err); }
 .form-error { font-size: 11px; color: var(--err); margin-top: 4px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* Date picker thémé */
+input[type="date"] {
+  background: var(--surf2);
+  color: var(--txt);
+  border: 1px solid var(--brd);
+  border-radius: var(--r);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: var(--font);
+  color-scheme: inherit;
+  cursor: pointer;
+}
+input[type="date"]:focus { outline: none; border-color: var(--acc); }
+[data-theme="dark"] input[type="date"] { color-scheme: dark; }
+:root:not([data-theme="dark"]) input[type="date"] { color-scheme: light; }
 
 /* ── SIDEBAR MENU ── */
 .config-layout { display: grid; grid-template-columns: 200px 1fr; gap: 16px; }

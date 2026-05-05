@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import api from '../api.js';
 import { useI18n } from '../contexts/I18nContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -43,7 +43,23 @@ function HistoryModal({ entryId, onClose }) {
       .finally(() => setLoading(false));
   }, [entryId]);
 
-  const EVT_LABELS = { created: 'Création', updated: 'Modification', tag_changed: 'Tag modifié', preview_changed: 'Preview' };
+  const EVT_LABELS = {
+    created:       'Création',
+    updated:       'Modification',
+    tag_changed:   'Tag modifié',
+    preview_changed:'Preview',
+    file_added:    '📎 Fichier ajouté',
+    file_deleted:  '🗑 Fichier supprimé',
+    file_locked:   '🔒 Fichier verrouillé/déverrouillé',
+  };
+
+  const evtColor = (type) => {
+    if (type === 'created')      return 'var(--ok)';
+    if (type === 'file_added')   return '#16a34a';
+    if (type === 'file_deleted') return 'var(--err)';
+    if (type === 'file_locked')  return 'var(--warn)';
+    return 'var(--acc)';
+  };
 
   return (
     <Modal title="Historique de la note" onClose={onClose}
@@ -59,12 +75,12 @@ function HistoryModal({ entryId, onClose }) {
                 borderBottom: i < history.length-1 ? '1px solid var(--brd)' : 'none',
               }}>
                 <div style={{ flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
-                  <div style={{ width:8, height:8, borderRadius:'50%', background: h.event_type==='created' ? 'var(--ok)' : 'var(--acc)', marginTop:4 }}/>
+                  <div style={{ width:8, height:8, borderRadius:'50%', background: evtColor(h.event_type), marginTop:4 }}/>
                   {i < history.length-1 && <div style={{ width:1, flex:1, background:'var(--brd)' }}/>}
                 </div>
                 <div style={{ flex:1 }}>
                   <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:2 }}>
-                    <span style={{ fontSize:11, fontWeight:700, color: h.event_type==='created' ? 'var(--ok)' : 'var(--acc)' }}>
+                    <span style={{ fontSize:11, fontWeight:700, color: evtColor(h.event_type) }}>
                       {EVT_LABELS[h.event_type] || h.event_type}
                     </span>
                     <span style={{ fontSize:10, color:'var(--muted)', fontFamily:'var(--mono)' }}>
@@ -83,23 +99,38 @@ function HistoryModal({ entryId, onClose }) {
   );
 }
 
-function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave }) {
+function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, customDateEnabled }) {
   const { t } = useI18n();
   const isEdit = !!entry;
   const now = new Date();
   const [year,      setYear]     = useState(entry?.year  || defaultYear  || now.getFullYear());
   const [month,     setMonth]    = useState(entry?.month || defaultMonth || now.getMonth() + 1);
-  const [tagCode,   setTagCode]  = useState(entry?.tag_code || '');  // pas de pré-sélection
+  const [tagCode,   setTagCode]  = useState(entry?.tag_code || '');
   const [content,   setContent]  = useState(entry?.content || '');
   const [isPreview, setIsPreview] = useState(entry?.is_preview ? true : false);
+  const [displayDate, setDisplayDate] = useState(entry?.display_date || '');
   const [tagError,  setTagError]  = useState(false);
   const [loading,   setLoading]  = useState(false);
   const [error,     setError]    = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const dateInputRef = useRef(null);
+
+  // Fichiers joints
+  const [files,      setFiles]      = useState([]);
+  const [filesLoaded, setFilesLoaded] = useState(false);
+  const [fileError,  setFileError]  = useState('');
+  const fileInputRef = useRef(null);
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
-  // Auto-preview si mois futur
+  // Charger les fichiers existants si édition
+  useEffect(() => {
+    if (!isEdit || filesLoaded) return;
+    api.getEntryFiles(entry.id)
+      .then(f => { setFiles(f); setFilesLoaded(true); })
+      .catch(() => setFilesLoaded(true));
+  }, [isEdit, entry, filesLoaded]);
+
   const isFutureMonth = () => {
     const cy = now.getFullYear(), cm = now.getMonth() + 1;
     return year > cy || (year === cy && month > cm);
@@ -112,12 +143,101 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
     setLoading(true);
     try {
       const preview = isFutureMonth() ? true : isPreview;
-      if (isEdit) await api.updateEntry(entry.id, { tag_code: tagCode, content, is_preview: preview });
-      else        await api.createEntry({ year, month, tag_code: tagCode, content, is_preview: preview });
+      let entryId = entry?.id;
+      if (isEdit) await api.updateEntry(entry.id, { tag_code: tagCode, content, is_preview: preview, display_date: customDateEnabled ? (displayDate || null) : undefined });
+      else {
+        const r = await api.createEntry({ year, month, tag_code: tagCode, content, is_preview: preview });
+        entryId = r.id;
+      }
+      // Uploader les fichiers en attente
+      for (const f of files.filter(f => f._pending)) {
+        await api.uploadEntryFile(entryId, { filename: f.filename, mimetype: f.mimetype, data: f.data });
+      }
       onSave();
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }
+
+  function handleFileSelect(e) {
+    const selected = Array.from(e.target.files);
+    setFileError('');
+    selected.forEach(file => {
+      if (file.size > 10 * 1024 * 1024) { setFileError(`${file.name} dépasse 10 Mo`); return; }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const b64 = ev.target.result.split(',')[1];
+        setFiles(prev => [...prev, {
+          _pending: true,
+          _tempId: Date.now() + Math.random(),
+          filename: file.name,
+          mimetype: file.type || 'application/octet-stream',
+          size_bytes: file.size,
+          data: b64,
+          locked: 0,
+          uploaded_at: new Date().toISOString(),
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  }
+
+  async function toggleLock(f) {
+    if (f._pending) {
+      setFiles(prev => prev.map(x => x._tempId === f._tempId ? { ...x, locked: x.locked ? 0 : 1 } : x));
+      return;
+    }
+    try {
+      const r = await api.lockEntryFile(f.id);
+      setFiles(prev => prev.map(x => x.id === f.id ? { ...x, locked: r.locked } : x));
+    } catch {}
+  }
+
+  async function deleteFile(f) {
+    if (f.locked) { setFileError('Déverrouillez le fichier avant de le supprimer.'); return; }
+    if (f._pending) {
+      setFiles(prev => prev.filter(x => x._tempId !== f._tempId));
+      return;
+    }
+    try {
+      await api.deleteEntryFile(f.id);
+      setFiles(prev => prev.filter(x => x.id !== f.id));
+    } catch (e) { setFileError(e.message); }
+  }
+
+  function downloadFile(f) {
+    if (f._pending) {
+      const a = document.createElement('a');
+      a.href = 'data:' + f.mimetype + ';base64,' + f.data;
+      a.download = f.filename; a.click();
+      return;
+    }
+    const token = localStorage.getItem('dp_token');
+    const a = document.createElement('a');
+    a.href = `/api/activity/files/${f.id}/download`;
+    a.download = f.filename;
+    // Fetch avec auth
+    fetch(a.href, { headers: { Authorization: 'Bearer ' + token } })
+      .then(r => r.blob())
+      .then(blob => { a.href = URL.createObjectURL(blob); a.click(); })
+      .catch(() => {});
+  }
+
+  function fmtSize(b) {
+    if (b < 1024) return b + ' o';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' Ko';
+    return (b/(1024*1024)).toFixed(1) + ' Mo';
+  }
+
+  function fmtDate(s) {
+    if (!s) return '';
+    const d = new Date(s);
+    return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
+  }
+
+  const totalFiles = files.length;
+
+  const [showFilesModal, setShowFilesModal] = useState(false);
 
   return (
     <>
@@ -136,12 +256,32 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
         )}
       </div>}
       onClose={onClose}
+      hideClose={true}
+      width="864px"
       footer={
-        <div style={{ display:'flex', justifyContent:'flex-end', gap:8, width:'100%' }}>
-          <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
-          <button className="btn btn-primary" onClick={submit} disabled={loading || !tagCode}>
-            {loading ? 'Enregistrement…' : isEdit ? 'Modifier' : 'Ajouter'}
-          </button>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%' }}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <button className="btn" onClick={() => fileInputRef.current?.click()}
+              style={{borderColor:'var(--ok)',color:'var(--ok)',display:'flex',alignItems:'center',gap:6}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>Importer</button>
+            <input ref={fileInputRef} type="file" multiple style={{display:'none'}} onChange={handleFileSelect}/>
+            <button className="btn" onClick={() => setShowFilesModal(true)}
+              style={{display:'flex',alignItems:'center',gap:6}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+              </svg>
+              Fichiers
+              {files.length > 0 && <span style={{background:'var(--acc)',color:'white',borderRadius:10,padding:'1px 7px',fontSize:11,fontWeight:700,marginLeft:2}}>{files.length}</span>}
+            </button>
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn" onClick={onClose}>{t('activity.cancel')}</button>
+            <button className="btn btn-primary" onClick={submit} disabled={loading || !tagCode}>
+              {loading ? 'Enregistrement…' : isEdit ? 'Modifier' : 'Ajouter'}
+            </button>
+          </div>
         </div>
       }
     >
@@ -164,19 +304,18 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
       )}
       <div className="form-group">
         <label className="form-label">Tag</label>
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:6 }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:6, justifyContent:'center' }}>
           {tags.map(t => (
             <button key={t.code} onClick={() => { setTagCode(t.code); setTagError(false); }} style={{
               display:'inline-flex', alignItems:'center', gap:6,
               padding:'5px 12px', borderRadius:4, cursor:'pointer',
               border: `2px solid ${tagCode===t.code ? t.color : 'var(--brd)'}`,
               background: tagCode===t.code ? `rgba(${parseInt(t.color.slice(1,3),16)},${parseInt(t.color.slice(3,5),16)},${parseInt(t.color.slice(5,7),16)},0.12)` : 'var(--surf2)',
-              fontFamily:'var(--mono)', fontSize:11, fontWeight:700,
               color: tagCode===t.code ? t.color : 'var(--muted)',
             }}>
               <span style={{ width:8, height:8, borderRadius:'50%', background:t.color, flexShrink:0 }}/>
-              {t.code}
-              <span style={{ fontSize:10, fontWeight:400, fontFamily:'var(--font)', color:'var(--muted)' }}>{t.label}</span>
+              <strong style={{ fontFamily:'var(--mono)', fontWeight:700, fontSize:12 }}>{t.code}</strong>
+              <span style={{ fontSize:11, fontWeight:400, fontFamily:'var(--font)', color:'var(--muted)', lineHeight:1 }}>{t.label}</span>
             </button>
           ))}
         </div>
@@ -188,37 +327,261 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave })
         )}
       </div>
       <div className="form-group">
-        <label className="form-label">Description</label>
-        <textarea className="form-control" value={content} onChange={e => setContent(e.target.value)}
-          rows={4} placeholder="Ex: Mise à jour des serveurs Windows vers KB5..."
-          style={{ resize:'vertical', fontFamily:'var(--font)' }} autoFocus />
+        <label className="form-label" style={{ marginBottom:4 }}>Description</label>
+        <textarea id="entry-textarea" className="form-control" value={content} onChange={e => setContent(e.target.value)}
+          rows={12} placeholder="Ex: Mise à jour des serveurs Windows vers KB5..."
+          style={{ resize:'none', fontFamily:'var(--font)', overflowY:'auto',
+            scrollbarWidth:'auto', scrollbarColor:'var(--brd) var(--surf2)' }} autoFocus />
       </div>
-      {/* Checkbox preview — visible seulement si pas auto-futur */}
-      {!isFutureMonth() && (
-        <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:4, padding:'8px 0', borderTop:'1px solid var(--brd)' }}>
-          <input type="checkbox" id="preview-check" checked={isPreview}
-            onChange={e => setIsPreview(e.target.checked)}
-            style={{ width:14, height:14, cursor:'pointer' }} />
-          <label htmlFor="preview-check" style={{ fontSize:12, color:'var(--muted)', cursor:'pointer', userSelect:'none' }}>
-            Note en avant-première (preview) — ne compte pas dans les statistiques
-          </label>
+      {/* ── OPTIONS ── */}
+      <div style={{ marginTop:8, borderTop:'1px solid var(--brd)', paddingTop:10 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'.06em', textTransform:'uppercase', marginBottom:8 }}>
+          Options
         </div>
-      )}
-      {isFutureMonth() && (
-        <div style={{ fontSize:11, color:'var(--warn)', marginTop:6, display:'flex', alignItems:'center', gap:6 }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:12, height:12 }}>
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          Mois futur — marqué automatiquement en preview
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+
+          {/* Mode Secret */}
+          {(() => {
+            const hasSecret = /\[secret\][\s\S]*?\[\/secret\]/i.test(content);
+            return (
+              <div style={{ padding:'8px 10px', borderRadius:'var(--r)',
+                background: hasSecret ? 'rgba(217,119,6,0.08)' : 'var(--surf2)',
+                border: `1px solid ${hasSecret ? '#d97706' : 'var(--brd)'}`,
+                display:'flex', alignItems:'center', gap:12, transition:'all .12s' }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>Mode Secret</div>
+                  <div style={{ fontSize:11, color:'var(--muted)', lineHeight:1.45 }}>
+                    Pour masquer des données sensibles (mots de passe, clés…) par <span style={{ fontFamily:'var(--mono)' }}>●●●●●</span>, sélectionnez le texte puis cliquez sur le bouton. Les données restent en clair uniquement en mode édition.
+                  </div>
+                </div>
+                <button type="button" onClick={() => {
+                    const ta = document.getElementById('entry-textarea');
+                    if (!ta) return;
+                    const start = ta.selectionStart, end = ta.selectionEnd;
+                    const selected = content.slice(start, end);
+                    const before = content.slice(0, start), after = content.slice(end);
+                    const newContent = selected ? `${before}[secret]${selected}[/secret]${after}` : `${before}[secret][/secret]${after}`;
+                    setContent(newContent);
+                    setTimeout(() => { ta.focus(); ta.setSelectionRange(selected ? start+8+selected.length+9 : start+8, selected ? start+8+selected.length+9 : start+8); }, 10);
+                  }}
+                  style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5,
+                    background: hasSecret ? '#d97706' : 'var(--surf)',
+                    color: hasSecret ? 'white' : '#d97706',
+                    border:'1.5px solid #d97706',
+                    borderRadius:'var(--r)', padding:'6px 12px', cursor:'pointer', fontSize:12, fontWeight:600, whiteSpace:'nowrap', transition:'all .12s' }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13}}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  {hasSecret ? '✓ Activé' : 'Mode Secret'}
+                </button>
+              </div>
+            );
+          })()}
+
+          {/* Mode Brouillon */}
+          {!isFutureMonth() ? (
+            <div style={{ padding:'8px 10px', borderRadius:'var(--r)',
+              background: isPreview ? 'rgba(99,102,241,0.08)' : 'var(--surf2)',
+              border: `1px solid ${isPreview ? '#6366f1' : 'var(--brd)'}`,
+              display:'flex', alignItems:'center', gap:12, transition:'all .12s' }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>Mode Brouillon</div>
+                <div style={{ fontSize:11, color:'var(--muted)', lineHeight:1.45 }}>
+                  Pour commencer un suivi sans qu'il soit pris en compte dans les statistiques ou l'export PDF.
+                </div>
+              </div>
+              <button type="button" onClick={() => setIsPreview(p => !p)}
+                style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5,
+                  background: isPreview ? '#6366f1' : 'var(--surf)',
+                  color: isPreview ? 'white' : '#6366f1',
+                  border: `1.5px solid #6366f1`,
+                  borderRadius:'var(--r)', padding:'6px 12px', cursor:'pointer', fontSize:12, fontWeight:600, whiteSpace:'nowrap', transition:'all .12s' }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13}}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                {isPreview ? '✓ Activé' : 'Mode Brouillon'}
+              </button>
+            </div>
+          ) : (
+            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:'var(--r)', background:'var(--warn-s)', border:'1px solid var(--warn)', fontSize:12, color:'var(--warn)' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:13, height:13, flexShrink:0 }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Mois futur — marqué automatiquement en mode brouillon
+            </div>
+          )}
+
+          {/* Mode Affichage */}
+          {customDateEnabled && isEdit && (
+            <div style={{ padding:'8px 10px', borderRadius:'var(--r)',
+              background: displayDate ? 'rgba(20,184,166,0.08)' : 'var(--surf2)',
+              border: `1px solid ${displayDate ? '#14b8a6' : 'var(--brd)'}`,
+              display:'flex', alignItems:'center', gap:12, transition:'all .12s' }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>Mode Affichage</div>
+                <div style={{ fontSize:11, color:'var(--muted)', lineHeight:1.45 }}>
+                  Pour changer la date réelle du suivi. Cela modifie l'affichage mais pas l'historique.
+                  {displayDate && (
+                    <span style={{ marginLeft:6, color:'#14b8a6', fontWeight:600 }}>
+                      → {new Date(displayDate+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})}
+                      {entry?.created_at && <span style={{ color:'var(--muted)', fontWeight:400 }}> (réel : {entry.created_at.slice(8,10)}/{entry.created_at.slice(5,7)})</span>}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:6 }}>
+                {displayDate && (
+                  <button type="button" onClick={() => setDisplayDate('')}
+                    style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:'var(--muted)', padding:'2px 4px' }}
+                    title="Réinitialiser">✕</button>
+                )}
+                <button type="button" onClick={() => dateInputRef.current?.showPicker?.() || dateInputRef.current?.click()}
+                  style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5,
+                    background: displayDate ? '#14b8a6' : 'var(--surf)',
+                    color: displayDate ? 'white' : '#14b8a6',
+                    border:'1.5px solid #14b8a6',
+                    borderRadius:'var(--r)', padding:'6px 10px', cursor:'pointer', fontSize:12, fontWeight:600, whiteSpace:'nowrap', transition:'all .12s' }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13}}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                  {displayDate ? '✓ Activé' : 'Mode Affichage'}
+                </button>
+                <input ref={dateInputRef} type="date" value={displayDate} onChange={e => setDisplayDate(e.target.value)}
+                  style={{ position:'absolute', opacity:0, width:0, height:0, pointerEvents:'none' }} />
+              </div>
+            </div>
+          )}
+
         </div>
-      )}
+      </div>
+
     </Modal>
     {showHistory && isEdit && <HistoryModal entryId={entry.id} onClose={() => setShowHistory(false)} />}
+    {showFilesModal && (
+      <FilesModal
+        entryId={isEdit ? entry.id : null}
+        files={files}
+        setFiles={setFiles}
+        fileError={fileError}
+        setFileError={setFileError}
+        onClose={() => setShowFilesModal(false)}
+        fmtSize={fmtSize}
+        fmtDate={fmtDate}
+        toggleLock={toggleLock}
+        deleteFile={deleteFile}
+        downloadFile={downloadFile}
+      />
+    )}
     </>
   );
 }
 
 // ── LIGNE D'ENTRÉE ────────────────────────────────────────────────────────────
+
+// Masque le contenu entre balises [secret]...[/secret] par des ●●●●●
+function renderMasked(text) {
+  if (!text || !text.includes('[secret]')) return text;
+  const parts = [];
+  const regex = /\[secret\]([\s\S]*?)\[\/secret\]/gi;
+  let last = 0, match, key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) parts.push(<span key={key++}>{text.slice(last, match.index)}</span>);
+    parts.push(
+      <span key={key++} title="Contenu masqué — visible en édition"
+        style={{ fontFamily:'var(--mono)', letterSpacing:2, color:'var(--muted)', cursor:'default',
+          background:'var(--surf2)', borderRadius:4, padding:'1px 5px', fontSize:'0.85em',
+          border:'1px solid var(--brd)' }}>
+        ●●●●●
+      </span>
+    );
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push(<span key={key++}>{text.slice(last)}</span>);
+  return parts.length > 0 ? parts : text;
+}
+// ── MODAL FICHIERS JOINTS ─────────────────────────────────────────────────────
+function FilesModal({ entryId, files, setFiles, fileError, setFileError, onClose, fmtSize, fmtDate, toggleLock, deleteFile, downloadFile }) {
+  return (
+    <Modal
+      title={
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+          </svg>
+          Fichiers joints
+          {files.length > 0 && (
+            <span style={{background:'var(--acc)',color:'white',borderRadius:10,padding:'1px 8px',fontSize:11,fontWeight:700}}>
+              {files.length}
+            </span>
+          )}
+        </div>
+      }
+      onClose={onClose}
+      footer={<button className="btn" onClick={onClose}>Fermer</button>}
+    >
+      {fileError && <div className="alert alert-err" style={{fontSize:11,marginBottom:10}}>{fileError}</div>}
+      {files.length === 0 ? (
+        <div style={{textAlign:'center',padding:'28px 0',color:'var(--muted)',fontSize:13}}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{width:36,height:36,marginBottom:8,opacity:.4}}>
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+          </svg>
+          <div>Aucun fichier joint</div>
+          <div style={{fontSize:11,marginTop:4}}>Utilisez le bouton "Importer" pour ajouter des fichiers.</div>
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          {files.map((f, i) => (
+            <div key={f.id || f._tempId || i} style={{
+              display:'flex',alignItems:'center',gap:10,padding:'8px 12px',
+              background:'var(--surf2)',borderRadius:'var(--r)',
+              border:'1px solid var(--brd)',fontSize:12,
+            }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                style={{width:16,height:16,color:'var(--muted)',flexShrink:0}}>
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+              </svg>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.filename}</div>
+                <div style={{fontSize:10,color:'var(--muted)'}}>
+                  {fmtSize(f.size_bytes)} · {fmtDate(f.uploaded_at)}
+                  {f._pending && <span style={{color:'var(--warn)',marginLeft:4}}>• en attente d'enregistrement</span>}
+                </div>
+              </div>
+              {!!f.locked && (
+                <span style={{fontSize:10,background:'var(--warn-s)',color:'var(--warn)',padding:'2px 8px',borderRadius:8,fontWeight:600,flexShrink:0}}>
+                  Verrouillé
+                </span>
+              )}
+              <div style={{display:'flex',gap:4,flexShrink:0}}>
+                <button title="Télécharger" onClick={() => downloadFile(f)}
+                  style={{background:'none',border:'none',cursor:'pointer',padding:4,color:'var(--muted)',display:'flex',borderRadius:4}}
+                  onMouseEnter={e=>e.currentTarget.style.color='var(--acc)'}
+                  onMouseLeave={e=>e.currentTarget.style.color='var(--muted)'}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                </button>
+                <button title={f.locked ? 'Déverrouiller' : 'Verrouiller'} onClick={() => toggleLock(f)}
+                  style={{background:'none',border:'none',cursor:'pointer',padding:4,
+                    color:f.locked?'var(--warn)':'var(--muted)',display:'flex',borderRadius:4}}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+                    {f.locked
+                      ? <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>
+                      : <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></>
+                    }
+                  </svg>
+                </button>
+                <button title={f.locked ? 'Déverrouillez avant de supprimer' : 'Supprimer'}
+                  onClick={() => { deleteFile(f).then ? deleteFile(f).then(()=>{if(fileError)setFileError('');}) : deleteFile(f); }}
+                  disabled={!!f.locked}
+                  style={{background:'none',border:'none',cursor:f.locked?'not-allowed':'pointer',padding:4,
+                    color:f.locked?'var(--brd)':'var(--err)',display:'flex',borderRadius:4}}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
   const tag = tags.find(t => t.code === entry.tag_code);
   const isPreview = !!entry.is_preview;
@@ -245,15 +608,15 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
             <span style={{ fontSize: 8, fontWeight: 800, color: '#f76707', fontFamily: 'var(--mono)', letterSpacing: '.5px' }}>PRV</span>
           </div>
           <TagBadge tag={tag} />
-          {entry.created_at && (
-            <span style={{ fontSize:11, color:'rgba(247,103,7,0.7)', whiteSpace:'nowrap' }}>
-              {(entry.created_at||'').slice(8,10)}/{(entry.created_at||'').slice(5,7)}
+          {(entry.display_date || entry.created_at) && (
+            <span style={{ fontSize:11, color:'rgba(247,103,7,0.7)', whiteSpace:'nowrap', fontStyle: 'normal' }} title={entry.display_date ? 'Date cosmétique (réelle: '+(entry.created_at||'').slice(8,10)+'/'+(entry.created_at||'').slice(5,7)+')' : ''}>
+              {entry.display_date ? (entry.display_date.slice(8,10)+'/'+entry.display_date.slice(5,7)) : ((entry.created_at||'').slice(8,10)+'/'+(entry.created_at||'').slice(5,7))}
             </span>
           )}
           <span style={{ color:'rgba(247,103,7,0.5)', fontSize:11 }}>—</span>
         </div>
         <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, fontStyle: 'italic', alignSelf:'center' }}>
-          {entry.content}
+          {renderMasked(entry.content)}
         </div>
         {canEdit && (
           <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginTop: 2 }}>
@@ -276,15 +639,15 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
     >
       <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, alignSelf:'center' }}>
         <TagBadge tag={tag} />
-        {entry.created_at && (
-          <span style={{ fontSize:11, color:'var(--muted)', whiteSpace:'nowrap' }}>
-            {(entry.created_at||'').slice(8,10)}/{(entry.created_at||'').slice(5,7)}
+        {(entry.display_date || entry.created_at) && (
+          <span style={{ fontSize:11, color:'var(--muted)', whiteSpace:'nowrap', fontStyle: 'normal' }} title={entry.display_date ? 'Date cosmétique (réelle: '+(entry.created_at||'').slice(8,10)+'/'+(entry.created_at||'').slice(5,7)+')' : ''}>
+            {entry.display_date ? (entry.display_date.slice(8,10)+'/'+entry.display_date.slice(5,7)) : ((entry.created_at||'').slice(8,10)+'/'+(entry.created_at||'').slice(5,7))}
           </span>
         )}
         <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>
       </div>
       <div style={{ flex: 1, fontSize: 13, color: 'var(--txt)', lineHeight: 1.6, alignSelf:'center' }}>
-        {entry.content}
+        {renderMasked(entry.content)}
       </div>
       {canEdit && (
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
@@ -297,12 +660,12 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
 }
 
 // ── MOIS SECTION ──────────────────────────────────────────────────────────────
-function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
+function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateEnabled, isOpenDefault, onToggle }) {
     const { t } = useI18n();
   const [entries, setEntries]   = useState([]);
   const [loading, setLoading]   = useState(false);
   const [loaded, setLoaded]     = useState(false);
-  const [open, setOpen]         = useState(false);
+  const [open, setOpen]         = useState(isOpenDefault || false);
   const [editEntry, setEditEntry] = useState(null);
   const [delEntry, setDelEntry]   = useState(null);
   const { user } = useAuth();
@@ -327,7 +690,11 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
   }, []); // eslint-disable-line
 
   function toggle() {
-    setOpen(o => !o);
+    setOpen(o => {
+      const next = !o;
+      onToggle && onToggle(next);
+      return next;
+    });
   }
 
   // Dépliage automatique conditionnel : charger si besoin, ouvrir seulement si correspondance
@@ -423,7 +790,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
       )}
 
       {editEntry && (
-        <EntryModal tags={tags} entry={editEntry} onClose={() => setEditEntry(null)}
+        <EntryModal tags={tags} entry={editEntry} customDateEnabled={customDateEnabled} onClose={() => setEditEntry(null)}
           onSave={() => { setEditEntry(null); load(); }} />
       )}
       {delEntry && (
@@ -438,7 +805,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag }) {
 }
 
 // ── ANNÉE SECTION ─────────────────────────────────────────────────────────────
-function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle }) {
+function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle, customDateEnabled, openMonths, onToggleMonth }) {
     const { t } = useI18n();
   const [open, setOpen] = useState(isOpenDefault || false);
   const [yearCount, setYearCount] = useState(null);
@@ -496,7 +863,10 @@ function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onTo
       {open && (
         <div>
           {months.map(m => (
-            <MonthSection key={m} year={year} month={m} tags={tags} onAdd={onAdd} userId={userId} filterTag={filterTag} />
+            <MonthSection key={m} year={year} month={m} tags={tags} onAdd={onAdd} userId={userId} filterTag={filterTag} customDateEnabled={customDateEnabled}
+              isOpenDefault={!!(openMonths && openMonths[`${year}-${m}`])}
+              onToggle={isOpen => onToggleMonth && onToggleMonth(m, isOpen)}
+            />
           ))}
         </div>
       )}
@@ -545,6 +915,10 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
 
       const tagColors = {};
       tags.forEach(t => { tagColors[t.code] = t.color; });
+
+      // Charger le logo PDF si défini
+      let pdfLogo = null;
+      try { const lr = await api.getPdfLogo(); pdfLogo = lr.logo || null; } catch {}
 
       // Grouper par année > mois
       const grouped = {};
@@ -602,17 +976,26 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
       // Lignes du tableau
       let rows = '';
       Object.keys(grouped).sort((a,b)=>b-a).forEach(yr => {
-        rows += `<tr class="yr-row"><td colspan="2">${yr}</td></tr>`;
+        rows += `<tr class="yr-row"><td colspan="3">${yr}</td></tr>`;
         Object.keys(grouped[yr]).sort().forEach(mo => {
-          rows += `<tr class="mo-row"><td colspan="2">${MONTHS[parseInt(mo)-1]}</td></tr>`;
+          rows += `<tr class="mo-row"><td colspan="3">${MONTHS[parseInt(mo)-1]}</td></tr>`;
           grouped[yr][mo].forEach(e => {
             const col = tagColors[e.tag_code] || '#066fd1';
             const r = parseInt(col.slice(1,3),16), g=parseInt(col.slice(3,5),16), b=parseInt(col.slice(5,7),16);
+            // Date d'affichage (cosmétique si définie, sinon date réelle)
+            const dispDate = e.display_date || e.created_at || '';
+            const dateStr = dispDate ? `${dispDate.slice(8,10)}/${dispDate.slice(5,7)}/${dispDate.slice(0,4)}` : '';
+            // Contenu complet avec sauts de ligne + secrets masqués
+            const safeContent = e.content
+              .replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/\n/g,'<br>')
+              .replace(/\[secret\][\s\S]*?\[\/secret\]/gi, '<span style="background:#f1f5f9;color:#64748b;font-family:monospace;padding:1px 4px;border-radius:3px;font-size:10px;border:1px solid #cbd5e1">●●●●●</span>');
             rows += `<tr>
-              <td style="width:80px;padding:5px 8px;vertical-align:top;">
+              <td style="width:70px;padding:6px 8px;vertical-align:top;white-space:nowrap;font-size:10px;color:#64748b">${dateStr}</td>
+              <td style="width:70px;padding:6px 8px;vertical-align:top;text-align:center;">
                 <span style="display:inline-block;background:rgba(${r},${g},${b},0.1);color:${col};border:1px solid ${col};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;font-family:monospace">${e.tag_code}</span>
               </td>
-              <td style="padding:5px 8px;font-size:11px;line-height:1.6;color:#1e293b">${e.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td>
+              <td style="padding:6px 8px;font-size:11px;line-height:1.7;color:#1e293b">${safeContent}</td>
             </tr>`;
           });
         });
@@ -652,11 +1035,12 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;font-size:12px;color:#1e293b;background:#fff}
-.header{background:linear-gradient(135deg,#0d47a1 0%,#1976d2 50%,#26c6da 100%);padding:28px 32px;display:flex;justify-content:space-between;align-items:center}
-.header-logo{color:white;font-size:22px;font-weight:800;letter-spacing:1px}
-.header-logo span{opacity:.7}
-.header-right{text-align:right;color:rgba(255,255,255,.85);font-size:11px}
-.header-right .scope{font-size:15px;font-weight:700;color:white;margin-bottom:4px}
+.header{background:#f8fafc;border-bottom:2px solid #e2e8f0;padding:20px 32px;display:flex;justify-content:space-between;align-items:center}
+.header-logo{font-size:22px;font-weight:800;letter-spacing:1px;color:#1e293b}
+.header-logo span{color:#2196f3}
+.header-logo img{max-height:60px;max-width:220px;object-fit:contain;display:block}
+.header-right{text-align:right;color:#64748b;font-size:11px}
+.header-right .scope{font-size:15px;font-weight:700;color:#1e293b;margin-bottom:4px}
 .meta-bar{background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:10px 32px;display:flex;gap:24px;font-size:11px;color:#64748b}
 .meta-item{display:flex;align-items:center;gap:5px}
 .meta-dot{width:6px;height:6px;border-radius:50%;background:#2196f3;display:inline-block}
@@ -689,7 +1073,7 @@ tr:not(.yr-row):not(.mo-row):nth-child(even){background:#fafafa}
 </head>
 <body>
 <div class="header">
-  <div class="header-logo">NEXUS<span>VAULT</span></div>
+  <div class="header-logo">${pdfLogo ? `<img src="${pdfLogo}" alt="Logo"/>` : 'NEXUS<span>VAULT</span>'}</div>
   <div class="header-right">
     <div class="scope">Suivi d'activité — ${who}</div>
     <div>${modeLabel}</div>
@@ -814,13 +1198,19 @@ export default function Activity() {
   const [filterTag, setFilterTag]   = useState('');
   const [tags, setTags]         = useState([]);
   const [users, setUsers]       = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null); // null = soi-même
+  const [selectedUser, setSelectedUser] = useState(null);
   const [years, setYears]       = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [addModal, setAddModal] = useState(null); // { year, month, onSaved }
+  const [addModal, setAddModal] = useState(null);
   const [showExport, setShowExport] = useState(false);
-  // Persister l'état ouvert/fermé des années (clé = year)
-  const [openYears, setOpenYears] = useState({});
+  const [customDateEnabled, setCustomDateEnabled] = useState(false);
+  // Mémoriser les années ET les mois dépliés pour ne pas perdre l'état après rechargement
+  const [openYears,  setOpenYears]  = useState({});
+  const [openMonths, setOpenMonths] = useState({}); // clé: "year-month"
+
+  useEffect(() => {
+    api.getFeatureFlags().then(f => setCustomDateEnabled(!!f.activity_custom_date)).catch(() => {});
+  }, []);
 
   const canViewAll = isAdmin || can('activity_read');
   const targetUserId = canViewAll && selectedUser ? selectedUser : null;
@@ -941,6 +1331,9 @@ export default function Activity() {
           <YearSection key={y} year={y} tags={tags} onAdd={openAdd} userId={targetUserId} filterTag={filterTag}
             isOpenDefault={!!openYears[y]}
             onToggle={isOpen => setOpenYears(prev => ({ ...prev, [y]: isOpen }))}
+            openMonths={openMonths}
+            onToggleMonth={(mo, isOpen) => setOpenMonths(prev => ({ ...prev, [`${y}-${mo}`]: isOpen }))}
+            customDateEnabled={customDateEnabled}
           />
         ))
       )}
@@ -950,6 +1343,7 @@ export default function Activity() {
           tags={tags}
           defaultYear={addModal.year}
           defaultMonth={addModal.month}
+          customDateEnabled={customDateEnabled}
           onClose={() => setAddModal(null)}
           onSave={() => {
             addModal.onSaved?.();

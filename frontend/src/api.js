@@ -8,12 +8,21 @@ async function request(method, path, body) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${BASE}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error || `Erreur ${res.status}`);
+    err.status = res.status;
+    if (data.usages) err.usages = data.usages;
+    throw err;
+  }
   return data;
 }
 
 const api = {
-  login: (u, p) => request('POST', '/auth/login', { username: u, password: p }),
+  login: (u, p, totp_token) => {
+    const body = { username: u, password: p };
+    if (totp_token) body.totp_token = totp_token;
+    return request('POST', '/auth/login', body);
+  },
   changePassword: (cur, nw) => request('POST', '/auth/change-password', { currentPassword: cur, newPassword: nw }),
   stats: () => request('GET', '/stats'),
   // Account
@@ -26,6 +35,10 @@ const api = {
   createUser: (d) => request('POST', '/users', d),
   updateUser: (id, d) => request('PUT', `/users/${id}`, d),
   deleteUser: (id) => request('DELETE', `/users/${id}`),
+  getEntryFiles: (id) => request("GET", "/activity/entries/"+id+"/files"),
+  uploadEntryFile: (id,d) => request("POST", "/activity/entries/"+id+"/files", d),
+  lockEntryFile: (id) => request("PUT", "/activity/files/"+id+"/lock"),
+  deleteEntryFile: (id) => request("DELETE", "/activity/files/"+id),
   getFeatureFlags: () => request('GET', '/settings/feature-flags'),
   setFeatureFlags: (f) => request('PUT', '/settings/feature-flags', f),
   getCountries:    () => request('GET', '/countries'),
@@ -46,6 +59,12 @@ const api = {
   getSettings: () => request('GET', '/settings'),
   updateSettings: (d) => request('PUT', '/settings', d),
   getPublicSettings: () => fetch('/api/settings/public').then(r => r.json()),
+  // TOTP
+  totpSetupQr:     (setup_token) => request('POST', '/auth/totp/setup-qr', { setup_token }),
+  totpSetupVerify: (setup_token, totp_token) => request('POST', '/auth/totp/setup-verify', { setup_token, totp_token }),
+  importActivityCsv: (csv) => request('POST', '/activity/import-csv', { csv }),
+  getPdfLogo: () => request('GET', '/settings/pdf-logo'),
+  setPdfLogo: (logo) => request('PUT', '/settings/pdf-logo', { logo }),
   getPrefs: () => request('GET', '/me/prefs'),
   // Activity
   activityTags: () => request('GET', '/activity/tags'),

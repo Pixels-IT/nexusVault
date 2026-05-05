@@ -141,8 +141,8 @@ export default function Navbar() {
             {t('nav.automatisation')}
           </button>
           <button
-            className={`nav-item ${isActive('/activity') ? 'active' : ''}` }
-            onClick={() => navigate('/activity')}
+            className={`nav-item ${isActive('/activite') ? 'active' : ''}` }
+            onClick={() => navigate('/activite')}
             style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

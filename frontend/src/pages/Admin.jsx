@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -153,8 +153,9 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
     enabled: user.enabled !== 0,
     password: '',
     unlock: false,
+    reset_totp: false,
   } : {
-    username: '', display_name: '', email: '', role: 'viewer', enabled: true, password: '',
+    username: '', display_name: '', email: '', role: 'viewer', enabled: true, password: '', reset_totp: false,
   });
   const [error, setError]     = useState('');
   const [loading, setLoading] = useState(false);
@@ -182,6 +183,7 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
         const payload = { ...data };
         if (!payload.password) delete payload.password;
         delete payload.permissions;
+        delete payload.unlock;
         await api.updateUser(user.id, payload);
         if (data.unlock) await api.unlockUser(user.id);
       }
@@ -276,6 +278,30 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
               onChange={e => setData(d => ({ ...d, unlock: e.target.checked }))} />
             Déverrouiller
           </label>
+        </div>
+      )}
+
+      {/* Reset TOTP — uniquement si l'utilisateur a le TOTP activé */}
+      {!isNew && !!user?.totp_enabled && (
+        <div className="alert alert-ok" style={{ margin: '8px 0 0 0', fontSize: 12, background: 'var(--acc-s)', borderColor: 'var(--acc)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}>
+            <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+          </svg>
+          <span style={{ color: 'var(--acc)', fontWeight: 600 }}>TOTP activé</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', cursor: 'pointer', fontSize: 11 }}>
+            <input type="checkbox" checked={data.reset_totp}
+              onChange={e => setData(d => ({ ...d, reset_totp: e.target.checked }))}
+              style={{ accentColor: 'var(--warn)' }} />
+            <span style={{ color: 'var(--warn)', fontWeight: 600 }}>Réinitialiser le TOTP</span>
+          </label>
+        </div>
+      )}
+      {!isNew && !user?.totp_enabled && (
+        <div style={{ margin: '8px 0 0 0', fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 12, height: 12 }}>
+            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+          </svg>
+          TOTP non configuré
         </div>
       )}
     </Modal>
@@ -1242,6 +1268,27 @@ function SecurityOidcTab() {
   const [msg, setMsg]       = useState('');
   const [err, setErr]       = useState('');
 
+  // ── TOTP ─────────────────────────────────────────────────────────────────────
+  const [totpRequired, setTotpRequired] = useState(false);
+  const [totpSaving, setTotpSaving]     = useState(false);
+  const [totpMsg, setTotpMsg]           = useState('');
+
+  useEffect(() => {
+    api.getFeatureFlags().then(f => setTotpRequired(!!f.totp_required)).catch(() => {});
+  }, []);
+
+  async function toggleTotp() {
+    const newVal = !totpRequired;
+    setTotpSaving(true); setTotpMsg('');
+    try {
+      await api.setFeatureFlags({ totp_required: newVal });
+      setTotpRequired(newVal);
+      setTotpMsg(newVal ? 'TOTP obligatoire activé.' : 'TOTP désactivé.');
+      setTimeout(() => setTotpMsg(''), 3000);
+    } catch (e) { setTotpMsg('Erreur : ' + e.message); }
+    finally { setTotpSaving(false); }
+  }
+
   useEffect(() => {
     api.oidcConfig().then(d => { if (d) setCfg(prev => ({ ...prev, ...d })); }).catch(() => {});
   }, []);
@@ -1266,6 +1313,42 @@ function SecurityOidcTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* ── TOTP ── */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
+              <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><line x1="12" y1="15" x2="12" y2="17"/>
+            </svg>
+            Authentification à deux facteurs (TOTP)
+          </div>
+        </div>
+        <div style={{padding:'14px 18px', display:'flex', flexDirection:'column', gap:10}}>
+          <label style={{display:'flex', alignItems:'flex-start', gap:12, cursor:'pointer', padding:'12px 14px', borderRadius:'var(--r)',
+            background: totpRequired ? 'var(--acc-s)' : 'var(--surf2)',
+            border: `1px solid ${totpRequired ? 'var(--acc)' : 'var(--brd)'}`, transition:'all .15s'}}>
+            <input type="checkbox" checked={totpRequired} onChange={toggleTotp} disabled={totpSaving}
+              style={{marginTop:2, accentColor:'var(--acc)', width:16, height:16}} />
+            <div>
+              <div style={{fontWeight:600, fontSize:13}}>Rendre le TOTP obligatoire</div>
+              <div style={{fontSize:12, color:'var(--muted)', marginTop:2}}>
+                Quand cette option est activée, tous les utilisateurs doivent configurer une application d'authentification (Google Authenticator, Authy…) lors de leur prochaine connexion.
+              </div>
+            </div>
+          </label>
+          {totpMsg && <div className={`alert ${totpRequired || totpMsg.startsWith('Erreur') ? (totpMsg.startsWith('Erreur') ? 'alert-err' : 'alert-ok') : 'alert-warn'}`} style={{fontSize:12}}>{totpMsg}</div>}
+          {totpRequired && (
+            <div className="alert alert-warn" style={{fontSize:12}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13,flexShrink:0}}>
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              Les utilisateurs sans TOTP configuré seront invités à scanner un QR code lors de leur prochaine connexion. Pour réinitialiser le TOTP d'un utilisateur, rendez-vous dans <strong>Utilisateurs</strong> → modifier le compte → <em>Réinitialiser le TOTP</em>.
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="card">
         <div className="card-header">
           <div className="card-title">
@@ -1614,7 +1697,8 @@ function ActivityMenuTab() {
   const [activeTab, setActiveTab] = useState('tags');
   const sv = d => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>{d}</svg>;
   const INNER_TABS = [
-    { key: 'tags', label: "Tags d'activité", icon: sv(<><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></>) },
+    { key: 'tags',    label: "Tags d'activité", icon: sv(<><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></>) },
+    { key: 'options', label: 'Options',          icon: sv(<><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M5.34 18.66l-1.41 1.41M19.07 19.07l-1.41-1.41M5.34 5.34L3.93 3.93M22 12h-2M4 12H2M12 22v-2M12 4V2"/></>) },
   ];
   return (
     <div>
@@ -1632,7 +1716,243 @@ function ActivityMenuTab() {
           </button>
         ))}
       </div>
-      {activeTab === 'tags' && <ActivityTagsTab />}
+      {activeTab === 'tags'    && <ActivityTagsTab />}
+      {activeTab === 'options' && <ActivityOptionsTab />}
+    </div>
+  );
+}
+
+function ActivityOptionsTab() {
+  const [customDate, setCustomDate] = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [msg, setMsg]               = useState('');
+
+  // Import CSV
+  const [csvFile, setCsvFile]         = useState(null);
+  const [importing, setImporting]     = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [importError, setImportError]   = useState('');
+  const fileInputRef = useRef(null);
+
+  // Logo PDF
+  const [logoPreview, setLogoPreview]   = useState(null);
+  const [logoSaving, setLogoSaving]     = useState(false);
+  const [logoMsg, setLogoMsg]           = useState('');
+  const logoInputRef = useRef(null);
+
+  useEffect(() => {
+    api.getFeatureFlags().then(f => setCustomDate(!!f.activity_custom_date)).catch(() => {});
+    api.getPdfLogo().then(r => setLogoPreview(r.logo || null)).catch(() => {});
+  }, []);
+
+  async function toggle() {
+    const newVal = !customDate;
+    setSaving(true); setMsg('');
+    try {
+      await api.setFeatureFlags({ activity_custom_date: newVal });
+      setCustomDate(newVal);
+      setMsg(newVal ? 'Option activée.' : 'Option désactivée.');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function handleImport() {
+    if (!csvFile) return;
+    setImporting(true); setImportResult(null); setImportError('');
+    try {
+      const text = await csvFile.text();
+      const result = await api.importActivityCsv(text);
+      setImportResult(result);
+      setCsvFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (e) { setImportError(e.message); }
+    finally { setImporting(false); }
+  }
+
+  function handleLogoFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setLogoMsg('Fichier invalide — image requise.'); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        if (img.height > 120) {
+          setLogoMsg(`Image trop haute (${img.height}px). Maximum 120px de hauteur.`);
+          return;
+        }
+        setLogoPreview(ev.target.result);
+        setLogoMsg('');
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  async function saveLogo() {
+    setLogoSaving(true); setLogoMsg('');
+    try {
+      await api.setPdfLogo(logoPreview);
+      setLogoMsg('Logo sauvegardé.');
+      setTimeout(() => setLogoMsg(''), 3000);
+    } catch (e) { setLogoMsg('Erreur : ' + e.message); }
+    finally { setLogoSaving(false); }
+  }
+
+  async function deleteLogo() {
+    setLogoSaving(true); setLogoMsg('');
+    try {
+      await api.setPdfLogo(null);
+      setLogoPreview(null);
+      setLogoMsg('Logo supprimé.');
+      setTimeout(() => setLogoMsg(''), 3000);
+    } catch (e) { setLogoMsg('Erreur : ' + e.message); }
+    finally { setLogoSaving(false); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Card date cosmétique */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            Date d'affichage personnalisée
+          </div>
+        </div>
+        <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label style={{
+            display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer',
+            padding: '12px 14px', borderRadius: 'var(--r)',
+            background: customDate ? 'var(--acc-s)' : 'var(--surf2)',
+            border: `1px solid ${customDate ? 'var(--acc)' : 'var(--brd)'}`, transition: 'all .15s',
+          }}>
+            <input type="checkbox" checked={customDate} onChange={toggle} disabled={saving}
+              style={{ marginTop: 2, accentColor: 'var(--acc)', width: 16, height: 16 }} />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>Permettre la modification de la date d'affichage</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                Quand cette option est activée, un champ date apparaît dans le formulaire d'édition d'une note.
+                Cette date est purement cosmétique : elle modifie uniquement l'affichage dans la liste des suivis.
+              </div>
+            </div>
+          </label>
+          {msg && <div className={`alert ${msg.startsWith('Erreur') ? 'alert-err' : 'alert-ok'}`} style={{ fontSize: 12 }}>{msg}</div>}
+        </div>
+      </div>
+
+      {/* Cards Logo + CSV sur 2 colonnes */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+
+        {/* Card logo PDF */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+              Logo pour l'export PDF
+            </div>
+          </div>
+          <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+              Ce logo remplace le texte "NEXUSVAULT" dans l'en-tête des exports PDF. <strong>Contrainte :</strong> hauteur max 120px.
+            </div>
+            <div style={{ background: 'var(--surf2)', borderRadius: 'var(--r)', padding: '12px 16px',
+              border: '1px solid var(--brd)', display: 'flex', alignItems: 'center', minHeight: 60 }}>
+              {logoPreview
+                ? <img src={logoPreview} alt="Logo PDF" style={{ maxHeight: 60, maxWidth: '100%', objectFit: 'contain' }} />
+                : <span style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Aucun logo — texte "NEXUSVAULT" utilisé</span>
+              }
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn" style={{ borderColor: 'var(--ok)', color: 'var(--ok)', display: 'flex', alignItems: 'center', gap: 6 }}
+                onClick={() => logoInputRef.current?.click()}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                {logoPreview ? 'Changer' : 'Uploader'}
+              </button>
+              <input ref={logoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoFile} />
+              {logoPreview && <>
+                <button className="btn btn-primary" onClick={saveLogo} disabled={logoSaving}>
+                  {logoSaving ? 'Sauvegarde…' : 'Sauvegarder'}
+                </button>
+                <button className="btn" onClick={deleteLogo} disabled={logoSaving}
+                  style={{ borderColor: 'var(--err)', color: 'var(--err)' }}>
+                  Supprimer
+                </button>
+              </>}
+            </div>
+            {logoMsg && <div className={`alert ${logoMsg.startsWith('Erreur') || logoMsg.includes('trop') ? 'alert-err' : 'alert-ok'}`} style={{ fontSize: 12 }}>{logoMsg}</div>}
+          </div>
+        </div>
+
+        {/* Card import CSV */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              Import CSV de suivi d'activité
+            </div>
+          </div>
+          <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+              Importation de suivi d'activité au format CSV avec un séparateur ; (point-virgule) : <span style={{ fontFamily:'var(--mono)', color:'var(--acc)' }}>ANNEE;MOIS;JOUR;TAG;NOTE</span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surf2)', borderRadius: 'var(--r)', padding: '8px 12px', fontFamily: 'var(--mono)', lineHeight: 1.8 }}>
+              <span style={{ fontSize: 11 }}>Ex: 2026;01;15;SECU;Mise à jour du firewall</span><br/>
+              <span style={{ fontSize: 11 }}>TAG absent → créé auto. Date future → preview.</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              {csvFile && (
+                <span style={{ fontSize: 12, color: 'var(--txt)', marginRight: 'auto' }}>
+                  <strong>{csvFile.name}</strong>
+                  <button onClick={() => { setCsvFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', marginLeft: 6, padding: 0, fontSize: 12 }}>✕</button>
+                </span>
+              )}
+              <button className="btn" style={{ borderColor: 'var(--ok)', color: 'var(--ok)', display: 'flex', alignItems: 'center', gap: 6 }}
+                onClick={() => fileInputRef.current?.click()}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Choisir CSV
+              </button>
+              <input ref={fileInputRef} type="file" accept=".csv,.txt" style={{ display: 'none' }}
+                onChange={e => { setCsvFile(e.target.files[0] || null); setImportResult(null); setImportError(''); }} />
+              {csvFile && (
+                <button className="btn btn-primary" onClick={handleImport} disabled={importing}>
+                  {importing ? 'Import…' : "Importer"}
+                </button>
+              )}
+            </div>
+            {importResult && (
+              <div className="alert alert-ok" style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <strong>✓ Import terminé</strong>
+                <span>{importResult.imported} importée(s), {importResult.skipped} ignorée(s)</span>
+                {importResult.tagsCreated?.length > 0 && <span>Tags créés : <strong>{importResult.tagsCreated.join(', ')}</strong></span>}
+                {importResult.errors?.length > 0 && (
+                  <details><summary style={{ cursor:'pointer', fontSize:11 }}>{importResult.errors.length} ligne(s) ignorée(s)</summary>
+                    <div style={{ marginTop:4, fontFamily:'var(--mono)', fontSize:11, lineHeight:1.6 }}>
+                      {importResult.errors.map((e,i) => <div key={i}>{e}</div>)}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+            {importError && <div className="alert alert-err" style={{ fontSize: 12 }}>{importError}</div>}
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }
@@ -1643,6 +1963,7 @@ function ActivityTagsTab() {
   const [editTag, setEditTag] = useState(null);
   const [error, setError]     = useState('');
   const [confirm, setConfirm] = useState(null);
+  const [usageError, setUsageError] = useState(null); // { tagCode, usages[] }
 
   const load = () => api.activityTags().then(setTags).catch(() => {});
   useEffect(() => { load(); }, []);
@@ -1757,8 +2078,48 @@ function ActivityTagsTab() {
         </table>
       </div>
       {confirm && <ConfirmModal message={`Supprimer le tag "${confirm.code}" ?`}
-        onConfirm={async () => { await api.deleteTag(confirm.id); setConfirm(null); load(); }}
+        onConfirm={async () => {
+          try {
+            await api.deleteTag(confirm.id);
+            setConfirm(null); load();
+          } catch (e) {
+            if (e.status === 409 || (e.usages)) {
+              setUsageError({ tagCode: confirm.code, usages: e.usages || [] });
+            } else {
+              setError(e.message);
+            }
+            setConfirm(null);
+          }
+        }}
         onCancel={() => setConfirm(null)} />}
+
+      {usageError && (
+        <Modal title={`Tag [${usageError.tagCode}] — impossible de supprimer`} onClose={() => setUsageError(null)}
+          footer={<button className="btn" onClick={() => setUsageError(null)}>Fermer</button>}>
+          <div className="alert alert-err" style={{ fontSize: 12, marginBottom: 12 }}>
+            Ce tag est utilisé dans des notes et ne peut pas être supprimé.
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--muted)' }}>
+            Notes utilisant ce tag ({usageError.usages.length}{usageError.usages.length >= 20 ? '+' : ''}) :
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
+            {usageError.usages.map((u, i) => (
+              <div key={i} style={{ background: 'var(--surf2)', borderRadius: 'var(--r)', padding: '7px 10px',
+                border: '1px solid var(--brd)', fontSize: 12 }}>
+                <span style={{ color: 'var(--muted)', marginRight: 8 }}>
+                  {u.date.slice(8,10)}/{u.date.slice(5,7)}/{u.date.slice(0,4)}
+                </span>
+                {u.excerpt}{u.excerpt.length >= 60 ? '…' : ''}
+              </div>
+            ))}
+          </div>
+          {usageError.usages.length >= 20 && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+              Seules les 20 premières notes sont affichées.
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

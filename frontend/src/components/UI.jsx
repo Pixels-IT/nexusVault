@@ -1,12 +1,12 @@
 import { useState } from 'react';
 
-export function Modal({ title, onClose, children, footer }) {
+export function Modal({ title, onClose, children, footer, width, hideClose }) {
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className="modal" style={width ? { width, maxWidth: `min(${width}, calc(100vw - 40px))` } : {}}>
         <div className="modal-header">
           <span className="modal-title">{title}</span>
-          <button className="btn btn-sm" onClick={onClose}>✕</button>
+          {!hideClose && <button className="btn btn-sm" onClick={onClose}>✕</button>}
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-footer">{footer}</div>}

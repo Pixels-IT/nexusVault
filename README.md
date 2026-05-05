@@ -1,8 +1,12 @@
+![Logo](screenshots/logo-login.png)
+
 # nexusVault — New EXperience for USer Vault — Environnement de Coffre-Fort IT
 
 Interface de coffre-fort des éléments critiques IT : configuration des équipements réseaux, suivi d'activité, scripts & automatisation.
 
 ---
+
+> 🇬🇧 [English version here](readme-uk.md)
 
 ## Pourquoi nexusVault ?
 
@@ -23,31 +27,39 @@ En cas de compromission, les attaquants ont tout sous la main !
 
 ### Suivi d'activités
 - **Suivi d'activité par utilisateurs des équipes IT par TAG avec filtrage**
-- **Création de TAG personnalisés avec couleurs : SECU, ADM, NETWORK, etc.**
-- **Export PDF du suivi d'activité avec filtrage**
+- **TAGs personnalisés avec couleurs : SECU, ADM, NET, BACKUP, INCIDENT…**
+- **Fichiers joints par note : upload, verrouillage, suppression, téléchargement**
+- **Balise `[secret]...[/secret]`** pour masquer les données sensibles (mots de passe, clés…) — affichage en `●●●●●` sur la liste, visible uniquement en édition
+- **Date d'affichage cosmétique** (Admin → Suivi → Options) : modifier la date affichée sans toucher à l'historique réel
+- **Import CSV** de notes historiques (format `ANNEE;MOIS;JOUR;TAG;NOTE`, Admin → Suivi → Options)
+- **Export PDF** avec logo personnalisable, contenu complet, colonne date et TAG
+- **Protection des notes** : suppression d'un TAG bloquée s'il est utilisé dans des notes
+- **TOTP 2FA obligatoire** configurable par l'admin (Admin → Sécurité → Authentification)
 
 ### Journal d'audit
 - **Audit complet : Connexion OK/NOK, Ajout/Suppression/Consultation/Modification**
 - **Détection et journalisation du brute-force**
 - **Archivage automatique mensuel (cron configurable : heure d'exécution)**
 - **Consultation des archives par année/mois, téléchargement CSV.gz**
-- **Actions auditées : CONNEXION_RÉUSSIE/ÉCHEC/BLOQUÉE, DÉCONNEXION/TIMEOUT, BACKUP_*, AUDIT_ARCHIVÉ, BRUTE_CONFIG_MODIFIÉ, PAYS_AJOUTÉ/SUPPRIMÉ, DROITS_MODIFIÉS, etc.**
+- **Actions auditées : CONNEXION_RÉUSSIE/ÉCHEC/BLOQUÉE, DÉCONNEXION/TIMEOUT, BACKUP_*, AUDIT_ARCHIVÉ, SUIVI_IMPORTÉ, LOGO_PDF_MODIFIÉ, TOTP_CONFIGURE, etc.**
 
 ### Sécurité
 - **Gestion des droits d'accès par rôle (Admin, Opérateur, Lecteur)**
 - **Protection brute-force configurable : nombre de tentatives et durée de verrouillage**
 - **Timeout de session configurable avec décompte visuel et audit automatique**
+- **Authentification TOTP (Google Authenticator, Authy…) obligatoire ou optionnelle**
 - **Déverrouillage manuel des comptes depuis l'interface Admin**
 - **Mode sombre / clair**
-- **Multilangues basé sur i18n (11 langues : fr, en, de, es, it, ja, nl, pl, pt, ru, zh)**
+- **Multilangues i18n (11 langues : fr, en, de, es, it, ja, nl, pl, pt, ru, zh)**
 - **Connexion LDAP/LDAPS, OIDC *(non testé à ce jour)***
 - **Notifications par SMTP, Telegram et Slack *(non testé à ce jour)***
 - **Chiffrement AES-256** de toutes les données sensibles en base SQLite
 
 ### Administration
-- **Gestion des utilisateurs avec verrouillage/déverrouillage, validation email**
+- **Gestion des utilisateurs avec verrouillage/déverrouillage, reset TOTP**
 - **URL de l'application configurable**
 - **Planificateur d'archivage (1er du mois, heure configurable)**
+- **Logo PDF personnalisable** (Admin → Suivi → Options, hauteur max 120px)
 - **Personnalisation de l'interface *(à venir)***
 
 ---
@@ -55,12 +67,10 @@ En cas de compromission, les attaquants ont tout sous la main !
 ## Fonctionnalités à venir
 
 - **RGPD : Anonymisation de certains éléments**
-- **2FA**
-- **Personnalisation du Tableau de Bord : éléments affichés, couleurs, TOP3, export PDF, etc.**
-- **Fix toutes les pages en i18n**
-- **Suivi d'activité : permettre d'ajouter des fichiers dans un suivi d'activité**
+- **Personnalisation du Tableau de Bord : éléments affichés, couleurs, TOP3, etc.**
+- **i18n complet sur toutes les pages**
 - **Suivi d'activité commun multi-utilisateurs avec TAG d'identification**
-- **Rubrique Automatisation : stockage des scripts, par type, environnement, tag, fichiers YAML**
+- **Rubrique Automatisation : stockage des scripts par type, environnement, tag**
 
 ---
 
@@ -120,6 +130,13 @@ docker compose down
 # Arrêter ET supprimer les données (⚠️ irréversible)
 docker compose down -v
 ```
+
+### 5. Screenshots
+
+![Logo](screenshots/dashboard.png)
+![Logo](screenshots/backup.png)
+![Logo](screenshots/activity_tracking.png)
+![Logo](screenshots/admin.png)
 
 ---
 
@@ -320,3 +337,22 @@ Une fois activée :
 ---
 
 *Version courante : consultez `.build_meta` pour le numéro de build exact.*
+
+---
+
+## Balise `[secret]` — Masquage de données sensibles
+
+Dans les notes de suivi d'activité, entourez les données sensibles avec la balise `[secret]` :
+
+```
+MDP serveur : [secret]MonMotDePasse123![/secret]
+Clé API : [secret]sk-xxxxxxxxxxxxxxxxxxxx[/secret]
+```
+
+**Comportement :**
+- **Page Suivi d'activité** : le contenu s'affiche comme `●●●●●` (fond orange), non lisible par les observateurs
+- **Modal d'édition** : le texte réel est visible et modifiable normalement
+- **Export PDF** : les données masquées apparaissent comme `●●●●●`
+
+> ⚠️ Les données sont stockées **en clair** dans la base chiffrée. Le masquage est uniquement visuel sur l'interface.
+
