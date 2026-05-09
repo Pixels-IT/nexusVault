@@ -1283,7 +1283,14 @@ app.put('/api/devices/:id', authMiddleware, requirePerm('config_write'), (req, r
 app.delete('/api/devices/:id', authMiddleware, requirePerm('config_write'), (req, res) => {
   const db3 = getDb(); const ip3 = getClientIp(req);
   const dev = db3.prepare('SELECT name_enc, ip_enc FROM devices WHERE id=?').get(req.params.id);
-  const devLabel = dev ? `${decrypt(dev.name_enc)} (${decrypt(dev.ip_enc)})` : req.params.id;
+  if (!dev) return res.status(404).json({ error: 'Équipement introuvable' });
+  // Bloquer si des backups existent pour cet équipement
+  const backupCount = db3.prepare('SELECT COUNT(*) as c FROM backups WHERE device_id=?').get(req.params.id).c;
+  if (backupCount > 0) {
+    const devLabel = `${decrypt(dev.name_enc)} (${decrypt(dev.ip_enc)})`;
+    return res.status(409).json({ error: `Impossible de supprimer "${devLabel}" : ${backupCount} backup(s) existant(s). Supprimez d'abord les backups associés.`, backupCount });
+  }
+  const devLabel = `${decrypt(dev.name_enc)} (${decrypt(dev.ip_enc)})`;
   db3.prepare('DELETE FROM devices WHERE id = ?').run(req.params.id);
   audit(db3, { userId: req.user.id, username: req.user.username, action: 'ÉQUIPEMENT_SUPPRIMÉ', category: 'config', severity: 'warn', detail: devLabel, ip: ip3, success: 1 });
   res.json({ success: true });
@@ -1432,13 +1439,29 @@ app.post('/api/backups/:id/audit-copy', authMiddleware, (req, res) => {
 });
 
 app.delete('/api/backups/:id', authMiddleware, requirePerm('backup_write'), (req, res) => {
-  const db = getDb();
-  const backup = db.prepare('SELECT id, pinned, version FROM backups WHERE id = ?').get(req.params.id);
-  if (!backup) return res.status(404).json({ error: 'Backup introuvable' });
-  if (backup.pinned) return res.status(403).json({ error: 'Ce backup est épinglé. Désépinglez-le avant de le supprimer.' });
-  db.prepare('DELETE FROM backups WHERE id = ?').run(req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'BACKUP_SUPPRIMÉ', category: 'backup', severity: 'warn', detail: `Backup ID ${req.params.id} v${backup.version}`, ip: getClientIp(req), success: 1 });
-  res.json({ success: true });
+  try {
+    const db = getDb();
+    const backup = db.prepare(`
+      SELECT b.id, b.pinned, b.version, b.created_at,
+        d.name_enc as device_name_enc, s.name_enc as site_name_enc
+      FROM backups b
+      LEFT JOIN devices d ON b.device_id = d.id
+      LEFT JOIN sites s ON d.site_id = s.id
+      WHERE b.id = ?`).get(req.params.id);
+    if (!backup) return res.status(404).json({ error: 'Backup introuvable' });
+    if (backup.pinned) return res.status(403).json({ error: 'Ce backup est épinglé. Désépinglez-le avant de le supprimer.' });
+    db.prepare('DELETE FROM backups WHERE id = ?').run(req.params.id);
+    let siteName = '?', deviceName = '?';
+    try { siteName   = backup.site_name_enc   ? decrypt(backup.site_name_enc)   : '?'; } catch {}
+    try { deviceName = backup.device_name_enc ? decrypt(backup.device_name_enc) : '?'; } catch {}
+    const dateStr = (backup.created_at || '').slice(0, 10);
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'BACKUP_SUPPRIMÉ', category: 'backup', severity: 'warn',
+      detail: `${siteName} / ${deviceName} — v${backup.version} du ${dateStr}`, ip: getClientIp(req), success: 1 });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('DELETE /api/backups/:id error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get('/api/backups/diff', authMiddleware, (req, res) => {
@@ -1741,12 +1764,18 @@ app.put('/api/activity/entries/:id', authMiddleware, (req, res) => {
 });
 
 app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
-  const db = getDb();
-  const entry = db.prepare('SELECT user_id FROM activity_entries WHERE id=?').get(req.params.id);
+  const db = getDb(); const ip = getClientIp(req);
+  const entry = db.prepare('SELECT * FROM activity_entries WHERE id=?').get(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Introuvable' });
   if (entry.user_id !== req.user.id)
     return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres notes' });
   db.prepare('DELETE FROM activity_entries WHERE id=?').run(req.params.id);
+  // Audit avec année, date, tag et extrait (secrets masqués)
+  const pad = n => String(n).padStart(2,'0');
+  const dateStr = `${pad(entry.created_at?.slice(8,10)||'??')}/${pad(entry.created_at?.slice(5,7)||'??')}/${entry.year}`;
+  const excerpt = (entry.content||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_SUPPRIMÉ', category: 'suivi', severity: 'warn',
+    detail: `[${entry.tag_code}] ${dateStr} — ${excerpt}${excerpt.length===60?'…':''}`, ip, success: 1 });
   res.json({ success: true });
 });
 
@@ -1909,6 +1938,18 @@ app.post('/api/activity/import-csv', authMiddleware, requirePerm('activity_tags'
 });
 
 // ── SUIVI D'ACTIVITÉ — AUDIT EXPORT ──────────────────────────────────────────
+// Audit quand on ouvre une note en édition
+app.post('/api/activity/entries/:id/audit-edit', authMiddleware, (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const entry = db.prepare('SELECT * FROM activity_entries WHERE id=?').get(req.params.id);
+  if (!entry) return res.status(404).json({ error: 'Introuvable' });
+  const pad = n => String(n).padStart(2,'0');
+  const dateStr = `${pad(entry.created_at?.slice(8,10)||'??')}/${pad(entry.created_at?.slice(5,7)||'??')}/${entry.year}`;
+  const excerpt = (entry.content||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_ÉDITÉ', category: 'suivi', severity: 'info',
+    detail: `[${entry.tag_code}] ${dateStr} — ${excerpt}${excerpt.length===60?'…':''}`, ip, success: 1 });
+  res.json({ success: true });
+});
 app.post('/api/activity/export-audit', authMiddleware, (req, res) => {
   const { mode, year, month, filterTag, count, target_user } = req.body;
   const db = getDb();
@@ -1955,11 +1996,37 @@ app.get('/api/stats', authMiddleware, (req, res) => {
     'SELECT tag_code, COUNT(*) as cnt FROM activity_entries WHERE user_id=? AND year=? AND (is_preview=0 OR is_preview IS NULL) GROUP BY tag_code ORDER BY cnt DESC LIMIT 3'
   ).all(userId, prevYear);
 
+  // Stats Automatisation
+  const autoDocTotal = db.prepare('SELECT COUNT(*) as c FROM automation_documents').get().c;
+  const autoDocRecent = db.prepare(`
+    SELECT d.name, d.created_at, c.name as cat_name, c.color as cat_color
+    FROM automation_documents d
+    LEFT JOIN automation_categories c ON d.category_id = c.id
+    ORDER BY d.created_at DESC LIMIT 3`).all();
+  const autoCatTop3 = db.prepare(`
+    SELECT c.name, c.color, COUNT(d.id) as doc_count
+    FROM automation_categories c
+    LEFT JOIN automation_documents d ON d.category_id = c.id
+    GROUP BY c.id HAVING doc_count > 0
+    ORDER BY doc_count DESC LIMIT 3`).all();
+  const autoExpiring = db.prepare(`
+    SELECT d.name, d.valid_until, c.name as cat_name
+    FROM automation_documents d
+    LEFT JOIN automation_categories c ON d.category_id = c.id
+    WHERE d.valid_until IS NOT NULL AND d.valid_until >= date('now')
+    ORDER BY d.valid_until ASC LIMIT 3`).all();
+
   res.json({
     devices:       db.prepare('SELECT COUNT(*) as c FROM devices').get().c,
     sites:         db.prepare('SELECT COUNT(*) as c FROM sites').get().c,
     backups:       db.prepare('SELECT COUNT(*) as c FROM backups').get().c,
     models:        db.prepare('SELECT COUNT(*) as c FROM device_models').get().c,
+    automation: {
+      total:    autoDocTotal,
+      recent:   autoDocRecent,
+      top3cats: autoCatTop3,
+      expiring: autoExpiring,
+    },
     activity: {
       total:      totalActivity,
       year:       yearActivity,
@@ -1975,6 +2042,248 @@ app.get('/api/stats', authMiddleware, (req, res) => {
 });
 
 // ── START ─────────────────────────────────────────────────────────────────────
+// ── AUTOMATISATION — CATÉGORIES ───────────────────────────────────────────────
+app.get('/api/automation/categories', authMiddleware, (req, res) => {
+  const db = getDb();
+  res.json(db.prepare('SELECT * FROM automation_categories ORDER BY name ASC').all());
+});
+
+app.post('/api/automation/categories', authMiddleware, requirePerm('automatisation_admin'), (req, res) => {
+  const { name, description, type, color, parent_id, valid_until } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Nom requis' });
+  const db = getDb(); const ip = getClientIp(req);
+  const r = db.prepare('INSERT INTO automation_categories (name, description, type, color, parent_id, valid_until) VALUES (?,?,?,?,?,?)')
+    .run(name.trim(), description?.trim() || null, type || 'generic', color || '#066fd1', parent_id || null, valid_until || null);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_CRÉÉE', category: 'automatisation', severity: 'info',
+    detail: `"${name.trim()}" (${type || 'generic'})`, ip, success: 1 });
+  res.json({ id: r.lastInsertRowid, success: true });
+});
+
+app.put('/api/automation/categories/:id', authMiddleware, requirePerm('automatisation_admin'), (req, res) => {
+  const { name, description, type, color, parent_id, valid_until } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Nom requis' });
+  const db = getDb(); const ip = getClientIp(req);
+  const existing = db.prepare('SELECT * FROM automation_categories WHERE id=?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Introuvable' });
+  // Empêcher catégorie parente d'elle-même ou cycle direct
+  if (parent_id && parseInt(parent_id) === parseInt(req.params.id))
+    return res.status(400).json({ error: 'Une catégorie ne peut pas être son propre parent' });
+  db.prepare('UPDATE automation_categories SET name=?, description=?, type=?, color=?, parent_id=?, valid_until=?, updated_at=? WHERE id=?')
+    .run(name.trim(), description?.trim() || null, type || 'generic', color || '#066fd1', parent_id || null, valid_until || null, nowLocal(), req.params.id);
+  const changes = [];
+  if (existing.name !== name.trim()) changes.push(`nom: "${existing.name}" → "${name.trim()}"`);
+  if (existing.type !== (type || 'generic')) changes.push(`type: ${existing.type} → ${type}`);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_MODIFIÉE', category: 'automatisation', severity: 'info',
+    detail: `"${name.trim()}" (${type || 'generic'})${changes.length ? ' — ' + changes.join(', ') : ''}`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+app.delete('/api/automation/categories/:id', authMiddleware, requirePerm('automatisation_admin'), (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const cat = db.prepare('SELECT * FROM automation_categories WHERE id=?').get(req.params.id);
+  if (!cat) return res.status(404).json({ error: 'Introuvable' });
+  // Vérifier enfants
+  const children = db.prepare('SELECT COUNT(*) as c FROM automation_categories WHERE parent_id=?').get(req.params.id).c;
+  if (children > 0) return res.status(409).json({ error: `Cette catégorie a ${children} sous-catégorie(s). Supprimez-les d'abord.` });
+  db.prepare('DELETE FROM automation_categories WHERE id=?').run(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_SUPPRIMÉE', category: 'automatisation', severity: 'warn',
+    detail: `"${cat.name}" (${cat.type})`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+// ── AUTOMATISATION — DOCUMENTS ────────────────────────────────────────────────
+
+// Liste des documents d'une catégorie
+app.get('/api/automation/categories/:id/documents', authMiddleware, (req, res) => {
+  const db = getDb();
+  const docs = db.prepare(`
+    SELECT d.*, u.username as created_by_name,
+      (SELECT COUNT(*) FROM automation_document_files f WHERE f.document_id = d.id) as file_count
+    FROM automation_documents d
+    LEFT JOIN users u ON d.created_by = u.id
+    WHERE d.category_id = ? ORDER BY d.created_at DESC`).all(req.params.id);
+  res.json(docs);
+});
+
+// Détail d'un document (avec ses fichiers)
+app.get('/api/automation/documents/:id', authMiddleware, (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const doc = db.prepare(`
+    SELECT d.*, u.username as created_by_name, c.type as category_type
+    FROM automation_documents d
+    LEFT JOIN users u ON d.created_by = u.id
+    LEFT JOIN automation_categories c ON d.category_id = c.id
+    WHERE d.id = ?`).get(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Introuvable' });
+  const files = db.prepare(`
+    SELECT f.id, f.filename, f.mimetype, f.size_bytes, f.uploaded_at, u.username as uploaded_by_name
+    FROM automation_document_files f
+    LEFT JOIN users u ON f.uploaded_by = u.id
+    WHERE f.document_id = ? ORDER BY f.uploaded_at ASC`).all(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_CONSULTÉ', category: 'automatisation', severity: 'info',
+    detail: `Document "${doc.name}"`, ip, success: 1, ref_id: doc.id });
+  res.json({ ...doc, files });
+});
+
+// Créer un document
+app.post('/api/automation/categories/:id/documents', authMiddleware, requirePerm('automatisation_write'), (req, res) => {
+  const { name, description, note, valid_until, doc_password } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Nom requis' });
+  const db = getDb(); const ip = getClientIp(req);
+  const cat = db.prepare('SELECT * FROM automation_categories WHERE id=?').get(req.params.id);
+  const r = db.prepare('INSERT INTO automation_documents (category_id, name, description, note, valid_until, doc_password, created_by) VALUES (?,?,?,?,?,?,?)')
+    .run(req.params.id, name.trim(), description?.trim()||null, note?.trim()||null, valid_until||null, doc_password||null, req.user.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_CRÉÉ', category: 'automatisation', severity: 'info',
+    detail: `Document "${name.trim()}" dans catégorie "${cat?.name||req.params.id}"`, ip, success: 1, ref_id: r.lastInsertRowid });
+  res.json({ id: r.lastInsertRowid, success: true });
+});
+
+// Modifier un document
+app.put('/api/automation/documents/:id', authMiddleware, requirePerm('automatisation_write'), (req, res) => {
+  const { name, description, note, valid_until, doc_password } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Nom requis' });
+  const db = getDb(); const ip = getClientIp(req);
+  const doc = db.prepare('SELECT * FROM automation_documents WHERE id=?').get(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Introuvable' });
+  db.prepare('UPDATE automation_documents SET name=?, description=?, note=?, valid_until=?, doc_password=?, updated_at=? WHERE id=?')
+    .run(name.trim(), description?.trim()||null, note?.trim()||null, valid_until||null, doc_password||doc.doc_password||null, nowLocal(), req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_MODIFIÉ', category: 'automatisation', severity: 'info',
+    detail: `Document "${name.trim()}"`, ip, success: 1, ref_id: parseInt(req.params.id) });
+  res.json({ success: true });
+});
+
+// Supprimer un document
+app.delete('/api/automation/documents/:id', authMiddleware, requirePerm('automatisation_write'), (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const doc = db.prepare('SELECT * FROM automation_documents WHERE id=?').get(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Introuvable' });
+  db.prepare('DELETE FROM automation_documents WHERE id=?').run(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_SUPPRIMÉ', category: 'automatisation', severity: 'warn',
+    detail: `Document "${doc.name}"`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+// Ajouter un fichier joint à un document
+app.post('/api/automation/documents/:id/files', authMiddleware, requirePerm('automatisation_write'), (req, res) => {
+  const { filename, mimetype, data } = req.body;
+  if (!filename || !data) return res.status(400).json({ error: 'Fichier requis' });
+  const db = getDb(); const ip = getClientIp(req);
+  const doc = db.prepare('SELECT * FROM automation_documents WHERE id=?').get(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Document introuvable' });
+  const buf = Buffer.from(data, 'base64');
+  const r = db.prepare('INSERT INTO automation_document_files (document_id, filename, mimetype, size_bytes, data, uploaded_by) VALUES (?,?,?,?,?,?)')
+    .run(req.params.id, filename, mimetype||'application/octet-stream', buf.length, buf, req.user.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_AJOUTÉ', category: 'automatisation', severity: 'info',
+    detail: `"${filename}" → document "${doc.name}"`, ip, success: 1, ref_id: parseInt(req.params.id) });
+  res.json({ id: r.lastInsertRowid, success: true });
+});
+
+// Télécharger un fichier joint
+app.get('/api/automation/files/:id/download', authMiddleware, (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const row = db.prepare(`SELECT f.*, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Introuvable' });
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_TÉLÉCHARGÉ', category: 'automatisation', severity: 'info',
+    detail: `"${row.filename}" (doc: "${row.doc_name}")`, ip, success: 1, ref_id: row.document_id });
+  res.setHeader('Content-Disposition', `attachment; filename="${row.filename}"`);
+  res.setHeader('Content-Type', row.mimetype || 'application/octet-stream');
+  res.send(Buffer.from(row.data));
+});
+
+// Supprimer un fichier joint
+app.delete('/api/automation/files/:id', authMiddleware, requirePerm('automatisation_write'), (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const f = db.prepare(`SELECT f.*, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
+  if (!f) return res.status(404).json({ error: 'Introuvable' });
+  db.prepare('DELETE FROM automation_document_files WHERE id=?').run(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_SUPPRIMÉ', category: 'automatisation', severity: 'warn',
+    detail: `"${f.filename}" du document "${f.doc_name}"`, ip, success: 1, ref_id: f.document_id });
+  res.json({ success: true });
+});
+
+// Audit tentative accès document sécurisé échouée
+app.post('/api/automation/documents/:id/access-denied', authMiddleware, (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const doc = db.prepare('SELECT name FROM automation_documents WHERE id=?').get(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_ACCÈS_REFUSÉ', category: 'automatisation', severity: 'warn',
+    detail: `Tentative d'accès refusée — document "${doc?.name||req.params.id}"`, ip, success: 0, ref_id: parseInt(req.params.id) });
+  res.json({ success: true });
+});
+
+// Audit copie d'un fichier script
+app.post('/api/automation/files/:id/copy-audit', authMiddleware, (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const row = db.prepare(`SELECT f.filename, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Introuvable' });
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_COPIÉ', category: 'automatisation', severity: 'info',
+    detail: `"${row.filename}" (doc: "${row.doc_name}") copié dans le presse-papier`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+// Prévisualisation d'un fichier (texte/PDF/Word via LibreOffice)
+app.get('/api/automation/files/:id/preview', authMiddleware, async (req, res) => {
+  const os = require('os'); const path = require('path');
+  const { execFile } = require('child_process'); const fs = require('fs');
+  const db = getDb(); const ip = getClientIp(req);
+  const row = db.prepare(`SELECT f.*, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Introuvable' });
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_PRÉVISUALISÉ', category: 'automatisation', severity: 'info',
+    detail: `"${row.filename}" (doc: "${row.doc_name}")`, ip, success: 1, ref_id: row.document_id });
+  const buf = Buffer.from(row.data);
+  const fn  = row.filename.toLowerCase();
+  const mime = row.mimetype || '';
+
+  // PRIORITÉ 1 : Word/ODT/PPT → LibreOffice → PDF fidèle (styles, couleurs, mise en page)
+  if (fn.match(/\.(docx?|odt|odp|pptx?)$/) || mime.includes('word') || mime.includes('officedocument') || mime.includes('opendocument')) {
+    const ext    = fn.match(/\.([^.]+)$/)?.[1] || 'docx';
+    const tmpIn  = path.join(os.tmpdir(), `nv_${Date.now()}_${row.id}.${ext}`);
+    const tmpPdf = path.join(os.tmpdir(), `nv_${Date.now()}_${row.id}.pdf`);
+    try {
+      fs.writeFileSync(tmpIn, buf);
+      await new Promise((resolve, reject) => {
+        execFile('libreoffice', ['--headless', '--convert-to', 'pdf', '--outdir', os.tmpdir(), tmpIn],
+          { timeout: 30000 }, (err) => err ? reject(err) : resolve());
+      });
+      const baseName = path.basename(tmpIn, path.extname(tmpIn));
+      const generatedPdf = path.join(os.tmpdir(), baseName + '.pdf');
+      const pdfBuf = fs.readFileSync(generatedPdf);
+      try { fs.unlinkSync(tmpIn); fs.unlinkSync(generatedPdf); } catch {}
+      return res.json({ type: 'pdf', content: pdfBuf.toString('base64'), filename: row.filename, mimetype: 'application/pdf' });
+    } catch (err) {
+      try { fs.unlinkSync(tmpIn); } catch {}
+      logger.warn('[PREVIEW] LibreOffice: ' + err.message);
+      // Fallback: retourner base64 brut pour mammoth côté client
+      return res.json({ type: 'office', content: buf.toString('base64'), filename: row.filename, mimetype: mime });
+    }
+  }
+
+  // PRIORITÉ 2 : PDF direct
+  if (fn.endsWith('.pdf') || mime === 'application/pdf') {
+    return res.json({ type: 'pdf', content: buf.toString('base64'), filename: row.filename, mimetype: mime });
+  }
+
+  // PRIORITÉ 3 : Texte / Code
+  if (mime.startsWith('text/') || mime.includes('json') || mime.includes('yaml') || mime.includes('xml') ||
+      mime.includes('javascript') || mime.includes('python') || mime.includes('shell') ||
+      ['.txt','.md','.yaml','.yml','.json','.xml','.sh','.py','.js','.ts','.sql','.ini','.cfg','.conf','.log','.csv',
+       '.html','.htm','.css','.rb','.go','.java','.c','.cpp','.h','.rs','.php']
+        .some(ext => fn.endsWith(ext))) {
+    return res.json({ type: 'text', content: buf.toString('utf8'), filename: row.filename, mimetype: mime });
+  }
+  res.json({ type: 'unsupported', filename: row.filename });
+});
+
+// Historique d'un document
+app.get('/api/automation/documents/:id/history', authMiddleware, (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT action, detail, username, created_at, severity
+    FROM audit_log
+    WHERE ref_id = ? AND category = 'automatisation'
+    ORDER BY created_at DESC LIMIT 100`).all(req.params.id);
+  res.json(rows);
+});
+
 module.exports = { logger };
 
 app.listen(PORT, () => {

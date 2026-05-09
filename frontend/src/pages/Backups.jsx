@@ -52,8 +52,17 @@ function ContentView({ backup, onClose }) {
             </div>
           </div>
           <div style={{ display:'flex', gap:8 }}>
-            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); api.logBackupCopy(backup.id).catch(()=>{}); })} disabled={loading}>
-              {copied ? '✓ Copié' : 'Copier'}
+            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); api.logBackupCopy(backup.id).catch(()=>{}); })} disabled={loading}
+              style={{ display:'flex', alignItems:'center', gap:5,
+                borderColor: copied ? 'var(--ok)' : 'var(--acc)',
+                color: copied ? 'var(--ok)' : 'var(--acc)',
+                transition:'color .15s, border-color .15s' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+                {copied
+                  ? <polyline points="20 6 9 17 4 12"/>
+                  : <><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>}
+              </svg>
+              {copied ? 'Copié !' : 'Copier'}
             </button>
             <button className="btn btn-sm" onClick={onClose}>✕</button>
           </div>

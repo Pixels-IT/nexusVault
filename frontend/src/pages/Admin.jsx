@@ -20,25 +20,435 @@ function PersonnalisationTab() {
 }
 
 // ── SCRIPTS ADMIN TAB ────────────────────────────────────────────────────────
+// ── TYPES DE CATÉGORIES ────────────────────────────────────────────────────────
+const CAT_TYPES = [
+  { value: 'generic',   label: 'Générique',   desc: 'Sans option particulière' },
+  { value: 'temporary', label: 'Temporaire',  desc: 'Avec date de validité (ex: certificat)' },
+  { value: 'procedure', label: 'Procédure',   desc: 'Document Word/PDF avec aperçu' },
+  { value: 'script',    label: 'Scripts',     desc: 'Document de type script avec reconnaissance des balises' },
+  { value: 'secured',   label: 'Sécurisé',    desc: 'Protégé par mot de passe admin' },
+];
+
 function ScriptsAdminTab() {
+  const [innerTab, setInnerTab] = useState('categories');
+  const { can, isAdmin } = usePerms();
+
+  const INNER = [
+    { key:'categories', label:'Catégories', icon:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13}}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> },
+    ...(isAdmin || can('automatisation_options') ? [{ key:'options', label:'Options', icon:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13}}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M5.34 18.66l-1.41 1.41M19.07 19.07l-1.41-1.41M5.34 5.34L3.93 3.93M22 12h-2M4 12H2M12 22v-2M12 4V2"/></svg> }] : []),
+  ];
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-      padding:'60px 20px', gap:14, background:'var(--surf)', border:'2px dashed var(--brd)', borderRadius:'var(--rl)' }}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="1.5" style={{ width:48, height:48 }}>
-        <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
-      </svg>
-      <div style={{ fontWeight:700, fontSize:15, color:'var(--txt)' }}>Gestion des scripts</div>
-      <div style={{ fontSize:13, color:'var(--muted)', textAlign:'center', maxWidth:400 }}>
-        Cette section permettra de gérer les fichiers de scripts hébergés dans NexusVault.
+    <div>
+      <div style={{ display:'flex', gap:2, marginBottom:20, borderBottom:'1px solid var(--brd)' }}>
+        {INNER.map(t => (
+          <button key={t.key} onClick={() => setInnerTab(t.key)} style={{
+            display:'flex', alignItems:'center', gap:6,
+            padding:'9px 16px', background:'none', border:'none',
+            borderBottom: innerTab===t.key ? '2px solid var(--acc)' : '2px solid transparent',
+            color: innerTab===t.key ? 'var(--acc)' : 'var(--muted)',
+            fontWeight: innerTab===t.key ? 600 : 500,
+            fontSize:13, cursor:'pointer', fontFamily:'var(--font)', marginBottom:-1,
+          }}>{t.icon} {t.label}</button>
+        ))}
       </div>
-      <span style={{ fontSize:11, fontWeight:700, color:'var(--warn)', background:'var(--warn-s)',
-        border:'1px solid var(--warn)', borderRadius:4, padding:'3px 10px', letterSpacing:'.4px' }}>
-        BIENTÔT DISPONIBLE
-      </span>
+      {innerTab === 'categories' && <AutomationCategoriesTab />}
+      {innerTab === 'options'    && <AutomationOptionsTab />}
     </div>
   );
 }
 
+// ── CATÉGORIES ─────────────────────────────────────────────────────────────────
+function AutomationCategoriesTab() {
+  const [cats, setCats]         = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [editCat, setEditCat]   = useState(null);   // null = création, object = édition
+  const [confirm, setConfirm]   = useState(null);
+  const [colorMode, setColorMode] = useState('same');
+
+  const EMPTY_FORM = { name:'', description:'', type:'generic', color:'#066fd1', parent_id:'', valid_until:'' };
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [error, setError] = useState('');
+  const [msg,   setMsg]   = useState('');
+
+  const load = () => api.automationCategories().then(d => setCats(Array.isArray(d)?d:[])).catch(()=>{});
+  useEffect(() => {
+    load();
+    api.getFeatureFlags().then(f => setColorMode(f.automation_cat_color_mode || 'same')).catch(()=>{});
+  }, []);
+
+  const TYPE_COLORS = { generic:'#64748b', temporary:'var(--warn)', procedure:'#0891b2', script:'#16a34a', secured:'var(--err)' };
+  const TYPE_LABEL  = Object.fromEntries(CAT_TYPES.map(t=>[t.value, t.label]));
+
+  // Calculer la couleur héritée (teinte différente = rotation hue de 30°)
+  function computeChildColor(parentColor) {
+    if (colorMode === 'same') return parentColor;
+    // Décaler la teinte de 30 degrés en HSL
+    const hex = parentColor.replace('#','');
+    const r=parseInt(hex.slice(0,2),16)/255, g=parseInt(hex.slice(2,4),16)/255, b=parseInt(hex.slice(4,6),16)/255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b), l=(max+min)/2;
+    const d=max-min;
+    let h=0, s=d===0?0:d/(1-Math.abs(2*l-1));
+    if(d!==0){ if(max===r)h=((g-b)/d)%6; else if(max===g)h=(b-r)/d+2; else h=(r-g)/d+4; h=h*60; if(h<0)h+=360; }
+    h=(h+30)%360;
+    const c2=(1-Math.abs(2*l-1))*s, x=c2*(1-Math.abs((h/60)%2-1)), m=l-c2/2;
+    let r2=0,g2=0,b2=0;
+    if(h<60){r2=c2;g2=x;}else if(h<120){r2=x;g2=c2;}else if(h<180){g2=c2;b2=x;}else if(h<240){g2=x;b2=c2;}else if(h<300){r2=x;b2=c2;}else{r2=c2;b2=x;}
+    const toHex=v=>Math.round((v+m)*255).toString(16).padStart(2,'0');
+    return '#'+toHex(r2)+toHex(g2)+toHex(b2);
+  }
+
+  // Quand parent_id change, forcer la couleur héritée
+  function handleParentChange(pid) {
+    if (!pid) { setForm(f=>({...f, parent_id:''})); return; }
+    const parent = cats.find(c=>String(c.id)===String(pid));
+    if (parent) {
+      const inherited = computeChildColor(parent.color);
+      setForm(f=>({...f, parent_id:pid, color:inherited}));
+    } else {
+      setForm(f=>({...f, parent_id:pid}));
+    }
+  }
+
+  const hasParent = !!form.parent_id;
+  const colorLocked = hasParent; // la couleur est toujours gérée par héritage si parent
+
+  async function submit(e) {
+    e.preventDefault(); setError('');
+    const data = { ...form, parent_id:form.parent_id||null, valid_until:form.type==='temporary'?form.valid_until||null:null };
+    try {
+      if (editCat) { await api.updateCategory(editCat.id, data); setMsg('Catégorie modifiée.'); }
+      else         { await api.createCategory(data);              setMsg('Catégorie créée.'); }
+      setShowModal(false); setEditCat(null); setForm(EMPTY_FORM);
+      load(); setTimeout(()=>setMsg(''),3000);
+    } catch(ex) { setError(ex.message); }
+  }
+
+  function openCreate() { setEditCat(null); setForm(EMPTY_FORM); setError(''); setShowModal(true); }
+  function openEdit(cat) {
+    setEditCat(cat);
+    setForm({ name:cat.name, description:cat.description||'', type:cat.type, color:cat.color, parent_id:cat.parent_id||'', valid_until:cat.valid_until||'' });
+    setError(''); setShowModal(true);
+  }
+  function closeModal() { setShowModal(false); setEditCat(null); setForm(EMPTY_FORM); setError(''); }
+
+  const roots    = cats.filter(c => !c.parent_id);
+  const children = id => cats.filter(c => c.parent_id === id);
+  const parentOptions = cats.filter(c => !editCat || c.id !== editCat.id);
+
+  function CatRow({ cat, depth=0 }) {
+    const tc = TYPE_COLORS[cat.type] || 'var(--muted)';
+    return (
+      <>
+        <tr style={{ borderBottom:'1px solid var(--brd)' }}>
+          {/* Nom — prioritaire, largeur doublée, centré */}
+          <td style={{ padding:'9px 14px', paddingLeft: 14+depth*22, whiteSpace:'nowrap', textAlign:'center' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ width:10, height:10, borderRadius:'50%', background:cat.color, flexShrink:0, display:'inline-block' }}/>
+              <span style={{ fontWeight:600, fontSize:13 }}>{cat.name}</span>
+            </div>
+          </td>
+          {/* Type — fixe, centré */}
+          <td style={{ padding:'9px 8px', whiteSpace:'nowrap', width:100, textAlign:'center' }}>
+            <span style={{ fontSize:11, fontWeight:600, color:tc, background:`${tc}22`, borderRadius:4, padding:'2px 7px' }}>
+              {TYPE_LABEL[cat.type]||cat.type}
+            </span>
+          </td>
+          {/* Description — largeur restante */}
+          <td style={{ padding:'9px 8px', fontSize:12, color:'var(--muted)', width:'100%' }}>
+            {cat.description || <span style={{ fontStyle:'italic', opacity:.5 }}>—</span>}
+          </td>
+          {/* Actions */}
+          <td style={{ padding:'9px 8px', whiteSpace:'nowrap', textAlign:'right' }}>
+            <button className="btn btn-sm" onClick={()=>openEdit(cat)} style={{ marginRight:6 }}>Éditer</button>
+            <button className="btn btn-sm" onClick={()=>setConfirm(cat)} style={{ color:'var(--err)', borderColor:'var(--err)' }}>✕</button>
+          </td>
+        </tr>
+        {children(cat.id).sort((a,b)=>a.name.localeCompare(b.name)).map(ch => <CatRow key={ch.id} cat={ch} depth={depth+1}/>)}
+      </>
+    );
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      {/* Message de succès */}
+      {msg && <div className="alert alert-ok" style={{fontSize:12}}>{msg}</div>}
+
+      {/* Liste avec bouton dans le header */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            Catégories ({cats.length})
+          </div>
+          <button className="btn btn-sm" onClick={openCreate}
+            style={{ display:'flex', alignItems:'center', gap:5, borderColor:'var(--ok)', color:'var(--ok)' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Ajouter
+          </button>
+        </div>
+        {cats.length === 0 ? (
+          <div style={{ padding:'30px 20px', textAlign:'center', color:'var(--muted)', fontSize:13 }}>
+            Aucune catégorie. Cliquez sur "Créer une catégorie" pour commencer.
+          </div>
+        ) : (
+          <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
+            <colgroup>
+              <col style={{ width:240 }}/>
+              <col style={{ width:100 }}/>
+              <col/>
+              <col style={{ width:100 }}/>
+            </colgroup>
+            <thead>
+              <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
+                <th style={{ padding:'7px 14px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Nom</th>
+                <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Type</th>
+                <th style={{ padding:'7px 8px', textAlign:'left', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Description</th>
+                <th style={{ padding:'7px 8px' }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {roots.sort((a,b)=>a.name.localeCompare(b.name)).map(c => <CatRow key={c.id} cat={c} />)}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Modal création / édition */}
+      {showModal && (() => {
+        // Construire options parentes triées : parents puis leurs enfants indentés
+        const buildOptions = () => {
+          const result = [];
+          const allRoots = parentOptions.filter(c=>!c.parent_id).sort((a,b)=>a.name.localeCompare(b.name));
+          allRoots.forEach(root => {
+            result.push({ id: root.id, label: root.name, depth: 0 });
+            parentOptions.filter(c=>c.parent_id===root.id).sort((a,b)=>a.name.localeCompare(b.name))
+              .forEach(ch => result.push({ id:ch.id, label:ch.name, depth:1 }));
+          });
+          return result;
+        };
+        return (
+          <Modal title={editCat ? `Modifier "${editCat.name}"` : 'Nouvelle catégorie'} onClose={closeModal}
+            footer={
+              <div style={{ display:'flex', gap:8 }}>
+                <button type="button" className="btn" onClick={closeModal}>Annuler</button>
+                <button type="button" onClick={()=>document.getElementById('cat-form').requestSubmit()} className="btn btn-primary">
+                  {editCat ? 'Enregistrer' : 'Créer'}
+                </button>
+              </div>
+            }>
+            <form id="cat-form" onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                <div className="form-group" style={{margin:0}}>
+                  <label className="form-label">Nom *</label>
+                  <input className="form-control" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} required />
+                </div>
+                <div className="form-group" style={{margin:0}}>
+                  <label className="form-label">Type</label>
+                  <select className="form-control" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
+                    {CAT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label} — {t.desc}</option>)}
+                  </select>
+                </div>
+                <div className="form-group" style={{margin:0, gridColumn:'1/-1'}}>
+                  <label className="form-label">Description <span style={{fontWeight:400,color:'var(--muted)'}}>— optionnel</span></label>
+                  <input className="form-control" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="Description de la catégorie" />
+                </div>
+                {/* Ligne pleine largeur 75/25 : parent + couleur */}
+                <div style={{ gridColumn:'1/-1', display:'grid', gridTemplateColumns:'3fr 1fr', gap:10 }}>
+                  <div className="form-group" style={{margin:0}}>
+                    <label className="form-label">Catégorie parente</label>
+                    <select className="form-control" value={form.parent_id} onChange={e=>handleParentChange(e.target.value)}
+                      style={{ color:'var(--txt)', background:'var(--surf2)' }}>
+                      <option value="">— Aucune (catégorie racine) —</option>
+                      {buildOptions().map(opt => (
+                        <option key={opt.id} value={opt.id} style={{ paddingLeft: opt.depth > 0 ? 16 : 0 }}>
+                          {opt.depth > 0 ? '    ↳ ' : ''}{opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{margin:0}}>
+                    <label className="form-label" style={{ display:'flex', alignItems:'center', gap:4 }}>
+                      Couleur
+                      {colorLocked && <span style={{ fontSize:9, color:'var(--muted)', background:'var(--surf2)', border:'1px solid var(--brd)', borderRadius:3, padding:'1px 4px' }}>auto</span>}
+                    </label>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, opacity: colorLocked ? 0.5 : 1 }}>
+                      <input type="color" value={form.color} disabled={colorLocked}
+                        onChange={e=>setForm(f=>({...f,color:e.target.value}))}
+                        style={{ width:36, height:32, padding:2, border:'1px solid var(--brd)', borderRadius:'var(--r)', cursor: colorLocked?'not-allowed':'pointer', background:'var(--surf2)', flexShrink:0 }} />
+                      <input className="form-control" value={form.color} disabled={colorLocked}
+                        onChange={e=>setForm(f=>({...f,color:e.target.value}))}
+                        style={{ fontFamily:'var(--mono)', fontSize:11 }} />
+                    </div>
+                  </div>
+                </div>
+                {form.type === 'temporary' && (
+                  <div className="form-group" style={{margin:0}}>
+                    <label className="form-label">Date de fin de validité</label>
+                    <input type="date" className="form-control" value={form.valid_until} onChange={e=>setForm(f=>({...f,valid_until:e.target.value}))} />
+                  </div>
+                )}
+              </div>
+              {error && <div className="alert alert-err" style={{fontSize:12}}>{error}</div>}
+            </form>
+          </Modal>
+        );
+      })()}
+
+      {confirm && <ConfirmModal message={`Supprimer la catégorie "${confirm.name}" ?`}
+        onConfirm={async()=>{ try { await api.deleteCategory(confirm.id); setConfirm(null); load(); } catch(e){ alert(e.message); setConfirm(null); } }}
+        onCancel={()=>setConfirm(null)} />}
+    </div>
+  );
+}
+
+// ── OPTIONS AUTOMATISATION ─────────────────────────────────────────────────────
+
+// ── OPTIONS AUTOMATISATION ─────────────────────────────────────────────────────
+function AutomationOptionsTab() {
+  const [colorMode, setColorMode] = useState('same');
+  const [securedPwd, setSecuredPwd] = useState('');
+  const [saving, setSaving]       = useState(false);
+  const [msg, setMsg]             = useState('');
+
+  useEffect(() => {
+    api.getFeatureFlags().then(f => {
+      setColorMode(f.automation_cat_color_mode || 'same');
+      setSecuredPwd(f.automation_secured_password || '');
+    }).catch(()=>{});
+  }, []);
+
+  async function saveColorMode(mode) {
+    setSaving(true); setMsg('');
+    try {
+      await api.setFeatureFlags({ automation_cat_color_mode: mode });
+      setColorMode(mode);
+      setMsg('Option sauvegardée.'); setTimeout(()=>setMsg(''),3000);
+    } catch(e) { setMsg('Erreur : '+e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function saveSecuredPwd() {
+    setSaving(true); setMsg('');
+    try {
+      await api.setFeatureFlags({ automation_secured_password: securedPwd });
+      setMsg(securedPwd ? 'Mot de passe enregistré.' : 'Mot de passe vide enregistré.');
+      setTimeout(()=>setMsg(''),3000);
+    } catch(e) { setMsg('Erreur : '+e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      {/* Ligne 50/50 : couleurs + mot de passe sécurisé */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        {/* Card couleur des catégories */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="10" cy="19.5" r="2.5"/>
+              </svg>
+              Couleur des catégories
+            </div>
+          </div>
+          <div style={{ padding:'14px 18px', display:'flex', flexDirection:'column', gap:8 }}>
+            {[
+              { value:'same',  label:"Les catégories enfants héritent de la couleur des parents à l'identique." },
+              { value:'shade', label:"Les catégories enfants héritent d'une nuance/teinte différente de la couleur des parents." },
+            ].map(opt => (
+              <label key={opt.value} style={{ display:'flex', alignItems:'flex-start', gap:10, cursor:'pointer',
+                padding:'10px 12px', borderRadius:'var(--r)',
+                background: colorMode===opt.value ? 'var(--acc-s)' : 'var(--surf2)',
+                border: `1px solid ${colorMode===opt.value ? 'var(--acc)' : 'var(--brd)'}`,
+                transition:'all .12s' }}>
+                <input type="radio" name="colorMode" value={opt.value} checked={colorMode===opt.value}
+                  onChange={()=>saveColorMode(opt.value)} disabled={saving}
+                  style={{ marginTop:2, accentColor:'var(--acc)' }} />
+                <span style={{ fontSize:12 }}>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Card mot de passe sécurisé */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              Mot de passe des documents sécurisés
+            </div>
+          </div>
+          <div style={{ padding:'14px 18px', display:'flex', flexDirection:'column', gap:12 }}>
+            <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>
+              Le mot de passe indiqué sera utilisé pour sécuriser l'accès à tous les documents dont la catégorie est "Sécurisé".
+              <strong> Si vide</strong>, il faudra indiquer un mot de passe à chaque document.
+              <span style={{ color:'var(--warn)' }}> À vos risques et périls.</span>
+            </div>
+            <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
+              <div className="form-group" style={{ margin:0, flex:1 }}>
+                <label className="form-label">Mot de passe global</label>
+                <input type="password" className="form-control" value={securedPwd}
+                  onChange={e=>setSecuredPwd(e.target.value)}
+                  placeholder="Laisser vide pour demander à chaque document" />
+              </div>
+              <button className="btn btn-primary" onClick={saveSecuredPwd} disabled={saving}>
+                Enregistrer
+              </button>
+            </div>
+            {msg && <div className={`alert ${msg.startsWith('Erreur')?'alert-err':'alert-ok'}`} style={{fontSize:12,marginTop:8}}>{msg}</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* Card types de catégories */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+              <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+            </svg>
+            Types de catégorie
+          </div>
+        </div>
+        <div style={{ padding:'14px 18px' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <thead>
+              <tr style={{ borderBottom:'1px solid var(--brd)' }}>
+                <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>Type</th>
+                <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {CAT_TYPES.map((t, i) => (
+                <tr key={t.value} style={{ borderBottom:'1px solid var(--brd)', background: i%2?'var(--surf2)':'transparent' }}>
+                  <td style={{ padding:'10px 10px', whiteSpace:'nowrap' }}>
+                    <span style={{ fontWeight:600, color:({generic:'#64748b',temporary:'var(--warn)',procedure:'#0891b2',script:'#16a34a',secured:'var(--err)'})[t.value] || 'var(--muted)' }}>
+                      {t.label}
+                    </span>
+                  </td>
+                  <td style={{ padding:'10px 10px', color:'var(--muted)', fontSize:12 }}>
+                    {t.value === 'generic'   && 'Sans option particulière. Type par défaut.'}
+                    {t.value === 'temporary' && 'Avec une date de validité. Une notification peut être envoyée avant expiration (configurable dans Sécurité → Notifications → "Expiration de document").'}
+                    {t.value === 'procedure' && "Document de type Word/PDF. Permettra un aperçu du document dans l'interface."}
+                    {t.value === 'script'    && 'Document de type script avec reconnaissance des balises.'}
+                    {t.value === 'secured'   && "Protégé par un mot de passe. En cas de perte, seul un administrateur peut récupérer l'accès."}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 // ── MON COMPTE ────────────────────────────────────────────────────────────────
 function AccountTab() {
   const { t } = useI18n();
@@ -339,17 +749,28 @@ function UsersTab() {
         </button>
       </div>
       <table>
-        <thead><tr><th>{t('users.username')}</th><th>Nom</th><th>E-mail</th><th>{t('users.role')}</th><th>Statut</th><th>{t('users.last_login')}</th><th>Créé le</th><th></th></tr></thead>
+        <thead>
+          <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('users.username')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Nom</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>E-mail</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('users.role')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Statut</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('users.last_login')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Créé le</th>
+            <th style={{ padding:'7px 8px', background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}></th>
+          </tr>
+        </thead>
         <tbody>
           {users.map(u => (
             <tr key={u.id}>
-              <td className="cell-name">{u.username}</td>
-              <td>{u.display_name}</td>
-              <td className="cell-sub">{u.email || <span style={{color:'var(--muted)'}}>—</span>}</td>
-              <td>{roleBadge(u.role)}</td>
-              <td>
+              <td style={{ padding:'9px 8px', textAlign:'center', fontWeight:600, fontSize:13 }}>{u.username}</td>
+              <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{u.display_name}</td>
+              <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{u.email || <span style={{color:'var(--muted)'}}>—</span>}</td>
+              <td style={{ padding:'9px 8px', textAlign:'center' }}>{roleBadge(u.role)}</td>
+              <td style={{ padding:'9px 8px', textAlign:'center' }}>
                 {u.locked_until && new Date(u.locked_until.replace(' ','T')) > new Date()
-                  ? <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  ? <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'center' }}>
                       <span className="badge badge-err" title={`Verrouillé jusqu'à ${u.locked_until}`}>
                         <span className="dot" style={{ background:'var(--err)' }}/>Verrouillé
                       </span>
@@ -364,18 +785,18 @@ function UsersTab() {
                     : <span className="badge badge-muted"><span className="dot dot-muted" />Désactivé</span>
                 }
               </td>
-              <td>
+              <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>
                 {u.last_login_at
-                  ? <span style={{ fontSize: 12 }}>{u.last_login_at.slice(0, 16).replace('T', ' ')}</span>
+                  ? <span>{u.last_login_at.slice(0, 16).replace('T', ' ')}</span>
                   : <span className="badge badge-muted">{t('users.never')}</span>}
               </td>
-              <td className="cell-sub">{u.created_at?.slice(0, 10)}</td>
-              <td><div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-sm" onClick={() => setModal(u)}>Modifier</button>
+              <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{u.created_at?.slice(0, 10)}</td>
+              <td style={{ padding:'9px 8px', textAlign:'right', whiteSpace:'nowrap' }}>
+                <button className="btn btn-sm" onClick={() => setModal(u)} style={{ marginRight:4 }}>Modifier</button>
                 {!(u.role === 'admin' && adminCount <= 1) && (
                   <button className="btn btn-sm btn-danger" onClick={() => setConfirm(u)}>Suppr.</button>
                 )}
-              </div></td>
+              </td>
             </tr>
           ))}
           {users.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucun utilisateur</td></tr>}
@@ -407,8 +828,8 @@ const PERM_DEFS = [
     section: 'Scripts',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
     perms: [
-      { key: 'automatisation_read', label: 'Consulter les scripts' },
-      { key: 'automatisation_exec', label: 'Exécuter les scripts' },
+      { key: 'automatisation_read',  label: 'Consulter les scripts' },
+      { key: 'automatisation_write', label: 'Ajouter, modifier, supprimer des documents et fichiers' },
     ],
   },
   {
@@ -423,22 +844,25 @@ const PERM_DEFS = [
     section: 'Menu Configuration Appareils',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg>,
     perms: [
-      { key: 'config_read',  label: "Consulter (menu Admin → Appareils)" },
-      { key: 'config_write', label: "Configuration : Ajouter / modifier / supprimer" },
+      { key: 'config_read',    label: "Consulter (menu Admin → Appareils)" },
+      { key: 'config_write',   label: "Configuration : Ajouter / modifier / supprimer" },
+      { key: 'config_options', label: "Accès à l'onglet Options" },
     ],
   },
   {
     section: 'Menu Configuration Scripts',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
     perms: [
-      { key: 'automatisation_admin', label: "Consulter (menu Admin → Scripts)" },
+      { key: 'automatisation',         label: "Consulter (menu Admin → Scripts)" },
+      { key: 'automatisation_options', label: "Accès à l'onglet Options" },
     ],
   },
   {
     section: "Menu Configuration Activité",
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>,
     perms: [
-      { key: 'activity', label: "Consulter (menu Admin → Tags d'activité)" },
+      { key: 'activity',         label: "Consulter (menu Admin → Tags d'activité)" },
+      { key: 'activity_options', label: "Accès à l'onglet Options" },
     ],
   },
   {
@@ -489,9 +913,10 @@ function RolePermissionsCard() {
     try {
       await api.saveRolePerms(perms);
       invalidatePermsCache();
-      setMsg('Droits enregistrés. Rechargement en cours…');
-      setTimeout(() => { window.location.href = window.location.pathname + '?tab=security&subtab=rights'; }, 1000);
-    } catch (e) { setMsg('Erreur : ' + e.message); setSaving(false); }
+      setMsg('Droits enregistrés avec succès.');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
   }
 
   if (!perms) return <div style={{ padding: 16, textAlign: 'center' }}><span className="spinner" /></div>;
@@ -1123,6 +1548,15 @@ function SecurityNotifTab() {
                           {Array.from({length:28},(_,i)=><option key={i+1} value={i+1}>Jour {i+1}</option>)}
                         </select>
                       )}
+                    </div>
+                  )}
+                  {cfg.event_key === 'expiration_document' && (
+                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <select className="form-control" style={{ padding:'2px 6px', fontSize:11, height:26 }}
+                        value={cfg.options?.days_before ?? 30}
+                        onChange={e => saveCfg(cfg.event_key, { options: { ...cfg.options, days_before: parseInt(e.target.value) } })}>
+                        {[30,15,10,5,2,1].map(d => <option key={d} value={d}>{d} jour{d>1?'s':''} avant</option>)}
+                      </select>
                     </div>
                   )}
                   {cfg.event_key === 'login_failed_threshold' && (
@@ -1959,165 +2393,178 @@ function ActivityOptionsTab() {
 
 function ActivityTagsTab() {
   const [tags, setTags]       = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [editTag, setEditTag] = useState(null);   // null=création, obj=édition
   const [form, setForm]       = useState({ code: '', label: '', color: '#066fd1' });
-  const [editTag, setEditTag] = useState(null);
   const [error, setError]     = useState('');
   const [confirm, setConfirm] = useState(null);
-  const [usageError, setUsageError] = useState(null); // { tagCode, usages[] }
+  const [usageError, setUsageError] = useState(null);
 
   const load = () => api.activityTags().then(setTags).catch(() => {});
   useEffect(() => { load(); }, []);
 
-  async function addTag(e) {
+  function openCreate() { setEditTag(null); setForm({ code:'', label:'', color:'#066fd1' }); setError(''); setShowModal(true); }
+  function openEdit(t)  { setEditTag(t); setForm({ code:t.code, label:t.label, color:t.color }); setError(''); setShowModal(true); }
+  function closeModal() { setShowModal(false); setEditTag(null); setError(''); }
+
+  async function submit(e) {
     e.preventDefault(); setError('');
     if (!form.code || !form.label) return setError('Code et libellé requis');
-    try { await api.createTag(form); setForm({ code: '', label: '', color: '#066fd1' }); load(); }
-    catch (e) { setError(e.message); }
-  }
-
-  async function saveEdit() {
-    await api.updateTag(editTag.id, { label: editTag.label, color: editTag.color });
-    setEditTag(null); load();
+    try {
+      if (editTag) { await api.updateTag(editTag.id, { label: form.label, color: form.color }); }
+      else         { await api.createTag(form); }
+      closeModal(); load();
+    } catch(ex) { setError(ex.message); }
   }
 
   return (
     <div className="card">
       <div className="card-header">
         <div className="card-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:15, height:15 }}>
             <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
             <line x1="7" y1="7" x2="7.01" y2="7"/>
           </svg>
-          Tags de suivi
+          Tags de suivi ({tags.length})
         </div>
+        <button className="btn btn-sm" onClick={openCreate}
+          style={{ display:'flex', alignItems:'center', gap:5, borderColor:'var(--ok)', color:'var(--ok)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Ajouter
+        </button>
       </div>
-      <div style={{ padding: 16 }}>
-        <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-          Les tags permettent de catégoriser les notes d'activité. 
-        </p>
-        {error && <div className="alert alert-err" style={{ marginBottom: 12 }}>{error}</div>}
-        <form onSubmit={addTag} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-end' }}>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label">Code</label>
-            <input className="form-control" style={{ width: 90 }} value={form.code}
-              onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g,'') }))}
-              placeholder="SECU" maxLength={10} />
-          </div>
-          <div className="form-group" style={{ margin: 0, flex: 1 }}>
-            <label className="form-label">Libellé</label>
-            <input className="form-control" value={form.label}
-              onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="Sécurité" />
-          </div>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label">Couleur</label>
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <input type="color" value={form.color}
-                onChange={e => setForm(f => ({ ...f, color: e.target.value }))}
-                style={{ width: 36, height: 32, padding: 2, border: '1px solid var(--brd)', borderRadius: 4, cursor: 'pointer', background: 'none' }} />
-              <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 120 }}>
-                {TAG_PRESETS.map(c => (
-                  <button key={c} type="button" onClick={() => setForm(f => ({ ...f, color: c }))}
-                    style={{ width: 16, height: 16, borderRadius: '50%', background: c, border: form.color === c ? '2px solid var(--txt)' : '2px solid transparent', cursor: 'pointer', padding: 0 }} />
-                ))}
+
+      <table style={{ width:'100%', borderCollapse:'collapse' }}>
+        <colgroup>
+          <col style={{ width:160 }}/>
+          <col/>
+          <col style={{ width:160 }}/>
+          <col style={{ width:90 }}/>
+        </colgroup>
+        <thead>
+          <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Code / Aperçu</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Libellé</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Couleur</th>
+            <th style={{ padding:'7px 8px' }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {tags.map(t => (
+            <tr key={t.id} style={{ borderBottom:'1px solid var(--brd)' }}>
+              <td style={{ padding:'9px 8px', textAlign:'center' }}>
+                <span style={{
+                  display:'inline-block',
+                  background:`rgba(${parseInt(t.color.slice(1,3),16)},${parseInt(t.color.slice(3,5),16)},${parseInt(t.color.slice(5,7),16)},0.12)`,
+                  color:t.color, border:`1px solid ${t.color}`,
+                  padding:'2px 10px', borderRadius:4, fontSize:12, fontWeight:700, fontFamily:'var(--mono)'
+                }}>{t.code}</span>
+              </td>
+              <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{t.label}</td>
+              <td style={{ padding:'9px 8px', textAlign:'center' }}>
+                <div style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+                  <span style={{ width:16, height:16, borderRadius:'50%', background:t.color, display:'inline-block', flexShrink:0 }}/>
+                  <span style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--muted)' }}>{t.color}</span>
+                </div>
+              </td>
+              <td style={{ padding:'9px 8px', textAlign:'right', whiteSpace:'nowrap' }}>
+                <button className="btn btn-sm" onClick={()=>openEdit(t)} style={{ marginRight:4 }}>Édit.</button>
+                <button className="btn btn-sm" onClick={()=>setConfirm(t)} style={{ color:'var(--err)', borderColor:'var(--err)' }}>✕</button>
+              </td>
+            </tr>
+          ))}
+          {tags.length === 0 && <tr><td colSpan={5} style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:13 }}>Aucun tag — cliquez sur "Ajouter" pour en créer un.</td></tr>}
+        </tbody>
+      </table>
+
+      {/* Modal création / édition */}
+      {showModal && (
+        <Modal title={editTag ? `Modifier "${editTag.code}"` : 'Nouveau tag'} onClose={closeModal}
+          footer={
+            <div style={{ display:'flex', gap:8 }}>
+              <button className="btn" onClick={closeModal}>Annuler</button>
+              <button className="btn btn-primary" onClick={()=>document.getElementById('tag-form').requestSubmit()}>
+                {editTag ? 'Enregistrer' : 'Créer'}
+              </button>
+            </div>
+          }>
+          <form id="tag-form" onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div className="form-group" style={{margin:0}}>
+              <label className="form-label">Code *</label>
+              <input className="form-control" value={form.code} maxLength={10}
+                disabled={!!editTag}
+                placeholder="Ex: SECU, NET, ADM…"
+                onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g,'')}))}
+                style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:600 }} />
+              <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>Majuscules et chiffres uniquement, max 10 caractères.</div>
+            </div>
+            <div className="form-group" style={{margin:0}}>
+              <label className="form-label">Libellé *</label>
+              <input className="form-control" value={form.label} placeholder="Ex: Sécurité, Réseau, Administration…"
+                onChange={e=>setForm(f=>({...f,label:e.target.value}))} />
+            </div>
+            <div className="form-group" style={{margin:0}}>
+              <label className="form-label">Couleur</label>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <input type="color" value={form.color} onChange={e=>setForm(f=>({...f,color:e.target.value}))}
+                  style={{ width:38, height:32, padding:2, border:'1px solid var(--brd)', borderRadius:'var(--r)', cursor:'pointer', background:'var(--surf2)', flexShrink:0 }} />
+                <input className="form-control" value={form.color} onChange={e=>setForm(f=>({...f,color:e.target.value}))}
+                  style={{ fontFamily:'var(--mono)', fontSize:12, maxWidth:110 }} />
+                <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                  {TAG_PRESETS.map(c => (
+                    <button key={c} type="button" onClick={()=>setForm(f=>({...f,color:c}))}
+                      style={{ width:18, height:18, borderRadius:'50%', background:c, padding:0, cursor:'pointer',
+                        border: form.color===c ? '2px solid var(--txt)' : '2px solid transparent' }} />
+                  ))}
+                </div>
+              </div>
+              {/* Aperçu */}
+              <div style={{ marginTop:8 }}>
+                <span style={{
+                  display:'inline-block',
+                  background:`rgba(${parseInt(form.color.slice(1,3)||'06',16)},${parseInt(form.color.slice(3,5)||'6f',16)},${parseInt(form.color.slice(5,7)||'d1',16)},0.12)`,
+                  color:form.color, border:`1px solid ${form.color}`,
+                  padding:'2px 10px', borderRadius:4, fontSize:12, fontWeight:700, fontFamily:'var(--mono)'
+                }}>{form.code || 'CODE'}</span>
+                <span style={{ fontSize:12, color:'var(--muted)', marginLeft:8 }}>{form.label || 'Libellé'}</span>
               </div>
             </div>
-          </div>
-          <button className="btn btn-primary" type="submit" style={{ marginBottom: 0 }}>Ajouter</button>
-        </form>
+            {error && <div className="alert alert-err" style={{fontSize:12}}>{error}</div>}
+          </form>
+        </Modal>
+      )}
 
-        <table>
-          <thead>
-            <tr>
-              <th style={{ width: 80 }}>Aperçu</th>
-              <th style={{ width: 80 }}>Code</th>
-              <th>Libellé</th>
-              <th style={{ width: 60 }}>Couleur</th>
-              <th style={{ width: 110 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {tags.map(t => (
-              <tr key={t.id}>
-                {/* Aperçu — badge coloré compact */}
-                <td style={{ width: 80 }}>
-                  <span style={{
-                    display: 'inline-block',
-                    background: `rgba(${parseInt(t.color.slice(1,3),16)},${parseInt(t.color.slice(3,5),16)},${parseInt(t.color.slice(5,7),16)},0.12)`,
-                    color: t.color, border: `1px solid ${t.color}`,
-                    padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--mono)'
-                  }}>{t.code}</span>
-                </td>
-                {/* Code — monospace compact */}
-                <td style={{ width: 80, fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600 }}>{t.code}</td>
-                {/* Libellé — largeur maximale */}
-                <td style={{ fontSize: 12 }}>
-                  {editTag?.id === t.id
-                    ? <input className="form-control" style={{ padding: '4px 8px', fontSize: 12 }} value={editTag.label} onChange={e => setEditTag(x => ({ ...x, label: e.target.value }))} />
-                    : t.label}
-                </td>
-                {/* Couleur */}
-                <td style={{ width: 60 }}>
-                  {editTag?.id === t.id
-                    ? <input type="color" value={editTag.color} onChange={e => setEditTag(x => ({ ...x, color: e.target.value }))}
-                        style={{ width: 36, height: 28, padding: 2, border: '1px solid var(--brd)', borderRadius: 4, cursor: 'pointer' }} />
-                    : <span style={{ display: 'inline-block', width: 20, height: 20, borderRadius: '50%', background: t.color, verticalAlign: 'middle' }} />}
-                </td>
-                {/* Actions — tout à droite */}
-                <td style={{ width: 110 }}>
-                  <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                    {editTag?.id === t.id
-                      ? <><button className="btn btn-sm btn-primary" onClick={saveEdit}>OK</button><button className="btn btn-sm" onClick={() => setEditTag(null)}>Annuler</button></>
-                      : <><button className="btn btn-sm" onClick={() => setEditTag({ ...t })}>Édit.</button><button className="btn btn-sm btn-danger" onClick={() => setConfirm(t)}>Suppr.</button></>
-                    }
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {tags.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>Aucun tag</td></tr>}
-          </tbody>
-        </table>
-      </div>
       {confirm && <ConfirmModal message={`Supprimer le tag "${confirm.code}" ?`}
-        onConfirm={async () => {
-          try {
-            await api.deleteTag(confirm.id);
-            setConfirm(null); load();
-          } catch (e) {
-            if (e.status === 409 || (e.usages)) {
-              setUsageError({ tagCode: confirm.code, usages: e.usages || [] });
-            } else {
-              setError(e.message);
-            }
+        onConfirm={async()=>{
+          try { await api.deleteTag(confirm.id); setConfirm(null); load(); }
+          catch(e) {
+            if (e.status===409||e.usages) { setUsageError({ tagCode:confirm.code, usages:e.usages||[] }); }
+            else { setError(e.message); }
             setConfirm(null);
           }
         }}
-        onCancel={() => setConfirm(null)} />}
+        onCancel={()=>setConfirm(null)} />}
 
       {usageError && (
-        <Modal title={`Tag [${usageError.tagCode}] — impossible de supprimer`} onClose={() => setUsageError(null)}
-          footer={<button className="btn" onClick={() => setUsageError(null)}>Fermer</button>}>
-          <div className="alert alert-err" style={{ fontSize: 12, marginBottom: 12 }}>
+        <Modal title={`Tag [${usageError.tagCode}] — impossible de supprimer`} onClose={()=>setUsageError(null)}
+          footer={<button className="btn" onClick={()=>setUsageError(null)}>Fermer</button>}>
+          <div className="alert alert-err" style={{ fontSize:12, marginBottom:12 }}>
             Ce tag est utilisé dans des notes et ne peut pas être supprimé.
           </div>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--muted)' }}>
-            Notes utilisant ce tag ({usageError.usages.length}{usageError.usages.length >= 20 ? '+' : ''}) :
+          <div style={{ fontSize:12, fontWeight:600, marginBottom:8, color:'var(--muted)' }}>
+            Notes utilisant ce tag ({usageError.usages.length}{usageError.usages.length>=20?'+':''}) :
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
-            {usageError.usages.map((u, i) => (
-              <div key={i} style={{ background: 'var(--surf2)', borderRadius: 'var(--r)', padding: '7px 10px',
-                border: '1px solid var(--brd)', fontSize: 12 }}>
-                <span style={{ color: 'var(--muted)', marginRight: 8 }}>
-                  {u.date.slice(8,10)}/{u.date.slice(5,7)}/{u.date.slice(0,4)}
-                </span>
-                {u.excerpt}{u.excerpt.length >= 60 ? '…' : ''}
+          <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:320, overflowY:'auto' }}>
+            {usageError.usages.map((u,i) => (
+              <div key={i} style={{ background:'var(--surf2)', borderRadius:'var(--r)', padding:'7px 10px', border:'1px solid var(--brd)', fontSize:12 }}>
+                <span style={{ color:'var(--muted)', marginRight:8 }}>{u.date.slice(8,10)}/{u.date.slice(5,7)}/{u.date.slice(0,4)}</span>
+                {u.excerpt}{u.excerpt.length>=60?'…':''}
               </div>
             ))}
           </div>
-          {usageError.usages.length >= 20 && (
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
-              Seules les 20 premières notes sont affichées.
-            </div>
-          )}
+          {usageError.usages.length>=20 && <div style={{ fontSize:11, color:'var(--muted)', marginTop:8 }}>Seules les 20 premières notes sont affichées.</div>}
         </Modal>
       )}
     </div>
@@ -2206,11 +2653,14 @@ const SEV = {
   error: { label: 'Erreur',  bg: 'var(--err-s)',  color: 'var(--err)',  dot: '#d63939' },
 };
 const CAT_COLORS = {
-  auth:     { bg: '#f0e6ff', color: '#7c3aed' },
-  admin:    { bg: 'var(--warn-s)', color: 'var(--warn)' },
-  backup:   { bg: 'var(--acc-s)', color: 'var(--acc)' },
-  config:   { bg: 'var(--ok-s)', color: 'var(--ok)' },
-  sécurité: { bg: 'var(--err-s)', color: 'var(--err)' },
+  auth:           { bg: '#dbeafe', color: '#1d4ed8' },   // bleu
+  admin:          { bg: 'var(--warn-s)', color: 'var(--warn)' }, // orange
+  backup:         { bg: 'var(--acc-s)', color: 'var(--acc)' },   // bleu clair
+  config:         { bg: 'var(--ok-s)', color: 'var(--ok)' },     // vert
+  sécurité:       { bg: 'var(--err-s)', color: 'var(--err)' },   // rouge
+  suivi:          { bg: '#e0f7f4', color: '#0e9f8e' },   // teal
+  automatisation: { bg: '#fdf4ff', color: '#9333ea' },   // violet
+  automation:     { bg: '#fdf4ff', color: '#9333ea' },   // alias
 };
 
 function AuditTab() {
@@ -2252,24 +2702,26 @@ function AuditTab() {
           <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
             value={filters.success} onChange={sf('success')}>
             <option value="">Résultat</option>
-            <option value="1">✓ OK</option>
             <option value="0">✗ Échec</option>
+            <option value="1">✓ OK</option>
           </select>
           <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
             value={filters.severity} onChange={sf('severity')}>
             <option value="">Sévérité</option>
-            <option value="info">Info</option>
             <option value="warn">Alerte</option>
             <option value="error">Erreur</option>
+            <option value="info">Info</option>
           </select>
           <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
             value={filters.category} onChange={sf('category')}>
             <option value="">Catégorie</option>
-            <option value="auth">Auth</option>
             <option value="admin">Admin</option>
+            <option value="auth">Auth</option>
+            <option value="automatisation">Automatisation</option>
             <option value="backup">Backup</option>
             <option value="config">Config</option>
             <option value="suivi">Suivi</option>
+            <option value="sécurité">Sécurité</option>
           </select>
           <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28, width: 60 }}
             value={filters.limit} onChange={sf('limit')}>
@@ -2326,14 +2778,14 @@ function AuditTab() {
       <div className="table-wrap" style={{ width: '100%', overflow: 'hidden' }}>
         <table className="audit-table">
           <thead>
-            <tr>
-              <th style={{ width: '14%' }}>{t('audit.date')}</th>
-              <th style={{ width: '9%' }}>{t('audit.level')}</th>
-              <th style={{ width: '10%' }}>{t('audit.category')}</th>
-              <th style={{ width: '21%' }}>{t('audit.action')}</th>
-              <th style={{ width: '10%' }}>{t('audit.user')}</th>
-              <th style={{ width: '26%' }}>{t('audit.detail')}</th>
-              <th style={{ width: '10%', textAlign: 'right' }}>{t('audit.result')}</th>
+            <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
+              <th style={{ padding:'7px 4px 7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'9%' }}>{t('audit.date')}</th>
+              <th style={{ padding:'7px 4px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'7%' }}>{t('audit.level')}</th>
+              <th style={{ padding:'7px 4px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'9%' }}>{t('audit.category')}</th>
+              <th style={{ padding:'7px 4px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'8%' }}>{t('audit.user')}</th>
+              <th style={{ padding:'7px 4px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'15%' }}>{t('audit.action')}</th>
+              <th style={{ padding:'7px 4px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('audit.detail')}</th>
+              <th style={{ padding:'7px 4px 7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'7%' }}>{t('audit.result')}</th>
             </tr>
           </thead>
           <tbody>
@@ -2358,23 +2810,23 @@ function AuditTab() {
                 </tr>
               )}
               <tr key={l.id} style={{ borderLeft: `3px solid ${sev.dot}` }}>
-                  <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                  <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', padding:'6px 4px 6px 8px', textAlign:'center' }}>
                     {l.created_at?.slice(0, 16).replace('T', ' ')}
                   </td>
-                  <td>
+                  <td style={{ padding:'6px 4px', textAlign:'center' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: sev.bg, color: sev.color, padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
                       <span style={{ width: 6, height: 6, borderRadius: '50%', background: sev.dot, flexShrink: 0 }} />
                       {sev.label}
                     </span>
                   </td>
-                  <td>
+                  <td style={{ padding:'6px 4px', textAlign:'center' }}>
                     <span style={{ display: 'inline-block', background: cat.bg, color: cat.color, padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
                       {l.category}
                     </span>
                   </td>
-                  <td style={{ fontWeight: 600, fontSize: 12 }}>{l.action}</td>
-                  <td style={{ fontSize: 12, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.username || '—'}</td>
-                  <td style={{ fontSize: 11, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.detail}>
+                  <td style={{ fontSize: 12, padding:'6px 4px', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign:'center' }}>{l.username || '—'}</td>
+                  <td style={{ fontWeight: 600, fontSize: 12, padding:'6px 4px' }}>{l.action}</td>
+                  <td style={{ fontSize: 11, padding:'6px 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.detail}>
                     <span style={{ color: l.success === 0 && l.detail?.includes('Identifiant tenté') ? 'var(--err)' : 'var(--muted)' }}>
                       {l.detail}
                     </span>
@@ -2477,7 +2929,7 @@ export default function Admin() {
     { key: '__sep1__',      sep: true },
     { key: '__label_config__', sectionLabel: t('admin.section_config') },
     { key: 'appareils',     label: t('admin.devices'),         icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg> },
-    { key: 'automatisation_admin', label: t('admin.automatisation_menu'),          icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
+    { key: 'automatisation', label: t('admin.automatisation_menu'),          icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
     { key: 'activity', label: t('admin.activity_menu'), icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
     { key: '__sep2__',      sep: true },
     { key: '__label_admin__', sectionLabel: t('admin.section_admin') },
@@ -2489,7 +2941,7 @@ export default function Admin() {
   const canAccessTab = (key) => {
     if (['account','personnalisation','logout'].includes(key)) return true;
     if (key === 'appareils') return isAdmin || can('config_read');
-    if (key === 'automatisation_admin') return isAdmin || can('automatisation_admin');
+    if (key === 'automatisation') return isAdmin || can('automatisation');
     if (key === 'activity') return isAdmin || can('activity');
     if (key === 'users') return isAdmin;
     if (key === 'security') return isAdmin || can('security_access');
@@ -2583,7 +3035,7 @@ export default function Admin() {
           {active === 'appareils' && <AppareilsTab />}
           {active === 'users' && isAdmin && <UsersTab />}
           {active === 'security' && (isAdmin || can('security_access')) && <SecurityTab />}
-          {active === 'automatisation_admin' && (isAdmin || can('automatisation_admin')) && <ScriptsAdminTab />}
+          {active === 'automatisation' && (isAdmin || can('automatisation')) && <ScriptsAdminTab />}
           {active === 'activity' && (isAdmin || can('activity')) && <ActivityMenuTab />}
           {active === 'audit' && (isAdmin || can('audit_access')) && <AuditTab />}
         </div>

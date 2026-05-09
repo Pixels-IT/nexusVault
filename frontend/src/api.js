@@ -63,6 +63,31 @@ const api = {
   totpSetupQr:     (setup_token) => request('POST', '/auth/totp/setup-qr', { setup_token }),
   totpSetupVerify: (setup_token, totp_token) => request('POST', '/auth/totp/setup-verify', { setup_token, totp_token }),
   importActivityCsv: (csv) => request('POST', '/activity/import-csv', { csv }),
+  auditEditEntry: (id) => request('POST', `/activity/entries/${id}/audit-edit`),
+  // Automation categories
+  automationCategories: ()      => request('GET',    '/automation/categories'),
+  createCategory:       (d)     => request('POST',   '/automation/categories', d),
+  updateCategory:       (id, d) => request('PUT',    `/automation/categories/${id}`, d),
+  deleteCategory:       (id)    => request('DELETE', `/automation/categories/${id}`),
+  // Automation documents
+  automationDocuments:    (catId)      => request('GET',    `/automation/categories/${catId}/documents`),
+  automationDocument:     (id)         => request('GET',    `/automation/documents/${id}`),
+  createDocument:         (catId, d)   => request('POST',   `/automation/categories/${catId}/documents`, d),
+  updateDocument:         (id, d)      => request('PUT',    `/automation/documents/${id}`, d),
+  deleteDocument:         (id)         => request('DELETE', `/automation/documents/${id}`),
+  addDocumentFile: async  (docId, file) => {
+    const data = await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});
+    return request('POST', `/automation/documents/${docId}/files`, { filename:file.name, mimetype:file.type, data });
+  },
+  downloadAutomationFile: (id, filename) => {
+    const token = localStorage.getItem('dp_token');
+    fetch(`/api/automation/files/${id}/download`, { headers:{ Authorization:`Bearer ${token}` }})
+      .then(r=>r.blob()).then(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=filename;a.click();});
+  },
+  deleteAutomationFile: (id) => request('DELETE', `/automation/files/${id}`),
+  automationDocumentHistory: (id) => request('GET', `/automation/documents/${id}/history`),
+  automationDocAccessDenied: (id) => request('POST', `/automation/documents/${id}/access-denied`, {}),
+  previewAutomationFile: (id) => request('GET', `/automation/files/${id}/preview`),
   getPdfLogo: () => request('GET', '/settings/pdf-logo'),
   setPdfLogo: (logo) => request('PUT', '/settings/pdf-logo', { logo }),
   getPrefs: () => request('GET', '/me/prefs'),

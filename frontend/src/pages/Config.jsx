@@ -40,7 +40,7 @@ function SitesTab({ countries = [] }) {
   const [modal, setModal] = useState(null);
   const [confirm, setConfirm] = useState(null);
 
-  const load = () => api.sites().then(setSites).catch(() => {});
+  const load = () => api.sites().then(d => setSites([...d].sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:"base"})))).catch(() => {});
   useEffect(() => { load(); }, []);
 
   return (
@@ -50,13 +50,24 @@ function SitesTab({ countries = [] }) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
           Sites réseau
         </div>
-        {can('config_write') && <button className="btn btn-primary" onClick={() => setModal({})}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+        {can('config_write') && <button className="btn btn-sm" onClick={() => setModal({})}
+          style={{ display:'flex', alignItems:'center', gap:5, borderColor:'var(--ok)', color:'var(--ok)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
           Ajouter
         </button>}
       </div>
       <table>
-        <thead><tr><th>Nom</th><th>Localisation</th><th>Contact</th><th>Équipements</th><th></th></tr></thead>
+        <thead>
+          <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Nom</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Localisation</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Contact</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Équipements</th>
+            <th style={{ padding:'7px 8px', background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}></th>
+          </tr>
+        </thead>
         <tbody>
           {sites.map(s => (
             <tr key={s.id}>
@@ -64,10 +75,10 @@ function SitesTab({ countries = [] }) {
               <td className="cell-sub">{s.location}</td>
               <td className="cell-sub">{s.contact}</td>
               <td><span className="badge badge-info">{s.device_count} équip.</span></td>
-              <td><div style={{ display: 'flex', gap: 4 }}>
-                {can('config_write') && <button className="btn btn-sm" onClick={() => setModal(s)}>Modifier</button>}
+              <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
+                {can('config_write') && <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(s)}>Modifier</button>}
                 {can('config_write') && <button className="btn btn-sm btn-danger" onClick={() => setConfirm(s)}>Suppr.</button>}
-              </div></td>
+              </td>
             </tr>
           ))}
           {sites.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucun site — ajoutez-en un</td></tr>}
@@ -143,7 +154,7 @@ function ModelsTab() {
   const [modal, setModal] = useState(null);
   const [confirm, setConfirm] = useState(null);
 
-  const load = () => api.models().then(setModels).catch(() => {});
+  const load = () => api.models().then(d => setModels([...d].sort((a,b)=>(a.vendor+" "+a.model).localeCompare(b.vendor+" "+b.model,undefined,{sensitivity:"base"})))).catch(() => {});
   useEffect(() => { load(); }, []);
 
   return (
@@ -154,14 +165,27 @@ function ModelsTab() {
           Modèles d'équipements
         </div>
         {can('config_write') && (
-          <button className="btn btn-primary" onClick={() => setModal({})}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          <button className="btn btn-sm" onClick={() => setModal({})}
+            style={{ display:'flex', alignItems:'center', gap:5, borderColor:'var(--ok)', color:'var(--ok)' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
             Ajouter
           </button>
         )}
       </div>
       <table>
-        <thead><tr><th>Modèle</th><th>Constructeur</th><th>Type</th><th>Méthode</th><th>Commande</th><th>Équip.</th><th></th></tr></thead>
+                <thead>
+          <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Modèle</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Constructeur</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Type</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Méthode</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Commande</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Équip.</th>
+            <th style={{ padding:'7px 8px', background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}></th>
+          </tr>
+        </thead>
         <tbody>
           {models.map(m => (
             <tr key={m.id}>
@@ -171,10 +195,10 @@ function ModelsTab() {
               <td><span className="badge badge-info">{m.backup_method}</span></td>
               <td><span className="cell-mono">{m.backup_command}</span></td>
               <td>{m.device_count}</td>
-              <td><div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-sm" onClick={() => setModal(m)}>Modifier</button>
+              <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
+                <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(m)}>Modifier</button>
                 <button className="btn btn-sm btn-danger" onClick={() => setConfirm(m)}>Suppr.</button>
-              </div></td>
+              </td>
             </tr>
           ))}
           {models.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucun modèle</td></tr>}
@@ -243,7 +267,7 @@ function DevicesTab() {
   const [modal, setModal] = useState(null);
   const [confirm, setConfirm] = useState(null);
 
-  const load = () => api.devices().then(setDevices).catch(() => {});
+  const load = () => api.devices().then(d => setDevices([...d].sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:"base"})))).catch(() => {});
   useEffect(() => {
     load();
     api.sites().then(setSites).catch(() => {});
@@ -273,14 +297,26 @@ function DevicesTab() {
           Équipements réseau
         </div>
         {can('config_write') && (
-          <button className="btn btn-primary" onClick={() => setModal({})}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          <button className="btn btn-sm" onClick={() => setModal({})}
+            style={{ display:'flex', alignItems:'center', gap:5, borderColor:'var(--ok)', color:'var(--ok)' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
             Ajouter
           </button>
         )}
       </div>
-      <table>
-        <thead><tr><th>Nom</th><th>Modèle</th><th>Site</th><th>IP</th><th>Dernier backup</th><th></th></tr></thead>
+      <table style={{ width:'100%', borderCollapse:'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Nom</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Modèle</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Site</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>IP</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Dernier backup</th>
+            <th style={{ padding:'7px 8px', background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}></th>
+          </tr>
+        </thead>
         <tbody>
           {devices.map(d => (
             <tr key={d.id}>
@@ -289,9 +325,9 @@ function DevicesTab() {
               <td><span className="badge badge-info">{d.site_name}</span></td>
               <td><span className="cell-mono">{d.ip}</span></td>
               <td>{d.last_backup ? <span className="cell-sub">v{d.last_backup.version} — {d.last_backup.created_at?.slice(0, 10)}</span> : <span className="badge badge-muted">Aucun</span>}</td>
-              <td><div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-sm" onClick={() => setModal(d)}>Modifier</button>
-                <button className="btn btn-sm" title="Dupliquer" onClick={() => duplicateDevice(d)}>
+              <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
+                <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(d)}>Modifier</button>
+                <button className="btn btn-sm" style={{marginRight:4}} title="Dupliquer" onClick={() => duplicateDevice(d)}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 12, height: 12 }}>
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -299,14 +335,21 @@ function DevicesTab() {
                   Dupliquer
                 </button>
                 <button className="btn btn-sm btn-danger" onClick={() => setConfirm(d)}>Suppr.</button>
-              </div></td>
+              </td>
             </tr>
           ))}
           {devices.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucun équipement</td></tr>}
         </tbody>
       </table>
       {modal !== null && <DeviceModal device={modal.id ? modal : null} sites={sites} models={models} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
-      {confirm && <ConfirmModal message={`Supprimer l'équipement "${confirm.name}" ?`} onConfirm={async () => { await api.deleteDevice(confirm.id); setConfirm(null); load(); }} onCancel={() => setConfirm(null)} />}
+      {confirm && <ConfirmModal message={`Supprimer l'équipement "${confirm.name}" ?`} onConfirm={async () => {
+        try {
+          await api.deleteDevice(confirm.id); setConfirm(null); load();
+        } catch(e) {
+          setConfirm(null);
+          alert(e.message || 'Erreur lors de la suppression');
+        }
+      }} onCancel={() => setConfirm(null)} />}
     </div>
   );
 }
@@ -393,11 +436,10 @@ export function ConfigEmbedded() {
   const [active, setActive] = useState('sites');
   const [flags, setFlags] = useState({});
   const [countries, setCountries] = useState([]);
+  const { can, isAdmin } = usePerms();
   const reload = () => api.getCountries().then(setCountries).catch(()=>{});
   useEffect(() => { api.getFeatureFlags().then(f=>{setFlags(f);if(f.countries)reload();}).catch(()=>{}); }, []);
-  const tabs = [
-    ...TABS,
-  ];
+  const tabs = TABS.filter(t => t.key !== 'options' || isAdmin || can('config_options'));
   return (
     <div>
       <div style={{display:'flex',gap:2,marginBottom:16,borderBottom:'1px solid var(--brd)'}}>
@@ -407,7 +449,7 @@ export function ConfigEmbedded() {
         {active==='sites'&&<SitesTab countries={flags.countries?countries:[]}/>}
         {active==='models'&&<ModelsTab/>}
         {active==='devices'&&<DevicesTab/>}
-        {active==='options'&&<OptionsTab onFlagsChange={f=>{setFlags(f);if(f.countries)reload();}}/>}
+        {active==='options'&&(isAdmin||can('config_options'))&&<OptionsTab onFlagsChange={f=>{setFlags(f);if(f.countries)reload();}}/>}
       </div>
     </div>
   );
@@ -420,9 +462,8 @@ export default function Config() {
   const [countries, setCountries] = useState([]);
   const reload = ()=>api.getCountries().then(setCountries).catch(()=>{});
   useEffect(()=>{api.getFeatureFlags().then(f=>{setFlags(f);if(f.countries)reload();}).catch(()=>{});}, []);
-  const tabs = [
-    ...TABS,
-  ];
+  const { can, isAdmin } = usePerms();
+  const tabs = TABS.filter(t => t.key !== 'options' || isAdmin || can('config_options'));
   return (
     <main>
       <div className="page-header"><div><div className="page-title">Appareils</div><div className="page-sub">Gestion des equipements, sites et modeles</div></div></div>

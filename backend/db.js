@@ -234,6 +234,58 @@ function initSchema() {
   try { db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT"); } catch {}
   try { db.exec("ALTER TABLE activity_entries ADD COLUMN is_preview INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE activity_entries ADD COLUMN display_date TEXT"); } catch {}
+
+  // ── Catégories Automatisation ─────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS automation_categories (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL,
+      description TEXT,
+      type        TEXT NOT NULL DEFAULT 'generic',
+      color       TEXT NOT NULL DEFAULT '#066fd1',
+      parent_id   INTEGER REFERENCES automation_categories(id) ON DELETE SET NULL,
+      valid_until TEXT,
+      created_at  TEXT DEFAULT (datetime('now','localtime')),
+      updated_at  TEXT DEFAULT (datetime('now','localtime'))
+    );
+  `);
+  // ── Documents Automatisation ─────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS automation_documents (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id INTEGER NOT NULL REFERENCES automation_categories(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      description TEXT,
+      note        TEXT,
+      valid_until TEXT,
+      doc_password TEXT,
+      created_by  INTEGER REFERENCES users(id),
+      created_at  TEXT DEFAULT (datetime('now','localtime')),
+      updated_at  TEXT DEFAULT (datetime('now','localtime'))
+    );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS automation_document_files (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      document_id INTEGER NOT NULL REFERENCES automation_documents(id) ON DELETE CASCADE,
+      filename    TEXT NOT NULL,
+      mimetype    TEXT,
+      size_bytes  INTEGER,
+      data        BLOB NOT NULL,
+      uploaded_by INTEGER REFERENCES users(id),
+      uploaded_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+  `);
+  // Garder automation_files pour compatibilité ascendante (table ancienne)
+  try { db.exec("ALTER TABLE automation_files ADD COLUMN name TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE automation_files ADD COLUMN description TEXT"); } catch {}
+  try { db.exec("ALTER TABLE automation_files ADD COLUMN valid_until TEXT"); } catch {}
+  // ref_id pour lier un événement audit à un document spécifique
+  try { db.exec("ALTER TABLE audit_log ADD COLUMN ref_id INTEGER"); } catch {}
+  try { db.exec("ALTER TABLE automation_documents ADD COLUMN doc_password TEXT"); } catch {}
+
+  // ── Options catégories ────────────────────────────────────────────────────
+  // Stockées dans settings: automation_cat_color_inherit
   try { db.exec("ALTER TABLE backups ADD COLUMN pinned INTEGER DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN totp_secret TEXT"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}
@@ -280,16 +332,15 @@ function decrypt(enc) {
   } catch { return '[erreur déchiffrement]'; }
 }
 
-function audit(db, { userId, username, action, category, severity = 'info', detail = '', ip = '', success = 1 }) {
+function audit(db, { userId, username, action, category, severity = 'info', detail = '', ip = '', success = 1, ref_id = null }) {
   try {
-    // Passer created_at explicitement pour respecter le TZ du conteneur
     const now = (() => {
       const d = new Date();
       const p = n => String(n).padStart(2, '0');
       return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     })();
-    db.prepare(`INSERT INTO audit_log (user_id, username, action, category, severity, detail, ip, success, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(userId || null, username || 'system', action, category, severity, detail, ip, success ? 1 : 0, now);
+    db.prepare(`INSERT INTO audit_log (user_id, username, action, category, severity, detail, ip, success, ref_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(userId || null, username || 'system', action, category, severity, detail, ip, success ? 1 : 0, ref_id || null, now);
   } catch (e) { console.error('[AUDIT]', e.message); }
 }
 

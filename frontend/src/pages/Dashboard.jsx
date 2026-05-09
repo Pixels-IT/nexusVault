@@ -126,7 +126,7 @@ function Top3Card({ icon, label, sub, value, color, top3, tags }) {
 
 function SectionTitle({ icon, children }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, marginTop: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, marginTop: 28 }}>
       <span style={{ color: 'var(--acc)' }}>{icon}</span>
       <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--txt)' }}>{children}</span>
       <div style={{ flex: 1, height: 1, background: 'var(--brd)', marginLeft: 4 }} />
@@ -175,6 +175,85 @@ export default function Dashboard() {
         <StatCard icon={icons.device} label="Équipements"   value={stats?.devices} color="#0891b2"     />
         <StatCard icon={icons.site}   label="Sites"         value={stats?.sites}   color="var(--ok)"   />
         <StatCard icon={icons.model}  label="Modèles"       value={stats?.models}  color="var(--warn)" />
+      </div>
+
+      <SectionTitle icon={icons.backup}>Automatisation</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 28 }}>
+
+        {/* Tuile 1 — Nombre total de documents */}
+        <StatCard icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:18,height:18}}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>}
+          label="Documents total" value={stats?.automation?.total ?? '—'} color="#a855f7" />
+
+        {/* Tuile 2 — 3 derniers documents */}
+        <div className="stat-card" style={{ height: CARD_H, boxSizing:'border-box', background:'var(--surf)', border:'1px solid var(--brd)', borderTop:'3px solid #a855f7', borderRadius:'var(--rl)', padding:'14px 16px', position:'relative', overflow:'hidden' }}>
+          <div style={{ position:'absolute', top:14, left:16, right:8 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
+              <span style={{ color:'#a855f7' }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </span>
+              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>Derniers documents</span>
+            </div>
+            {stats?.automation?.recent?.length > 0
+              ? stats.automation.recent.map((d,i) => (
+                  <div key={i} style={{ fontSize:11, color:'var(--muted)', display:'flex', alignItems:'center', gap:6, marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    <span style={{ width:6, height:6, borderRadius:'50%', background:d.cat_color||'#a855f7', flexShrink:0, display:'inline-block' }}/>
+                    <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.name}</span>
+                  </div>
+                ))
+              : <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>Aucun document</div>
+            }
+          </div>
+        </div>
+
+        {/* Tuile 3 — Top 3 catégories */}
+        <div className="stat-card" style={{ height: CARD_H, boxSizing:'border-box', background:'var(--surf)', border:'1px solid var(--brd)', borderTop:'3px solid #a855f7', borderRadius:'var(--rl)', padding:'14px 16px', position:'relative', overflow:'hidden' }}>
+          <div style={{ position:'absolute', top:14, left:16, right:8 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
+              <span style={{ color:'#a855f7' }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </span>
+              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>Top catégories</span>
+            </div>
+            {stats?.automation?.top3cats?.length > 0
+              ? stats.automation.top3cats.map((c,i) => (
+                  <div key={i} style={{ fontSize:11, color:'var(--muted)', display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:2 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, overflow:'hidden' }}>
+                      <span style={{ width:6, height:6, borderRadius:'50%', background:c.color||'#a855f7', flexShrink:0, display:'inline-block' }}/>
+                      <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.name}</span>
+                    </div>
+                    <span style={{ fontWeight:700, color:c.color||'#a855f7', marginLeft:8, flexShrink:0 }}>{c.doc_count}</span>
+                  </div>
+                ))
+              : <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>Aucune donnée</div>
+            }
+          </div>
+        </div>
+
+        {/* Tuile 4 — Prochaines expirations */}
+        <div className="stat-card" style={{ height: CARD_H, boxSizing:'border-box', background:'var(--surf)', border:'1px solid var(--brd)', borderTop:'3px solid #a855f7', borderRadius:'var(--rl)', padding:'14px 16px', position:'relative', overflow:'hidden' }}>
+          <div style={{ position:'absolute', top:14, left:16, right:8 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
+              <span style={{ color: stats?.automation?.expiring?.length > 0 ? 'var(--warn)' : '#a855f7' }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
+              </span>
+              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>Expirations</span>
+            </div>
+            {stats?.automation?.expiring?.length > 0
+              ? stats.automation.expiring.map((d,i) => {
+                  const daysLeft = Math.ceil((new Date(d.valid_until) - new Date()) / 86400000);
+                  const color = daysLeft <= 7 ? 'var(--err)' : daysLeft <= 30 ? 'var(--warn)' : 'var(--muted)';
+                  return (
+                    <div key={i} style={{ fontSize:11, color, display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:2 }}>
+                      <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{d.name}</span>
+                      <span style={{ fontWeight:600, marginLeft:6, flexShrink:0 }}>{d.valid_until}</span>
+                    </div>
+                  );
+                })
+              : <div style={{ fontSize:11, color:'var(--ok)', marginTop:4, fontWeight:600 }}>✓ Pas d'expiration de documents</div>
+            }
+          </div>
+        </div>
+
       </div>
 
       <SectionTitle icon={icons.cal}>Suivi d'activité</SectionTitle>

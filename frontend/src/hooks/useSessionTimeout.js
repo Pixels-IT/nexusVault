@@ -3,50 +3,51 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import api from '../api.js';
 
 const ACTIVITY_EVENTS = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
-const WARN_BEFORE_MS  = 60 * 1000;
+const WARN_BEFORE_MS  = 60 * 1000;  // 60s avant expiration
 const LAST_ACTIVE_KEY = 'dp_last_active';
 
 export function useSessionTimeout({ onWarn, onExpire }) {
   const { user, logout } = useAuth();
 
-  // Toutes les valeurs dynamiques passent par des refs → jamais de dépendances instables
-  const timerRef     = useRef(null);
-  const warnRef      = useRef(null);
-  const timeoutMsRef = useRef(30 * 60 * 1000);
-  const onWarnRef    = useRef(onWarn);
-  const onExpireRef  = useRef(onExpire);
-  const logoutRef    = useRef(logout);
-  const userRef      = useRef(user);
-  const initializedRef = useRef(false);
+  const warnRef          = useRef(null);
+  const timeoutMsRef     = useRef(30 * 60 * 1000);
+  const onWarnRef        = useRef(onWarn);
+  const logoutRef        = useRef(logout);
+  const userRef          = useRef(user);
+  const initializedRef   = useRef(false);
+  const warningActiveRef = useRef(false);
 
-  // Mettre à jour les refs quand les valeurs changent — sans déclencher d'effets
-  onWarnRef.current  = onWarn;
-  onExpireRef.current = onExpire;
-  logoutRef.current  = logout;
-  userRef.current    = user;
+  onWarnRef.current = onWarn;
+  logoutRef.current = logout;
+  userRef.current   = user;
 
-  // Effet unique monté une seule fois — gère tout le cycle de vie
   useEffect(() => {
     function doExpire() {
-      clearTimeout(timerRef.current);
       clearTimeout(warnRef.current);
+      warningActiveRef.current = false;
       localStorage.removeItem(LAST_ACTIVE_KEY);
-      onExpireRef.current?.();
       logoutRef.current?.('timeout');
     }
 
     function scheduleTimers() {
-      clearTimeout(timerRef.current);
+      if (warningActiveRef.current) return;
       clearTimeout(warnRef.current);
       localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now()));
       const ms = timeoutMsRef.current;
-      if (ms > WARN_BEFORE_MS) {
-        warnRef.current = setTimeout(() => {
-          onWarnRef.current?.(Math.round(WARN_BEFORE_MS / 1000));
-        }, ms - WARN_BEFORE_MS);
-      }
-      timerRef.current = setTimeout(doExpire, ms);
+      const warnDelay = Math.max(0, ms - WARN_BEFORE_MS);
+      warnRef.current = setTimeout(() => {
+        warningActiveRef.current = true;
+        // Passer exactement WARN_BEFORE_MS secondes au composant — il gère l'expiration
+        onWarnRef.current?.(Math.round(WARN_BEFORE_MS / 1000));
+      }, warnDelay);
     }
+
+    function dismissWarning() {
+      warningActiveRef.current = false;
+      scheduleTimers();
+    }
+
+    window.__sessionTimeoutDismiss = dismissWarning;
 
     function onActivity() {
       if (!userRef.current) return;
@@ -69,11 +70,9 @@ export function useSessionTimeout({ onWarn, onExpire }) {
         .then(s => {
           const minutes = Math.max(1, parseInt(s.session_timeout_minutes) || 30);
           timeoutMsRef.current = minutes * 60 * 1000;
-
-          const lastActive  = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || '0');
-          const loginTime   = parseInt(localStorage.getItem('dp_login_time')  || '0');
+          const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || '0');
+          const loginTime  = parseInt(localStorage.getItem('dp_login_time')  || '0');
           const justLoggedIn = (Date.now() - loginTime) < 10000;
-
           if (!justLoggedIn && lastActive > 0 && (Date.now() - lastActive) > timeoutMsRef.current) {
             doExpire();
           } else {
@@ -89,21 +88,16 @@ export function useSessionTimeout({ onWarn, onExpire }) {
 
     function teardown() {
       initializedRef.current = false;
-      clearTimeout(timerRef.current);
+      warningActiveRef.current = false;
       clearTimeout(warnRef.current);
       ACTIVITY_EVENTS.forEach(e => window.removeEventListener(e, onActivity));
       document.removeEventListener('visibilitychange', onVisible);
       localStorage.removeItem(LAST_ACTIVE_KEY);
+      delete window.__sessionTimeoutDismiss;
     }
 
-    if (user) {
-      init();
-    } else {
-      teardown();
-    }
-
+    if (user) { init(); } else { teardown(); }
     return teardown;
-  // user est la seule vraie dépendance : init au login, teardown au logout
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 }

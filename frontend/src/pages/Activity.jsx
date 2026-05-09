@@ -68,7 +68,7 @@ function HistoryModal({ entryId, onClose }) {
         history.length === 0 ? (
           <div style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:12 }}>Aucun historique disponible</div>
         ) : (
-          <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:0, maxHeight:400, overflowY:'auto' }}>
             {history.map((h, i) => (
               <div key={h.id} style={{
                 display:'flex', gap:12, padding:'10px 4px',
@@ -406,7 +406,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, c
           )}
 
           {/* Mode Affichage */}
-          {customDateEnabled && isEdit && (
+          {customDateEnabled && (
             <div style={{ padding:'8px 10px', borderRadius:'var(--r)',
               background: displayDate ? 'rgba(20,184,166,0.08)' : 'var(--surf2)',
               border: `1px solid ${displayDate ? '#14b8a6' : 'var(--brd)'}`,
@@ -615,12 +615,12 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
           )}
           <span style={{ color:'rgba(247,103,7,0.5)', fontSize:11 }}>—</span>
         </div>
-        <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, fontStyle: 'italic', alignSelf:'center' }}>
-          {renderMasked(entry.content)}
+        <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, fontStyle: 'italic', alignSelf:'center', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+          {renderMasked((entry.content||'').replace(/\r/g,'').split('\n')[0])}
         </div>
         {canEdit && (
           <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginTop: 2 }}>
-            <button className="btn btn-sm" onClick={() => onEdit(entry)}>Édit.</button>
+            <button className="btn btn-sm" onClick={() => { api.auditEditEntry(entry.id).catch(()=>{}); onEdit(entry); }}>Édit.</button>
             <button className="btn btn-sm btn-danger" onClick={() => onDelete(entry)}>✕</button>
           </div>
         )}
@@ -651,7 +651,7 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
       </div>
       {canEdit && (
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-          <button className="btn btn-sm" onClick={() => onEdit(entry)}>Édit.</button>
+          <button className="btn btn-sm" onClick={() => { api.auditEditEntry(entry.id).catch(()=>{}); onEdit(entry); }}>Édit.</button>
           <button className="btn btn-sm btn-danger" onClick={() => onDelete(entry)}>✕</button>
         </div>
       )}
@@ -793,19 +793,43 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateE
         <EntryModal tags={tags} entry={editEntry} customDateEnabled={customDateEnabled} onClose={() => setEditEntry(null)}
           onSave={() => { setEditEntry(null); load(); }} />
       )}
-      {delEntry && (
-        <ConfirmModal
-          message={`Supprimer cette note [${delEntry.tag_code}] ?`}
-          onConfirm={handleDelete}
-          onCancel={() => setDelEntry(null)}
-        />
-      )}
+      {delEntry && (() => {
+        const hasSecret = /\[secret\][\s\S]*?\[\/secret\]/i.test(delEntry.content || '');
+        const excerpt = (delEntry.content || '').replace(/\[secret\][\s\S]*?\[\/secret\]/gi, '●●●●●').slice(0, 80);
+        return (
+          <ConfirmModal
+            message={
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                <div style={{ fontSize:13 }}>
+                  Supprimer la note <strong style={{ fontFamily:'var(--mono)' }}>[{delEntry.tag_code}]</strong> ?
+                </div>
+                <div style={{ fontSize:12, color:'var(--muted)', fontStyle:'italic', background:'var(--surf2)',
+                  padding:'8px 10px', borderRadius:'var(--r)', borderLeft:'3px solid var(--brd)', lineHeight:1.5 }}>
+                  {excerpt}{(delEntry.content || '').length > 80 ? '…' : ''}
+                </div>
+                {hasSecret && (
+                  <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
+                    background:'rgba(217,119,6,0.1)', border:'1px solid #d97706',
+                    borderRadius:'var(--r)', fontSize:12, color:'#d97706', fontWeight:600 }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15,flexShrink:0}}>
+                      <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    ⚠ Cette note contient des données en Mode Secret. La suppression est définitive.
+                  </div>
+                )}
+              </div>
+            }
+            onConfirm={handleDelete}
+            onCancel={() => setDelEntry(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
 
 // ── ANNÉE SECTION ─────────────────────────────────────────────────────────────
-function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle, customDateEnabled, openMonths, onToggleMonth }) {
+function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle, customDateEnabled, openMonths, onToggleMonth, hideHeader }) {
     const { t } = useI18n();
   const [open, setOpen] = useState(isOpenDefault || false);
   const [yearCount, setYearCount] = useState(null);
@@ -833,6 +857,7 @@ function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onTo
 
   return (
     <div style={{ marginBottom: 10, border: '1px solid var(--brd)', borderRadius: 'var(--rl)', overflow: 'hidden' }}>
+      {!hideHeader && (
       <div
         onClick={toggleOpen}
         style={{
@@ -859,8 +884,9 @@ function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onTo
           </span>
         )}
       </div>
+      )}
 
-      {open && (
+      {(open || hideHeader) && (
         <div>
           {months.map(m => (
             <MonthSection key={m} year={year} month={m} tags={tags} onAdd={onAdd} userId={userId} filterTag={filterTag} customDateEnabled={customDateEnabled}
@@ -886,8 +912,17 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
   const [filterTag, setFilterTag] = useState('');
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState('');
+  const [showChart, setShowChart] = useState(true);
+  const [chartType, setChartType] = useState('pie'); // pie | bar-h | bar-v | donut
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
+
+  const CHART_TYPES = [
+    { value:'pie',   label:'Camembert' },
+    { value:'donut', label:'Donut' },
+    { value:'bar-h', label:'Barres horizontales' },
+    { value:'bar-v', label:'Barres verticales' },
+  ];
 
   async function doExport() {
     setLoading(true); setError('');
@@ -896,6 +931,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
       if (userId) params.user_id = userId;
       if (mode === 'month' || mode === 'year') params.year = year;
       if (mode === 'month') params.month = month;
+      // mode 'all' = pas de filtre année
 
       const entries = await api.activityEntries(params);
       // Exclure les notes en preview de l'export PDF
@@ -970,7 +1006,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
       }
 
       const who = targetUserName || user?.displayName || user?.username || '';
-      const modeLabel = mode === 'month' ? `${MONTHS[month-1]} ${year}` : mode === 'year' ? `Année ${year}` : `Tag ${filterTag || 'tous'}`;
+      const modeLabel = mode === 'month' ? `${MONTHS[month-1]} ${year}` : mode === 'year' ? `Année ${year}` : mode === 'all' ? 'Toutes les années' : `Tag ${filterTag || 'tous'}`;
       const exportDate = new Date().toLocaleDateString('fr-FR', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
 
       // Lignes du tableau
@@ -982,10 +1018,8 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
           grouped[yr][mo].forEach(e => {
             const col = tagColors[e.tag_code] || '#066fd1';
             const r = parseInt(col.slice(1,3),16), g=parseInt(col.slice(3,5),16), b=parseInt(col.slice(5,7),16);
-            // Date d'affichage (cosmétique si définie, sinon date réelle)
             const dispDate = e.display_date || e.created_at || '';
             const dateStr = dispDate ? `${dispDate.slice(8,10)}/${dispDate.slice(5,7)}/${dispDate.slice(0,4)}` : '';
-            // Contenu complet avec sauts de ligne + secrets masqués
             const safeContent = e.content
               .replace(/</g,'&lt;').replace(/>/g,'&gt;')
               .replace(/\n/g,'<br>')
@@ -1001,18 +1035,64 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
         });
       });
 
-      // Camembert (seulement si mode = mois ou année)
+      // ── Graphique ─────────────────────────────────────────────────────────────
       let chartSection = '';
-      if ((mode === 'month' || mode === 'year') && tagEntries.length > 0) {
-        const { svgPie, svgLegend } = buildPieChart(tagEntries, tagColors);
-        chartSection = `
-          <div class="chart-block">
-            <h3 class="chart-title">Répartition par TAG</h3>
-            <div class="chart-inner">
-              <div class="pie-wrap">${svgPie}</div>
-              <div class="legend-wrap">${svgLegend}</div>
-            </div>
-            <div class="stat-pills">
+      if (showChart && tagEntries.length > 0) {
+        const tot2 = tagEntries.reduce((s,[,v])=>s+v,0);
+
+        if (chartType === 'pie' || chartType === 'donut') {
+          const size=160, cx=size/2, cy=size/2, r2=chartType==='donut'?68:68, hole=chartType==='donut'?32:0;
+          let startAngle=-Math.PI/2, slices='', legend='';
+          tagEntries.forEach(([code,count],i) => {
+            const angle=(count/tot2)*2*Math.PI, endAngle=startAngle+angle;
+            const x1=cx+r2*Math.cos(startAngle), y1=cy+r2*Math.sin(startAngle);
+            const x2=cx+r2*Math.cos(endAngle),   y2=cy+r2*Math.sin(endAngle);
+            const large=angle>Math.PI?1:0;
+            const col=tagColors[code]||'#066fd1';
+            if(chartType==='donut'){
+              const ix1=cx+hole*Math.cos(endAngle), iy1=cy+hole*Math.sin(endAngle);
+              const ix2=cx+hole*Math.cos(startAngle), iy2=cy+hole*Math.sin(startAngle);
+              slices+=`<path d="M${x1.toFixed(1)},${y1.toFixed(1)} A${r2},${r2} 0 ${large},1 ${x2.toFixed(1)},${y2.toFixed(1)} L${ix1.toFixed(1)},${iy1.toFixed(1)} A${hole},${hole} 0 ${large},0 ${ix2.toFixed(1)},${iy2.toFixed(1)} Z" fill="${col}" stroke="white" stroke-width="1.5"/>`;
+            } else {
+              slices+=`<path d="M${cx},${cy} L${x1.toFixed(1)},${y1.toFixed(1)} A${r2},${r2} 0 ${large},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${col}" stroke="white" stroke-width="1.5"/>`;
+            }
+            const mid=startAngle+angle/2;
+            if(angle>0.25){const tx=cx+(chartType==='donut'?50:r2*0.65)*Math.cos(mid), ty=cy+(chartType==='donut'?50:r2*0.65)*Math.sin(mid); slices+=`<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="9" font-weight="700" font-family="monospace">${Math.round(count/tot2*100)}%</text>`;}
+            const ly=14+i*17; legend+=`<rect x="0" y="${ly-8}" width="10" height="10" rx="2" fill="${col}"/><text x="14" y="${ly+1}" font-size="9" fill="#444" font-family="Arial">${code} (${count})</text>`;
+            startAngle=endAngle;
+          });
+          const svgPie=`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${slices}</svg>`;
+          const svgLegend=`<svg width="120" height="${14+tagEntries.length*17}">${legend}</svg>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">Répartition par TAG</h3><div class="chart-inner"><div class="pie-wrap">${svgPie}</div><div class="legend-wrap">${svgLegend}</div></div>`;
+
+        } else if (chartType === 'bar-h') {
+          const bw=300, bh=20, gap=6, maxVal=tagEntries[0]?.[1]||1;
+          let bars='';
+          tagEntries.forEach(([code,count],i) => {
+            const col=tagColors[code]||'#066fd1';
+            const w=Math.max(4,Math.round((count/maxVal)*bw));
+            const y=i*(bh+gap);
+            bars+=`<g transform="translate(0,${y})"><rect x="0" y="0" width="${w}" height="${bh}" rx="3" fill="${col}"/><text x="${w+6}" y="${bh/2+4}" font-size="9" fill="#444" font-family="Arial" dominant-baseline="middle">${code} (${count})</text></g>`;
+          });
+          const svgH=`<svg width="450" height="${tagEntries.length*(bh+gap)}" font-family="Arial">${bars}</svg>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">Répartition par TAG</h3><div class="chart-inner">${svgH}</div>`;
+
+        } else if (chartType === 'bar-v') {
+          const barW=36, gap2=10, maxVal2=tagEntries[0]?.[1]||1, chartH=120;
+          const totalW=tagEntries.length*(barW+gap2);
+          let bars2='';
+          tagEntries.forEach(([code,count],i) => {
+            const col=tagColors[code]||'#066fd1'; const h=Math.max(4,Math.round((count/maxVal2)*chartH));
+            const x=i*(barW+gap2);
+            bars2+=`<g transform="translate(${x},0)"><rect x="0" y="${chartH-h}" width="${barW}" height="${h}" rx="3" fill="${col}"/><text x="${barW/2}" y="${chartH+12}" text-anchor="middle" font-size="8" fill="#444" font-family="monospace">${code}</text><text x="${barW/2}" y="${chartH-h-4}" text-anchor="middle" font-size="8" fill="#444">${count}</text></g>`;
+          });
+          const svgV=`<svg width="${totalW}" height="${chartH+24}" font-family="Arial">${bars2}</svg>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">Répartition par TAG</h3><div class="chart-inner">${svgV}</div>`;
+        }
+        if(chartSection) chartSection += `</div>`;
+      }
+
+      const statPillsHtml = `<div class="stat-pills">
               ${tagEntries.map(([code,cnt]) => {
                 const col = tagColors[code] || '#066fd1';
                 const r=parseInt(col.slice(1,3),16),g=parseInt(col.slice(3,5),16),b=parseInt(col.slice(5,7),16);
@@ -1025,7 +1105,6 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
               }).join('')}
             </div>
           </div>`;
-      }
 
       const html = `<!DOCTYPE html>
 <html lang="fr">
@@ -1085,6 +1164,7 @@ tr:not(.yr-row):not(.mo-row):nth-child(even){background:#fafafa}
   <div class="meta-item">Exporté le ${exportDate}</div>
 </div>
 ${chartSection}
+${statPillsHtml}
 <div class="table-section">
   <div class="table-title">Journal des notes</div>
   <table><tbody>${rows}</tbody></table>
@@ -1117,21 +1197,22 @@ ${chartSection}
 
       <div className="form-group">
         <label className="form-label">Périmètre de l'export</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {[{ k:'month', l:'Par mois' },{ k:'year', l:'Par année' },{ k:'tag', l:'Par tag' }].map(({ k, l }) => (
+        <div style={{ display: 'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap: 8 }}>
+          {[{ k:'month', l:'Par mois' },{ k:'year', l:'Par année' },{ k:'all', l:'Toutes les années' },{ k:'tag', l:'Par tag' }].map(({ k, l }) => (
             <button key={k} onClick={() => setMode(k)} style={{
-              flex:1, padding:'7px 12px', fontSize:12, fontWeight: mode===k ? 700 : 500,
+              padding:'7px 8px', fontSize:12, fontWeight: mode===k ? 700 : 500,
               border: `2px solid ${mode===k ? 'var(--acc)' : 'var(--brd)'}`,
               borderRadius:'var(--r)',
               background: mode===k ? 'var(--acc-s)' : 'var(--surf)',
               color: mode===k ? 'var(--acc)' : 'var(--muted)', cursor:'pointer',
+              whiteSpace:'nowrap',
             }}>{l}</button>
           ))}
         </div>
       </div>
 
       {(mode === 'month' || mode === 'year') && (
-        <div className="form-row">
+        <div className="form-row" style={{ marginBottom: mode === 'year' ? 16 : 0 }}>
           <div className="form-group">
             <label className="form-label">Année</label>
             <select className="form-control" value={year} onChange={e => setYear(parseInt(e.target.value))}>
@@ -1169,6 +1250,28 @@ ${chartSection}
           {!filterTag && <div style={{ fontSize:11, color:'var(--muted)', marginTop:6 }}>Aucun tag = tous les tags</div>}
         </div>
       )}
+
+      {/* Options graphique */}
+      <div className="form-group" style={{ background:'var(--surf2)', borderRadius:'var(--r)', padding:'10px 12px' }}>
+        <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginBottom: showChart ? 10 : 0 }}>
+          <input type="checkbox" checked={showChart} onChange={e=>setShowChart(e.target.checked)}
+            style={{ accentColor:'var(--acc)', width:14, height:14 }} />
+          <span style={{ fontSize:12, fontWeight:600 }}>Inclure un graphique de répartition par TAG</span>
+        </label>
+        {showChart && (
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+            {CHART_TYPES.map(ct => (
+              <button key={ct.value} onClick={()=>setChartType(ct.value)} style={{
+                padding:'4px 10px', fontSize:11, borderRadius:4, cursor:'pointer',
+                border: `1.5px solid ${chartType===ct.value ? 'var(--acc)' : 'var(--brd)'}`,
+                background: chartType===ct.value ? 'var(--acc-s)' : 'var(--surf)',
+                color: chartType===ct.value ? 'var(--acc)' : 'var(--muted)',
+                fontWeight: chartType===ct.value ? 600 : 400,
+              }}>{ct.label}</button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {targetUserName && (
         <div style={{ fontSize:12, color:'var(--muted)', marginTop:8, padding:'8px 12px', background:'var(--surf2)', borderRadius:'var(--r)' }}>
@@ -1208,6 +1311,10 @@ export default function Activity() {
   const [openYears,  setOpenYears]  = useState({});
   const [openMonths, setOpenMonths] = useState({}); // clé: "year-month"
 
+  const [activeTile,  setActiveTile]  = useState(null);
+  const [olderModal,  setOlderModal]  = useState(false);
+  const [yearCounts,  setYearCounts]  = useState({});
+
   useEffect(() => {
     api.getFeatureFlags().then(f => setCustomDateEnabled(!!f.activity_custom_date)).catch(() => {});
   }, []);
@@ -1238,6 +1345,18 @@ export default function Activity() {
     }
     loadYears();
   }, [isAdmin, canViewAll, loadYears]); // eslint-disable-line
+
+  // Charger le nombre de notes par année
+  useEffect(() => {
+    if (!years.length) return;
+    const params = targetUserId ? { user_id: targetUserId } : {};
+    const counts = {};
+    Promise.all(years.map(y =>
+      api.activityEntries({ ...params, year: y })
+        .then(entries => { counts[y] = Array.isArray(entries) ? entries.length : 0; })
+        .catch(() => { counts[y] = 0; })
+    )).then(() => setYearCounts({...counts}));
+  }, [years.join(','), targetUserId]); // eslint-disable-line
 
   function openAdd(year, month, onSaved) {
     setAddModal({ year, month, onSaved });
@@ -1326,17 +1445,140 @@ export default function Activity() {
           <div style={{ fontWeight: 600, marginBottom: 6 }}>Aucune note pour l'instant</div>
           <div style={{ fontSize: 12 }}>Cliquez sur "Nouvelle note" pour commencer</div>
         </div>
-      ) : (
-        years.map(y => (
-          <YearSection key={y} year={y} tags={tags} onAdd={openAdd} userId={targetUserId} filterTag={filterTag}
-            isOpenDefault={!!openYears[y]}
-            onToggle={isOpen => setOpenYears(prev => ({ ...prev, [y]: isOpen }))}
-            openMonths={openMonths}
-            onToggleMonth={(mo, isOpen) => setOpenMonths(prev => ({ ...prev, [`${y}-${mo}`]: isOpen }))}
-            customDateEnabled={customDateEnabled}
-          />
-        ))
-      )}
+      ) : (() => {
+        const curYear = new Date().getFullYear();
+        const tileYears = [curYear, curYear-1, curYear-2];
+        const olderYears = years.filter(y => y < curYear-2).sort((a,b) => b-a);
+        const TILE_COLORS = ['var(--acc)', '#0891b2', 'var(--ok)', 'var(--warn)'];
+        const CARD_H = 115;
+
+        return (
+          <>
+            {/* Grille de tuiles */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:20 }}>
+              {tileYears.map((y, idx) => {
+                const isActive = activeTile === y;
+                const color = TILE_COLORS[idx];
+                const subtitles = ['Année en cours', 'Année précédente', 'N-2'];
+                return (
+                  <div key={y} role="button" tabIndex={0}
+                    onClick={() => { if (activeTile !== y) setOpenMonths({}); setActiveTile(isActive ? null : y); }}
+                    onKeyDown={e => e.key==='Enter' && (activeTile !== y ? setOpenMonths({}) : null, setActiveTile(isActive ? null : y))}
+                    style={{
+                      background:'var(--surf)',
+                      border: isActive ? `2px solid ${color}` : '1px solid var(--brd)',
+                      borderTop: isActive ? `2px solid ${color}` : `3px solid ${color}`,
+                      borderRadius:'var(--rl)',
+                      padding:'14px 16px',
+                      cursor:'pointer', textAlign:'left',
+                      height: CARD_H, boxSizing:'border-box',
+                      position:'relative', overflow:'hidden',
+                      transition:'border .12s',
+                      fontFamily:'var(--font)',
+                      userSelect:'none',
+                    }}>
+                    {/* Label ancré en haut à gauche — position absolute comme StatCard */}
+                    <div style={{ position:'absolute', top:14, left:16, right:60 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
+                        <span style={{ color, flexShrink:0 }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                            <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                          </svg>
+                        </span>
+                        <span style={{ fontSize:14, color:'var(--txt)', fontWeight:600 }}>{y}</span>
+                      </div>
+                      <div style={{ fontSize:13, color:'var(--muted)', paddingLeft:20 }}>{subtitles[idx]}</div>
+                    </div>
+                    {/* Chiffre ancré en bas à droite — identique StatCard Dashboard */}
+                    <div style={{ position:'absolute', bottom:10, right:14, lineHeight:1 }}>
+                      {yearCounts[y] !== undefined
+                        ? <span style={{ fontSize:52, fontWeight:800, color:'white', lineHeight:1 }}>{yearCounts[y]}</span>
+                        : <span className="spinner" style={{ width:20, height:20, display:'inline-block' }} />}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Tuile Archives */}
+              {(() => {
+                const isArchiveActive = !!(activeTile && !tileYears.includes(activeTile));
+                const color = TILE_COLORS[3];
+                return (
+                  <div role="button" tabIndex={0} onClick={() => olderYears.length > 0 && setOlderModal(true)}
+                    style={{
+                      background:'var(--surf)',
+                      border: isArchiveActive ? `2px solid ${color}` : '1px solid var(--brd)',
+                      borderTop: isArchiveActive ? `2px solid ${color}` : `3px solid ${color}`,
+                      borderRadius:'var(--rl)',
+                      padding:'14px 16px',
+                      cursor: olderYears.length > 0 ? 'pointer' : 'default',
+                      textAlign:'left', height: CARD_H, boxSizing:'border-box',
+                      position:'relative', overflow:'hidden',
+                      opacity: olderYears.length === 0 ? 0.5 : 1,
+                      transition:'border .12s',
+                    }}>
+                    <div style={{ position:'absolute', top:14, left:16, right:60 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
+                        <span style={{ color, flexShrink:0 }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                          </svg>
+                        </span>
+                        <span style={{ fontSize:14, color:'var(--txt)', fontWeight:600 }}>
+                          {isArchiveActive ? activeTile : 'Archives'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize:13, color:'var(--muted)', paddingLeft:20 }}>
+                        {isArchiveActive ? 'Année archivée' : olderYears.length > 0 ? `${olderYears.length} année(s) disponible(s)` : 'Aucune archive'}
+                      </div>
+                    </div>
+                    <div style={{ position:'absolute', bottom:10, right:14, lineHeight:1 }}>
+                      {olderYears.length > 0
+                        ? <span style={{ fontSize:52, fontWeight:800, color:'white', lineHeight:1 }}>
+                            {isArchiveActive && yearCounts[activeTile] !== undefined ? yearCounts[activeTile] : olderYears.length}
+                          </span>
+                        : <span style={{ fontSize:14, color:'var(--muted)' }}>—</span>}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Contenu de la tuile active — key force le remontage au changement d'année */}
+            {activeTile && (
+              <div style={{ marginBottom: 20 }}>
+                <YearSection key={activeTile} year={activeTile} tags={tags} onAdd={openAdd} userId={targetUserId} filterTag={filterTag}
+                  isOpenDefault={true}
+                  onToggle={() => {}}
+                  openMonths={openMonths}
+                  onToggleMonth={(mo, isOpen) => setOpenMonths(prev => ({ ...prev, [`${activeTile}-${mo}`]: isOpen }))}
+                  customDateEnabled={customDateEnabled}
+                  hideHeader={true}
+                />
+              </div>
+            )}
+
+            {/* Modal archives */}
+            {olderModal && (
+              <Modal title="Archives — années précédentes" onClose={() => setOlderModal(false)}>
+                <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                  {olderYears.length === 0 ? (
+                    <div style={{ color:'var(--muted)', fontSize:13 }}>Aucune année archivée disponible.</div>
+                  ) : olderYears.map(y => (
+                    <button key={y} onClick={() => { setOpenMonths({}); setActiveTile(y); setOlderModal(false); }}
+                      style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+                        background:'var(--surf2)', border:'1px solid var(--brd)', borderRadius:'var(--r)',
+                        padding:'10px 14px', cursor:'pointer', fontSize:13, color:'var(--txt)', fontWeight:600 }}>
+                      <span>{y}</span>
+                      <span style={{ fontSize:11, color:'var(--muted)' }}>{yearCounts[y] !== undefined ? `${yearCounts[y]} note(s)` : '→ afficher'}</span>
+                    </button>
+                  ))}
+                </div>
+              </Modal>
+            )}
+          </>
+        );
+      })()}
 
       {addModal && (
         <EntryModal

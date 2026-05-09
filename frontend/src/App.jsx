@@ -51,7 +51,7 @@ function SessionWarning({ seconds: initialSeconds, onDismiss, onExpire }) {
         {countdown}s
       </strong>{' '}
       — cliquez pour rester connecté
-      <button onClick={onDismiss} style={{
+      <button onClick={() => { onDismiss?.(); window.__sessionTimeoutDismiss?.(); }} style={{
         background:'rgba(255,255,255,.25)', border:'none', color:'white',
         padding:'4px 10px', borderRadius:4, cursor:'pointer', fontWeight:600,
       }}>Continuer</button>
@@ -64,8 +64,8 @@ function AppInner({ children }) {
   const [warnSec, setWarnSec] = useState(null);
   const { logout } = useAuth();
 
-  const handleWarn     = useCallback((s) => setWarnSec(s),  []);
-  const handleExpireTimer = useCallback(() => setWarnSec(null), []);
+  const handleWarn          = useCallback((s) => setWarnSec(s), []);
+  const handleExpireTimer   = useCallback(() => setWarnSec(null), []);
   const handleSessionExpire = useCallback(() => {
     setWarnSec(null);
     logout('timeout');
@@ -73,7 +73,7 @@ function AppInner({ children }) {
 
   useSessionTimeout({
     onWarn:   handleWarn,
-    onExpire: handleExpireTimer,
+    onExpire: handleSessionExpire,
   });
 
   return (

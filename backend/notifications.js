@@ -36,6 +36,12 @@ const EVENT_CATALOG = {
     description: 'Alerte si des notes preview existent sur des périodes déjà écoulées.',
     options:     { frequency: 'daily' },
   },
+  expiration_document: {
+    key:         'expiration_document',
+    label:       'Expiration de document',
+    description: 'Envoie une notification x jours avant la fin de la validité d\'une catégorie temporaire.',
+    options:     { days_before: 30 },
+  },
 };
 
 module.exports.EVENT_CATALOG = EVENT_CATALOG;
