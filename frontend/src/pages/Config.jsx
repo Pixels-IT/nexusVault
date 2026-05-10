@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api.js';
+import { useI18n } from '../contexts/I18nContext.jsx';
 import { Modal, Alert, ConfirmModal } from '../components/UI.jsx';
 import { usePerms } from '../hooks/usePerms.js';
 
 // ── SITES ────────────────────────────────────────────────────────────────────
 
-function SiteModal({ site, onClose, onSave, countries = [] }) {
+function SiteModal({site, onClose, onSave, countries = [] }) {
+  const { t } = useI18n();
   const [data, setData] = useState({ name: '', location: '', contact: '', description: '', country_id: null, ...(site||{}) });
   const [error, setError] = useState('');
   const set = k => e => setData(d => ({ ...d, [k]: e.target.value }));
@@ -22,12 +24,12 @@ function SiteModal({ site, onClose, onSave, countries = [] }) {
   }
 
   return (
-    <Modal title={site ? 'Modifier le site' : 'Ajouter un site'} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Annuler</button><button className="btn btn-primary" onClick={submit}>Enregistrer</button></>}>
+    <Modal title={site ? t('config.site_edit') : t('config.site_add')} onClose={onClose}
+      footer={<><button className="btn" onClick={onClose}>{t('config.cancel')}</button><button className="btn btn-primary" onClick={submit}>{t('config.save')}</button></>}>
       {error && <Alert type="err">{error}</Alert>}
-      <div className="form-group"><label className="form-label">Nom du site *</label><input className="form-control" value={data.name} onChange={set('name')} placeholder="ex : Paris HQ" autoFocus /></div>
-      <div className="form-group"><label className="form-label">Localisation</label><input className="form-control" value={data.location} onChange={set('location')} placeholder="Ville, Pays" /></div>
-      <div className="form-group"><label className="form-label">Contact IT</label><input className="form-control" value={data.contact} onChange={set('contact')} placeholder="it@example.com" /></div>
+      <div className="form-group"><label className="form-label">{t('config.name')} du site *</label><input className="form-control" value={data.name} onChange={set('name')} placeholder="ex : Paris HQ" autoFocus /></div>
+      <div className="form-group"><label className="form-label">{t('config.location')}</label><input className="form-control" value={data.location} onChange={set('location')} placeholder="Ville, Pays" /></div>
+      <div className="form-group"><label className="form-label">{t('config.contact')} IT</label><input className="form-control" value={data.contact} onChange={set('contact')} placeholder="it@example.com" /></div>
       <div className="form-group"><label className="form-label">Description</label><input className="form-control" value={data.description} onChange={set('description')} placeholder="Optionnel" /></div>
       {countries.length>0&&<div className="form-group"><label className="form-label">Pays</label><select className="form-control" value={data.country_id||''} onChange={e=>setData(d=>({...d,country_id:e.target.value?parseInt(e.target.value):null}))}><option value="">— Aucun —</option>{countries.map(ct=><option key={ct.id} value={ct.id}>{ct.name}</option>)}</select></div>}
     </Modal>
@@ -35,6 +37,7 @@ function SiteModal({ site, onClose, onSave, countries = [] }) {
 }
 
 function SitesTab({ countries = [] }) {
+  const { t } = useI18n();
   const { can } = usePerms();
   const [sites, setSites] = useState([]);
   const [modal, setModal] = useState(null);
@@ -61,10 +64,10 @@ function SitesTab({ countries = [] }) {
       <table>
         <thead>
           <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Nom</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Localisation</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Contact</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Équipements</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.name')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.location')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.contact')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.devices_tab')}</th>
             <th style={{ padding:'7px 8px', background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}></th>
           </tr>
         </thead>
@@ -76,12 +79,12 @@ function SitesTab({ countries = [] }) {
               <td className="cell-sub">{s.contact}</td>
               <td><span className="badge badge-info">{s.device_count} équip.</span></td>
               <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
-                {can('config_write') && <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(s)}>Modifier</button>}
+                {can('config_write') && <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(s)}>{t('config.edit')}</button>}
                 {can('config_write') && <button className="btn btn-sm btn-danger" onClick={() => setConfirm(s)}>Suppr.</button>}
               </td>
             </tr>
           ))}
-          {sites.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucun site — ajoutez-en un</td></tr>}
+          {sites.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>{t('config.no_sites')}</td></tr>}
         </tbody>
       </table>
       {modal !== null && <SiteModal site={modal.id ? modal : null} countries={countries} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
@@ -92,14 +95,15 @@ function SitesTab({ countries = [] }) {
 
 // ── MODELS ───────────────────────────────────────────────────────────────────
 
-function ModelModal({ model, onClose, onSave }) {
+function ModelModal({model, onClose, onSave }) {
+  const { t } = useI18n();
   const [data, setData] = useState(model || { vendor: '', model: '', device_type: 'Access', backup_method: 'SSH', backup_command: 'show running-config' });
   const [error, setError] = useState('');
   const set = k => e => setData(d => ({ ...d, [k]: e.target.value }));
 
   async function submit() {
     setError('');
-    if (!data.vendor || !data.model) return setError('Constructeur et modèle requis');
+    if (!data.vendor || !data.model) return setError(`${t('config.manufacturer')} et modèle requis`);
     try {
       if (model) await api.updateModel(model.id, data);
       else await api.createModel(data);
@@ -108,12 +112,12 @@ function ModelModal({ model, onClose, onSave }) {
   }
 
   return (
-    <Modal title={model ? 'Modifier le modèle' : 'Ajouter un modèle'} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Annuler</button><button className="btn btn-primary" onClick={submit}>Enregistrer</button></>}>
+    <Modal title={model ? t('config.model_edit') : t('config.model_add')} onClose={onClose}
+      footer={<><button className="btn" onClick={onClose}>{t('config.cancel')}</button><button className="btn btn-primary" onClick={submit}>{t('config.save')}</button></>}>
       {error && <Alert type="err">{error}</Alert>}
       <div className="form-row">
-        <div className="form-group"><label className="form-label">Constructeur *</label><input className="form-control" value={data.vendor} onChange={set('vendor')} placeholder="Cisco, HP…" autoFocus /></div>
-        <div className="form-group"><label className="form-label">Modèle *</label><input className="form-control" value={data.model} onChange={set('model')} placeholder="Catalyst 9300" /></div>
+        <div className="form-group"><label className="form-label">{t('config.manufacturer')} *</label><input className="form-control" value={data.vendor} onChange={set('vendor')} placeholder="Cisco, HP…" autoFocus /></div>
+        <div className="form-group"><label className="form-label">{t('config.model')} + ' *'</label><input className="form-control" value={data.model} onChange={set('model')} placeholder="Catalyst 9300" /></div>
       </div>
       <div className="form-row">
         <div className="form-group"><label className="form-label">Type</label>
@@ -137,18 +141,19 @@ function ModelModal({ model, onClose, onSave }) {
             <option value="NAS" />
           </datalist>
         </div>
-        <div className="form-group"><label className="form-label">Méthode backup</label>
+        <div className="form-group"><label className="form-label">{t('config.method')} backup</label>
           <select className="form-control" value={data.backup_method} onChange={set('backup_method')}>
             <option>SSH</option><option>TFTP</option><option>SCP</option><option>API</option>
           </select>
         </div>
       </div>
-      <div className="form-group"><label className="form-label">Commande backup</label><input className="form-control" value={data.backup_command} onChange={set('backup_command')} placeholder="show running-config" /></div>
+      <div className="form-group"><label className="form-label">{t('config.command')} backup</label><input className="form-control" value={data.backup_command} onChange={set('backup_command')} placeholder="show running-config" /></div>
     </Modal>
   );
 }
 
 function ModelsTab() {
+  const { t } = useI18n();
   const { can } = usePerms();
   const [models, setModels] = useState([]);
   const [modal, setModal] = useState(null);
@@ -162,7 +167,7 @@ function ModelsTab() {
       <div className="card-header">
         <div className="card-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>
-          Modèles d'équipements
+          t('config.model')s d'équipements
         </div>
         {can('config_write') && (
           <button className="btn btn-sm" onClick={() => setModal({})}
@@ -177,11 +182,11 @@ function ModelsTab() {
       <table>
                 <thead>
           <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Modèle</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Constructeur</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.model')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.manufacturer')}</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Type</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Méthode</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Commande</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.method')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.command')}</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Équip.</th>
             <th style={{ padding:'7px 8px', background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}></th>
           </tr>
@@ -196,12 +201,12 @@ function ModelsTab() {
               <td><span className="cell-mono">{m.backup_command}</span></td>
               <td>{m.device_count}</td>
               <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
-                <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(m)}>Modifier</button>
+                <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(m)}>{t('config.edit')}</button>
                 <button className="btn btn-sm btn-danger" onClick={() => setConfirm(m)}>Suppr.</button>
               </td>
             </tr>
           ))}
-          {models.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucun modèle</td></tr>}
+          {models.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>{t('config.no_models')}</td></tr>}
         </tbody>
       </table>
       {modal !== null && <ModelModal model={modal.id ? modal : null} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
@@ -212,7 +217,8 @@ function ModelsTab() {
 
 // ── DEVICES ──────────────────────────────────────────────────────────────────
 
-function DeviceModal({ device, sites, models, onClose, onSave }) {
+function DeviceModal({device, sites, models, onClose, onSave }) {
+  const { t } = useI18n();
   const [data, setData] = useState(device || { name: '', site_id: sites[0]?.id || '', model_id: models[0]?.id || '', ip: '', ssh_port: '22', ssh_user: 'admin', ssh_password: '' });
   const [error, setError] = useState('');
   const set = k => e => setData(d => ({ ...d, [k]: e.target.value }));
@@ -232,16 +238,16 @@ function DeviceModal({ device, sites, models, onClose, onSave }) {
 
   return (
     <Modal title={device ? 'Modifier l\'équipement' : 'Ajouter un équipement'} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Annuler</button><button className="btn btn-primary" onClick={submit}>Enregistrer</button></>}>
+      footer={<><button className="btn" onClick={onClose}>{t('config.cancel')}</button><button className="btn btn-primary" onClick={submit}>{t('config.save')}</button></>}>
       {error && <Alert type="err">{error}</Alert>}
-      <div className="form-group"><label className="form-label">Nom *</label><input className="form-control" value={data.name} onChange={set('name')} placeholder="sw-paris-core-01" autoFocus /></div>
+      <div className="form-group"><label className="form-label">{t('config.name')} *</label><input className="form-control" value={data.name} onChange={set('name')} placeholder="sw-paris-core-01" autoFocus /></div>
       <div className="form-row">
         <div className="form-group"><label className="form-label">Site *</label>
           <select className="form-control" value={data.site_id} onChange={set('site_id')}>
             {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
-        <div className="form-group"><label className="form-label">Modèle *</label>
+        <div className="form-group"><label className="form-label">{t('config.model')} + ' *'</label>
           <select className="form-control" value={data.model_id} onChange={set('model_id')}>
             {models.map(m => <option key={m.id} value={m.id}>{m.vendor} {m.model}</option>)}
           </select>
@@ -260,6 +266,7 @@ function DeviceModal({ device, sites, models, onClose, onSave }) {
 }
 
 function DevicesTab() {
+  const { t } = useI18n();
   const { can } = usePerms();
   const [devices, setDevices] = useState([]);
   const [sites, setSites] = useState([]);
@@ -309,11 +316,11 @@ function DevicesTab() {
       <table style={{ width:'100%', borderCollapse:'collapse' }}>
         <thead>
           <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Nom</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Modèle</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.name')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.model')}</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Site</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>IP</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>Dernier backup</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}>{t('config.last_backup')}</th>
             <th style={{ padding:'7px 8px', background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}></th>
           </tr>
         </thead>
@@ -326,19 +333,19 @@ function DevicesTab() {
               <td><span className="cell-mono">{d.ip}</span></td>
               <td>{d.last_backup ? <span className="cell-sub">v{d.last_backup.version} — {d.last_backup.created_at?.slice(0, 10)}</span> : <span className="badge badge-muted">Aucun</span>}</td>
               <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
-                <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(d)}>Modifier</button>
-                <button className="btn btn-sm" style={{marginRight:4}} title="Dupliquer" onClick={() => duplicateDevice(d)}>
+                <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(d)}>{t('config.edit')}</button>
+                <button className="btn btn-sm" style={{marginRight:4}} title={t('config.duplicate')} onClick={() => duplicateDevice(d)}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 12, height: 12 }}>
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                   </svg>
-                  Dupliquer
+                  t('config.duplicate')
                 </button>
                 <button className="btn btn-sm btn-danger" onClick={() => setConfirm(d)}>Suppr.</button>
               </td>
             </tr>
           ))}
-          {devices.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>Aucun équipement</td></tr>}
+          {devices.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>{t('config.no_devices')}</td></tr>}
         </tbody>
       </table>
       {modal !== null && <DeviceModal device={modal.id ? modal : null} sites={sites} models={models} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
@@ -357,6 +364,7 @@ function DevicesTab() {
 
 // OPTIONS
 function OptionsTab({ onFlagsChange }) {
+  const { t } = useI18n();
   const { can } = usePerms();
   const cw = can('config_write');
   const [flags, setFlags] = useState(null);
@@ -386,7 +394,7 @@ function OptionsTab({ onFlagsChange }) {
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
       <div className="card">
-        <div className="card-header"><div className="card-title">Options</div></div>
+        <div className="card-header"><div className="card-title">{t('config.options_tab')}</div></div>
         <div style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:10}}>
           <label style={{display:'flex',alignItems:'flex-start',gap:12,cursor:'pointer',padding:'12px 14px',borderRadius:'var(--r)',background:flags.countries?'var(--acc-s)':'var(--surf2)',border:`1px solid ${flags.countries?'var(--acc)':'var(--brd)'}`,transition:'all .15s'}}>
             <input type="checkbox" checked={!!flags.countries} onChange={()=>toggle('countries')} style={{marginTop:2,accentColor:'var(--acc)',width:16,height:16}}/>
@@ -403,7 +411,7 @@ function OptionsTab({ onFlagsChange }) {
           </div>
           <div style={{padding:'10px 18px 16px'}}>
             <p style={{fontSize:12,color:'var(--muted)',marginBottom:10}}>Glissez pour reordonner.</p>
-            {adding&&<div style={{display:'flex',gap:8,marginBottom:12,alignItems:'center'}}><input className="form-control" autoFocus value={newName} placeholder="Nom du pays" onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addC();if(e.key==='Escape'){setAdding(false);setNewName('');}}} style={{maxWidth:280}}/><button className="btn btn-primary" onClick={addC}>Ajouter</button><button className="btn" onClick={()=>{setAdding(false);setNewName('');}}>Annuler</button></div>}
+            {adding&&<div style={{display:'flex',gap:8,marginBottom:12,alignItems:'center'}}><input className="form-control" autoFocus value={newName} placeholder={`${t('config.name')} du pays`} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addC();if(e.key==='Escape'){setAdding(false);setNewName('');}}} style={{maxWidth:280}}/><button className="btn btn-primary" onClick={addC}>{t('config.add')}</button><button className="btn" onClick={()=>{setAdding(false);setNewName('');}}>{t('config.cancel')}</button></div>}
             {countries.length===0&&!adding?<div style={{textAlign:'center',color:'var(--muted)',fontSize:13,padding:'16px 0'}}>Aucun pays configure.</div>:
             <div style={{display:'flex',flexDirection:'column',gap:4}}>
               {countries.map(ct=>(
@@ -412,7 +420,7 @@ function OptionsTab({ onFlagsChange }) {
                   {cw&&<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13,color:'var(--muted)'}}><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/></svg>}
                   {editing&&editing.id===ct.id?<input className="form-control" autoFocus value={editing.name} onChange={e=>setEditing(ed=>({...ed,name:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')saveC();if(e.key==='Escape')setEditing(null);}} style={{flex:1,maxWidth:250,height:28,padding:'3px 8px'}}/>:<span style={{flex:1,fontWeight:600,fontSize:13}}>{ct.name}</span>}
                   <span style={{fontSize:11,color:'var(--muted)'}}>{cnt(ct.id)} site{cnt(ct.id)!==1?'s':''}</span>
-                  {cw&&<div style={{display:'flex',gap:4}}>{editing&&editing.id===ct.id?<><button className="btn btn-sm btn-primary" onClick={saveC}>&#10003;</button><button className="btn btn-sm" onClick={()=>setEditing(null)}>&#10005;</button></>:<><button className="btn btn-sm" onClick={()=>setEditing({id:ct.id,name:ct.name})}>Modifier</button><button className="btn btn-sm btn-danger" onClick={()=>delC(ct.id)}>Suppr.</button></>}</div>}
+                  {cw&&<div style={{display:'flex',gap:4}}>{editing&&editing.id===ct.id?<><button className="btn btn-sm btn-primary" onClick={saveC}>&#10003;</button><button className="btn btn-sm" onClick={()=>setEditing(null)}>&#10005;</button></>:<><button className="btn btn-sm" onClick={()=>setEditing({id:ct.id,name:ct.name})}>{t('config.edit')}</button><button className="btn btn-sm btn-danger" onClick={()=>delC(ct.id)}>Suppr.</button></>}</div>}
                 </div>
               ))}
             </div>}
@@ -426,7 +434,7 @@ function OptionsTab({ onFlagsChange }) {
 
 const TABS = [
   { key: 'sites',   label: 'Sites',        icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg> },
-  { key: 'models',  label: 'Modèles',      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M12 2L2 7l10 5 10-5-10-5z" /></svg> },
+  { key: 'models',  label: 'Models',      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><path d="M12 2L2 7l10 5 10-5-10-5z" /></svg> },
   { key: 'devices', label: 'Équipements',  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="2" y="7" width="20" height="14" rx="2" /></svg> },
   { key: 'options', label: 'Options', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg> },
 ];
@@ -439,11 +447,11 @@ export function ConfigEmbedded() {
   const { can, isAdmin } = usePerms();
   const reload = () => api.getCountries().then(setCountries).catch(()=>{});
   useEffect(() => { api.getFeatureFlags().then(f=>{setFlags(f);if(f.countries)reload();}).catch(()=>{}); }, []);
-  const tabs = TABS.filter(t => t.key !== 'options' || isAdmin || can('config_options'));
+  const tabs = TABS.filter(tab => tab.key !== 'options' || isAdmin || can('config_options'));
   return (
     <div>
       <div style={{display:'flex',gap:2,marginBottom:16,borderBottom:'1px solid var(--brd)'}}>
-        {tabs.map(t=><button key={t.key} onClick={()=>setActive(t.key)} style={{display:'flex',alignItems:'center',gap:6,padding:'9px 16px',background:'none',border:'none',borderBottom:active===t.key?'2px solid var(--acc)':'2px solid transparent',color:active===t.key?'var(--acc)':'var(--muted)',fontWeight:active===t.key?600:500,fontSize:13,cursor:'pointer',fontFamily:'var(--font)',marginBottom:-1,transition:'color .15s'}}>{t.icon}{t.label}</button>)}
+        {tabs.map(tab =><button key={tab.key} onClick={()=>setActive(tab.key)} style={{display:'flex',alignItems:'center',gap:6,padding:'9px 16px',background:'none',border:'none',borderBottom:active===tab.key?'2px solid var(--acc)':'2px solid transparent',color:active===tab.key?'var(--acc)':'var(--muted)',fontWeight:active===tab.key?600:500,fontSize:13,cursor:'pointer',fontFamily:'var(--font)',marginBottom:-1,transition:'color .15s'}}>{tab.icon}{tab.label}</button>)}
       </div>
       <div>
         {active==='sites'&&<SitesTab countries={flags.countries?countries:[]}/>}
@@ -455,21 +463,22 @@ export function ConfigEmbedded() {
   );
 }
 export default function Config() {
+  const { t } = useI18n();
   const [sp, setSp] = useSearchParams();
   const active = sp.get('tab')||'sites';
-  const setTab = t=>setSp({tab:t});
+  const setTab = tabKey=>setSp({tab:tabKey});
   const [flags, setFlags] = useState({});
   const [countries, setCountries] = useState([]);
   const reload = ()=>api.getCountries().then(setCountries).catch(()=>{});
   useEffect(()=>{api.getFeatureFlags().then(f=>{setFlags(f);if(f.countries)reload();}).catch(()=>{});}, []);
   const { can, isAdmin } = usePerms();
-  const tabs = TABS.filter(t => t.key !== 'options' || isAdmin || can('config_options'));
+  const tabs = TABS.filter(tab => tab.key !== 'options' || isAdmin || can('config_options'));
   return (
     <main>
       <div className="page-header"><div><div className="page-title">Appareils</div><div className="page-sub">Gestion des equipements, sites et modeles</div></div></div>
       <div className="config-layout">
         <div className="side-menu">
-          {tabs.map(t=><div key={t.key} className={`side-item ${active===t.key?'active':''}`} onClick={()=>setTab(t.key)}>{t.icon}{t.label}</div>)}
+          {tabs.map(tab =><div key={tab.key} className={`side-item ${active===tab.key?'active':''}`} onClick={()=>setTab(tab.key)}>{tab.icon}{tab.label}</div>)}
         </div>
         <div>
           {active==='sites'&&<SitesTab countries={flags.countries?countries:[]}/>}

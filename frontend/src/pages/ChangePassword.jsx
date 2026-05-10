@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useI18n } from '../contexts/I18nContext.jsx';
 
 export default function ChangePassword() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const { logout } = useAuth();
   const [cur, setCur] = useState('');
@@ -40,7 +42,7 @@ export default function ChangePassword() {
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          <span>Vous devez changer votre mot de passe par défaut avant de continuer.</span>
+          <span>{t('auth.must_change_pwd') || 'You must change your default password before continuing.'}</span>
         </div>
         <form onSubmit={handleSubmit}>
           {error && <div className="alert alert-err" style={{ marginBottom: 12 }}>{error}</div>}

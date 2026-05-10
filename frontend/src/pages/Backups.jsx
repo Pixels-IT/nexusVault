@@ -8,8 +8,8 @@ import { Modal, Alert, Spinner } from '../components/UI.jsx';
 // ── HELPERS ────────────────────────────────────────────────────────────────────
 function statusBadge(s) {
   if (s === 'ok')    return <span className="badge badge-ok"><span className="dot dot-ok"/>OK</span>;
-  if (s === 'warn')  return <span className="badge badge-warn"><span className="dot dot-warn"/>Modifié</span>;
-  if (s === 'error') return <span className="badge badge-err"><span className="dot dot-err"/>Erreur</span>;
+  if (s === 'warn')  return <span className="badge badge-warn"><span className="dot dot-warn"/>Modified</span>;
+  if (s === 'error') return <span className="badge badge-err"><span className="dot dot-err"/>Error</span>;
   return <span className="badge badge-muted">{s}</span>;
 }
 function fmtDate(dt) {
@@ -28,6 +28,7 @@ function fmtSize(b) {
 
 // ── VUE CONTENU ───────────────────────────────────────────────────────────────
 function ContentView({ backup, onClose }) {
+  const { t } = useI18n();
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [copied, setCopied]   = useState(false);
@@ -35,7 +36,7 @@ function ContentView({ backup, onClose }) {
   useEffect(() => {
     api.backupContent(backup.id)
       .then(r => setContent(r.content))
-      .catch(() => setContent('Erreur de chargement'))
+      .catch(() => setContent('Error de chargement'))
       .finally(() => setLoading(false));
   }, [backup.id]);
 
@@ -62,7 +63,7 @@ function ContentView({ backup, onClose }) {
                   ? <polyline points="20 6 9 17 4 12"/>
                   : <><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>}
               </svg>
-              {copied ? 'Copié !' : 'Copier'}
+              {copied ? t('backup.copied') : t('backup.copy')}
             </button>
             <button className="btn btn-sm" onClick={onClose}>✕</button>
           </div>
@@ -121,7 +122,7 @@ function DiffView({ idA, idB, onClose }) {
     <div className="modal-overlay" onClick={e => e.target===e.currentTarget && onClose()}>
       <div className="modal" style={{ width:'85vw', maxWidth:1200, maxHeight:'90vh', display:'flex', flexDirection:'column' }}>
         <div className="modal-header" style={{ flexShrink:0 }}>
-          <span className="modal-title">Comparaison de versions</span>
+          <span className="modal-title">{'Diff'}</span>
           <div style={{ display:'flex', gap:10, alignItems:'center' }}>
             <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer', color:'var(--muted)' }}>
               <input type="checkbox" checked={showCtx} onChange={e => setShowCtx(e.target.checked)} /> Contexte
@@ -146,13 +147,13 @@ function DiffView({ idA, idB, onClose }) {
               ))}
             </div>
             <div style={{ padding:'8px 20px', borderBottom:'1px solid var(--brd)', display:'flex', gap:12, alignItems:'center', background:'var(--surf2)', flexShrink:0 }}>
-              <span style={{ fontSize:12, color:'var(--muted)' }}>Résumé :</span>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>{'Summary:' || 'Summary:'}</span>
               <span className="badge badge-ok" style={{ fontWeight:700 }}>+{data.added} ajout{data.added>1?'s':''}</span>
               <span className="badge badge-err" style={{ fontWeight:700 }}>−{data.removed} suppression{data.removed>1?'s':''}</span>
               <span style={{ marginLeft:'auto', fontSize:11, color:'var(--muted)' }}>{data.diff.length} lignes</span>
             </div>
             {hunks.length === 0
-              ? <div style={{ padding:32, textAlign:'center', color:'var(--muted)' }}>Aucune différence</div>
+              ? <div style={{ padding:32, textAlign:'center', color:'var(--muted)' }}>{'No differences' || 'No differences'}</div>
               : <table style={{ width:'100%', borderCollapse:'collapse', fontFamily:'var(--mono)', fontSize:12 }}>
                   <thead>
                     <tr style={{ background:'var(--surf2)', borderBottom:'2px solid var(--brd)' }}>
@@ -167,7 +168,7 @@ function DiffView({ idA, idB, onClose }) {
                       <>
                         {hi>0 && !showCtx && (
                           <tr key={`sep-${hi}`} style={{ background:'var(--acc-s)' }}>
-                            <td colSpan={4} style={{ padding:'3px 16px', fontSize:11, color:'var(--acc)', fontWeight:600 }}>↕ lignes masquées</td>
+                            <td colSpan={4} style={{ padding:'3px 16px', fontSize:11, color:'var(--acc)', fontWeight:600 }}>{'↕ hidden lines' || '↕ hidden lines'}</td>
                           </tr>
                         )}
                         {hunk.lines.map((line, li) => {
@@ -251,7 +252,7 @@ function UploadModal({ devices, onClose, onDone }) {
       </div>
       {content && (
         <div style={{ marginBottom:14 }}>
-          <label className="form-label">Aperçu (5 premières lignes)</label>
+          <label className="form-label">{'Preview (first 5 lines)' || 'Preview (first 5 lines)'}</label>
           <pre style={{ fontFamily:'var(--mono)', fontSize:11, background:'var(--surf2)', border:'1px solid var(--brd)', padding:'8px 12px', borderRadius:'var(--r)', color:'var(--txt)', maxHeight:100, overflow:'auto', whiteSpace:'pre-wrap' }}>
             {content.split('\n').slice(0,5).join('\n')}…
           </pre>
@@ -267,6 +268,7 @@ function UploadModal({ devices, onClose, onDone }) {
 
 // ── TRIGGER (SSH) MODAL ───────────────────────────────────────────────────────
 function TriggerModal({ devices, onClose, onDone }) {
+  const { t } = useI18n();
   const [query, setQuery]       = useState('');
   const [deviceId, setDeviceId] = useState(String(devices[0]?.id || ''));
   const [note, setNote]         = useState('');
@@ -300,7 +302,7 @@ function TriggerModal({ devices, onClose, onDone }) {
       setTimeout(onDone, 900);
     } catch (e) {
       setError(e.message);
-      setSshLog(prev => prev + `\n✗ Erreur : ${e.message}`);
+      setSshLog(prev => prev + `\n✗ Error : ${e.message}`);
     } finally { setLoading(false); }
   }
 
@@ -316,7 +318,7 @@ function TriggerModal({ devices, onClose, onDone }) {
 
       {/* Champ avec autocomplétion */}
       <div className="form-group" style={{ position:'relative' }}>
-        <label className="form-label">Rechercher un équipement</label>
+        <label className="form-label">{t('backup.search') || 'Search a device'}</label>
         <input
           className="form-control"
           value={query}
@@ -344,7 +346,7 @@ function TriggerModal({ devices, onClose, onDone }) {
         )}
         {query && !suggestions.length && showSuggestions && (
           <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:300, background:'var(--surf)', border:'1px solid var(--brd)', borderRadius:'var(--r)', padding:'10px 14px', fontSize:12, color:'var(--muted)', marginTop:2 }}>
-            Aucun équipement correspondant
+            {t('backup.no_devices') || 'No device'} correspondant
           </div>
         )}
       </div>
@@ -355,7 +357,7 @@ function TriggerModal({ devices, onClose, onDone }) {
             <div><span style={{ color:'var(--muted)', fontSize:11 }}>IP</span><br/><span style={{ fontFamily:'var(--mono)', fontWeight:600 }}>{selectedDevice.ip||'—'}</span></div>
             <div><span style={{ color:'var(--muted)', fontSize:11 }}>Port SSH</span><br/><span style={{ fontFamily:'var(--mono)', fontWeight:600 }}>{selectedDevice.ssh_port||'22'}</span></div>
             <div style={{ marginTop:6 }}><span style={{ color:'var(--muted)', fontSize:11 }}>Utilisateur</span><br/><span style={{ fontFamily:'var(--mono)', fontWeight:600 }}>{selectedDevice.ssh_user||'—'}</span></div>
-            <div style={{ marginTop:6 }}><span style={{ color:'var(--muted)', fontSize:11 }}>Méthode</span><br/><span className="badge badge-info" style={{ marginTop:2 }}>{selectedDevice.backup_method||'SSH'}</span></div>
+            <div style={{ marginTop:6 }}><span style={{ color:'var(--muted)', fontSize:11 }}>{t('config.method')}</span><br/><span className="badge badge-info" style={{ marginTop:2 }}>{selectedDevice.backup_method||'SSH'}</span></div>
           </div>
           <div style={{ marginTop:8, paddingTop:8, borderTop:'1px solid var(--brd)' }}>
             <span style={{ color:'var(--muted)', fontSize:11 }}>Commande</span><br/>
@@ -421,10 +423,10 @@ function VersionRow({ backup, onView, onSelectCompare, compareMode, selected, on
 
 // ── ICONE PAR TYPE D'ÉQUIPEMENT ───────────────────────────────────────────────
 function DeviceTypeIcon({ type }) {
-  const t = (type || '').toLowerCase();
+  const tp = (type || '').toLowerCase();
   const style = { width: 15, height: 15, flexShrink: 0 };
 
-  if (t.includes('core') || t.includes('routeur') || t.includes('router'))
+  if (tp.includes('core') || tp.includes('routeur') || tp.includes('router'))
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={style} title={type}>
         <circle cx="12" cy="12" r="3"/>
@@ -432,7 +434,7 @@ function DeviceTypeIcon({ type }) {
       </svg>
     );
 
-  if (t.includes('distrib') || t.includes('aggreg'))
+  if (tp.includes('distrib') || tp.includes('aggreg'))
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={style} title={type}>
         <rect x="2" y="7" width="20" height="10" rx="2"/>
@@ -443,21 +445,21 @@ function DeviceTypeIcon({ type }) {
       </svg>
     );
 
-  if (t.includes('firewall') || t.includes('pare-feu') || t.includes('pare') || t.includes('fortigate') || t.includes('forti'))
+  if (tp.includes('firewall') || tp.includes('pare-feu') || tp.includes('pare') || tp.includes('fortigate') || tp.includes('forti'))
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={style} title={type}>
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
       </svg>
     );
 
-  if (t.includes('wifi') || t.includes('ap ') || t.includes('wireless') || t.includes('access point'))
+  if (tp.includes('wifi') || tp.includes('ap ') || tp.includes('wireless') || tp.includes('access point'))
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={style} title={type}>
         <path d="M1.42 9a16 16 0 0 1 21.16 0M5 12.55a11 11 0 0 1 14.08 0M10.54 16.1a6 6 0 0 1 2.92 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/>
       </svg>
     );
 
-  if (t.includes('nas') || t.includes('storage') || t.includes('san'))
+  if (tp.includes('nas') || tp.includes('storage') || tp.includes('san'))
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={style} title={type}>
         <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
@@ -465,7 +467,7 @@ function DeviceTypeIcon({ type }) {
       </svg>
     );
 
-  if (t.includes('switch'))
+  if (tp.includes('switch'))
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={style} title={type}>
         <rect x="2" y="7" width="20" height="10" rx="2"/>
@@ -514,7 +516,7 @@ function DeviceSection({ device, compareMode, selected, onSelectCompare, onView,
     try {
       const result = await api.pinBackup(backup.id);
       setBackups(prev => prev.map(b => b.id === backup.id ? { ...b, pinned: result.pinned } : b));
-    } catch (e) { alert('Erreur : ' + e.message); }
+    } catch (e) { alert('Error : ' + e.message); }
   }
 
   return (
@@ -548,7 +550,7 @@ function DeviceSection({ device, compareMode, selected, onSelectCompare, onView,
                   <th style={{ width:72 }}>Taille</th>
                   <th style={{ width:90 }}>Statut</th>
                   <th>Note</th>
-                  <th style={{ width:110 }}>Déclenché</th>
+                  <th style={{ width:110 }}>{t('backup.triggered') || 'Triggered'}</th>
                   <th style={{ width:100 }}></th>
                 </tr>
               </thead>
@@ -694,7 +696,7 @@ export default function Backups() {
   async function confirmDeleteBackup() {
     if (!confirmDelete) return;
     try { await api.deleteBackup(confirmDelete.id); setConfirmDelete(null); load(); }
-    catch (e) { alert('Erreur : ' + e.message); setConfirmDelete(null); }
+    catch (e) { alert('Error : ' + e.message); setConfirmDelete(null); }
   }
 
   const orphanDevices = devices.filter(d => !sites.find(s => s.id === d.site_id));
@@ -712,7 +714,7 @@ export default function Backups() {
       <div className="page-header">
         <div>
           <div className="page-title">Backups de configuration</div>
-          <div className="page-sub">Versionning des fichiers des équipements</div>
+          <div className="page-sub">{t('backup.subtitle')}</div>
         </div>
         <div className="page-actions">
           {compareMode ? (
@@ -737,8 +739,8 @@ export default function Backups() {
                     title="Filtrer par type d'équipement"
                   >
                     <option value="">Tous les types</option>
-                    {allTypes.map(t => (
-                      <option key={t} value={t}>{t}</option>
+                    {allTypes.map(tp => (
+                      <option key={tp} value={tp}>{tp}</option>
                     ))}
                   </select>
                   {filterType && (
@@ -791,8 +793,8 @@ export default function Backups() {
       ) : orderedSites.length===0 && devices.length===0 ? (
         <div style={{ textAlign:'center', padding:60, color:'var(--muted)' }}>
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom:12, opacity:.3 }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <div style={{ fontWeight:600, marginBottom:6 }}>Aucun équipement configuré</div>
-          <div style={{ fontSize:12 }}>Ajoutez des sites et équipements dans Appareils</div>
+          <div style={{ fontWeight:600, marginBottom:6 }}>{t('backup.no_devices')} configuré</div>
+          <div style={{ fontSize:12 }}>{t('backup.add_hint') || 'Add sites and devices in Devices'}</div>
         </div>
       ) : (
         <>
@@ -890,7 +892,7 @@ export default function Backups() {
         <Modal title="Supprimer ce backup" onClose={() => setConfirmDelete(null)}
           footer={<><button className="btn" onClick={() => setConfirmDelete(null)}>Annuler</button><button className="btn btn-danger" onClick={confirmDeleteBackup}>{t('backup.delete')}</button></>}>
           <p style={{ fontSize:13 }}>Supprimer le backup <strong>v{confirmDelete.version}</strong> de <strong>{confirmDelete.device_name}</strong> ?</p>
-          <p style={{ fontSize:12, color:'var(--muted)', marginTop:8 }}>Cette action est irréversible. Les backups épinglés ne peuvent pas être supprimés.</p>
+          <p style={{ fontSize:12, color:'var(--muted)', marginTop:8 }}>{t('backup.delete_warning') || 'This action is irreversible. Pinned backups cannot be deleted.'}</p>
         </Modal>
       )}
     </main>

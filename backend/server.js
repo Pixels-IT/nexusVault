@@ -631,12 +631,48 @@ app.put('/api/smtp/config', authMiddleware, requirePerm('security_access'), (req
   const { host, port, secure, user, pass, from, app_url } = req.body;
   const db = getDb();
   const ip = getClientIp(req);
-  const cfg = { host: host || '', port: parseInt(port) || 587, secure: !!secure, user: user || '', pass: pass || '', from: from || '', app_url: app_url || '' };
+  
+  logger.info(`[SMTP] ===== SAUVEGARDE SMTP =====`);
+  logger.info(`[SMTP] Demandé par: ${req.user.username} depuis ${ip}`);
+  logger.info(`[SMTP] Body reçu: host=${host||'(vide)'} port=${port||587} secure=${secure} user=${user||'(vide)'} pass=${pass !== undefined ? (pass ? `(${pass.length} chars)` : '(chaîne vide)') : '(non envoyé/undefined)'} from=${from||'(vide)'}`);
+
+  // Charger config existante pour conserver le pass si non fourni
+  const existing = db.prepare("SELECT value FROM settings WHERE key='smtp_config'").get();
+  let existingCfg = {};
+  try { existingCfg = existing ? JSON.parse(existing.value) : {}; } catch {}
+  logger.info(`[SMTP] Config existante en base: host=${existingCfg.host||'(vide)'} pass=${existingCfg.pass ? `(${existingCfg.pass.length} chars)` : '(vide)'}`);
+  
+  const cfg = {
+    host:    host    || '',
+    port:    parseInt(port) || 587,
+    secure:  !!secure,
+    user:    user    || '',
+    pass:    (pass !== undefined && pass !== '') ? pass : (existingCfg.pass || ''),
+    from:    from    || '',
+    app_url: app_url || existingCfg.app_url || '',
+  };
+  
+  logger.info(`[SMTP] Config finale à sauvegarder: host=${cfg.host} port=${cfg.port} secure=${cfg.secure} user=${cfg.user} pass=${cfg.pass ? `(${cfg.pass.length} chars)` : '(vide)'} from=${cfg.from}`);
+  
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('smtp_config', ?)").run(JSON.stringify(cfg));
+  logger.info(`[SMTP] Sauvegarde en base OK`);
+  
   // Mettre à jour les variables d'environnement en mémoire
-  if (host) { process.env.SMTP_HOST = host; process.env.SMTP_PORT = String(cfg.port); process.env.SMTP_SECURE = String(cfg.secure); process.env.SMTP_USER = user || ''; process.env.SMTP_PASS = pass || ''; process.env.SMTP_FROM = cfg.from || 'NexusVault <no-reply@nexusvault.local>'; }
-  if (app_url) process.env.APP_URL = app_url;
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'SMTP_CONFIG_MODIFIÉ', category: 'admin', severity: 'info', detail: `SMTP host: ${host || '(vide)'}`, ip, success: 1 });
+  if (cfg.host) {
+    process.env.SMTP_HOST   = cfg.host;
+    process.env.SMTP_PORT   = String(cfg.port);
+    process.env.SMTP_SECURE = String(cfg.secure);
+    process.env.SMTP_USER   = cfg.user;
+    process.env.SMTP_PASS   = cfg.pass;
+    process.env.SMTP_FROM   = cfg.from;
+    logger.info(`[SMTP] Variables d'env mises à jour — SMTP_HOST=${cfg.host} SMTP_USER=${cfg.user} SMTP_PASS=${cfg.pass ? '***' : '(vide)'}`);
+  }
+
+  if (cfg.app_url) process.env.APP_URL = cfg.app_url;
+  
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SMTP_CONFIG_MODIFIÉ', category: 'admin', severity: 'info',
+    detail: `host=${cfg.host} port=${cfg.port} user=${cfg.user} pass=${cfg.pass ? '(défini)' : '(vide)'}`, ip, success: 1 });
+  
   res.json({ success: true });
 });
 

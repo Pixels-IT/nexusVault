@@ -58,10 +58,12 @@ function ForgotPasswordModal({ onClose }) {
                 placeholder={t('auth.forgot_placeholder')} />
             </div>
             <div style={{display:'flex', gap:8, marginTop:16}}>
-              <button type="button" className="btn" onClick={onClose} style={{flex:1}}>
+              <button type="button" className="btn" onClick={onClose}
+                style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center'}}>
                 {t('auth.forgot_cancel')}
               </button>
-              <button type="submit" className="btn btn-primary" disabled={loading} style={{flex:1, justifyContent:'center'}}>
+              <button type="submit" className="btn btn-primary" disabled={loading}
+                style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center'}}>
                 {loading ? t('auth.forgot_sending') : t('auth.forgot_send')}
               </button>
             </div>
@@ -215,7 +217,7 @@ export default function Login() {
                 <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
                 <line x1="12" y1="15" x2="12" y2="17"/>
               </svg>
-              <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Authentification à deux facteurs</div>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>{t('auth.totp_title')}</div>
               <div style={{fontSize:12,color:'var(--muted)'}}>Saisissez le code à 6 chiffres de votre application d'authentification</div>
             </div>
             {totpError && <div className="alert alert-err" style={{fontSize:12, marginBottom:12}}>{totpError}</div>}
@@ -252,7 +254,7 @@ export default function Login() {
               <div style={{fontSize:12,color:'var(--muted)'}}>Scannez ce QR code avec Google Authenticator, Authy ou une application similaire.</div>
             </div>
             {!qrData ? (
-              <div style={{textAlign:'center',padding:24,color:'var(--muted)'}}>Génération du QR code…</div>
+              <div style={{textAlign:'center',padding:24,color:'var(--muted)'}}>{t('auth.totp_qr_loading') || 'Generating QR code…'}</div>
             ) : (
               <>
                 <div style={{textAlign:'center',marginBottom:16}}>
@@ -264,7 +266,7 @@ export default function Login() {
                 {totpError && <div className="alert alert-err" style={{fontSize:12,marginBottom:12}}>{totpError}</div>}
                 <form onSubmit={handleSetupVerify}>
                   <div className="form-group">
-                    <label className="form-label" style={{textAlign:'center',display:'block'}}>Code de vérification (6 chiffres)</label>
+                    <label className="form-label" style={{textAlign:'center',display:'block'}}>{t('auth.totp_code')}</label>
                     <input className="form-control" type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
                       value={totpCode} onChange={e => setTotpCode(e.target.value.replace(/\D/g,''))}
                       autoFocus placeholder="000000"

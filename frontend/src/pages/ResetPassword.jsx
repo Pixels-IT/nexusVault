@@ -57,7 +57,7 @@ export default function ResetPassword() {
       await api.resetPassword(token, password);
       setMsg('Mot de passe modifié avec succès !');
       setStep('done');
-    } catch(e) { setErr(e.message || 'Lien invalide ou expiré'); }
+    } catch(e) { setErr(e.message || t('auth.invalid_token')); }
     finally { setLoading(false); }
   }
 
@@ -80,15 +80,15 @@ export default function ResetPassword() {
         {/* Contenu selon l'étape */}
         {step === 'check' && (
           <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--muted)', fontSize: 13 }}>
-            Vérification du lien…
+            t('auth.checking')
           </div>
         )}
 
         {step === 'request' && (
           <>
             <div style={{ textAlign: 'center', marginBottom: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--txt)', marginBottom: 6 }}>Mot de passe oublié</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Entrez votre identifiant pour recevoir un lien de réinitialisation.</div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--txt)', marginBottom: 6 }}>{t('auth.forgot_title')}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{t('auth.forgot_desc')}</div>
             </div>
             {err && <div className="alert alert-err" style={{ marginBottom: 14 }}>{err}</div>}
             <form onSubmit={handleRequest}>
@@ -106,7 +106,7 @@ export default function ResetPassword() {
               <a href="/login" style={{ fontSize: 12, color: 'var(--muted)', textDecoration: 'none' }}
                 onMouseEnter={e => e.target.style.color='var(--acc)'}
                 onMouseLeave={e => e.target.style.color='var(--muted)'}>
-                ← Retour à la connexion
+                t('auth.back_login')
               </a>
             </div>
           </>
@@ -118,7 +118,7 @@ export default function ResetPassword() {
               style={{ width: 40, height: 40, margin: '0 auto 12px', display: 'block' }}>
               <polyline points="20 6 9 17 4 12"/>
             </svg>
-            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--txt)', marginBottom: 10 }}>Email envoyé</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--txt)', marginBottom: 10 }}>{t('auth.sent_title')}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>{msg}</div>
             <a href="/login" className="btn btn-primary"
               style={{ display: 'inline-flex', marginTop: 20, padding: '9px 24px', textDecoration: 'none', justifyContent: 'center' }}>
@@ -134,11 +134,11 @@ export default function ResetPassword() {
               <circle cx="12" cy="12" r="10"/>
               <line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
             </svg>
-            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--err)', marginBottom: 10 }}>Lien invalide ou expiré</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>Ce lien de réinitialisation est invalide ou a expiré (validité : 10 minutes).</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--err)', marginBottom: 10 }}>{t('auth.invalid_token')}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>{t('auth.invalid_desc')}</div>
             <a href="/reset-password"
               style={{ fontSize: 13, color: 'var(--acc)', textDecoration: 'none', fontWeight: 600 }}>
-              Faire une nouvelle demande
+              t('auth.new_request')
             </a>
           </div>
         )}
@@ -146,8 +146,8 @@ export default function ResetPassword() {
         {step === 'reset' && (
           <>
             <div style={{ textAlign: 'center', marginBottom: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--txt)', marginBottom: 6 }}>Nouveau mot de passe</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Choisissez un mot de passe de 14 caractères minimum.</div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--txt)', marginBottom: 6 }}>{t('auth.new_pwd')}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{t('auth.new_pwd_desc')}</div>
             </div>
             {err && <div className="alert alert-err" style={{ marginBottom: 14 }}>{err}</div>}
             <form onSubmit={handleReset}>
@@ -174,7 +174,7 @@ export default function ResetPassword() {
               </div>
               <button className="btn btn-primary" type="submit" disabled={loading}
                 style={{ width: '100%', marginTop: 14, justifyContent: 'center', padding: '10px 14px', fontSize: 13 }}>
-                {loading ? t('auth.saving') : 'Changer le mot de passe'}
+                {loading ? t('auth.saving') : t('auth.save_pwd')}
               </button>
             </form>
           </>
@@ -186,11 +186,11 @@ export default function ResetPassword() {
               style={{ width: 40, height: 40, margin: '0 auto 12px', display: 'block' }}>
               <polyline points="20 6 9 17 4 12"/>
             </svg>
-            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--txt)', marginBottom: 10 }}>Mot de passe modifié !</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--txt)', marginBottom: 10 }}>{t('auth.success_title')}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>{t('auth.success_desc')}</div>
             <a href="/login" className="btn btn-primary"
               style={{ display: 'inline-flex', padding: '9px 24px', textDecoration: 'none', justifyContent: 'center' }}>
-              Se connecter
+              t('auth.go_login')
             </a>
           </div>
         )}

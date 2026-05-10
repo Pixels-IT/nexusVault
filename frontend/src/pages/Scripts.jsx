@@ -78,7 +78,7 @@ export default function Scripts() {
       <div className="page-header">
         <div>
           <div className="page-title">Automatisation</div>
-          <div className="page-sub">Documents et fichiers par catégorie</div>
+          <div className="page-sub">{t('automatisation.subtitle')}</div>
         </div>
       </div>
 
@@ -104,7 +104,7 @@ export default function Scripts() {
           {visibleCats.map((cat) => {
             const color = cat.color || 'var(--acc)';
             const childCount = cats.filter(c=>c.parent_id===cat.id).length;
-            const TYPE_LABEL = {generic:'Générique',temporary:'Temporaire',procedure:'Procédure',script:'Scripts',secured:'Sécurisé'};
+            const TYPE_LABEL = {generic:t('auto_cat.type_generic'),temporary:t('auto_cat.type_temporary'),procedure:t('auto_cat.type_procedure'),script:t('auto_cat.type_script'),secured:t('auto_cat.type_secured')};
             return (
               <div key={cat.id} role="button" tabIndex={0}
                 onClick={()=>handleTileClick(cat)}
@@ -151,8 +151,8 @@ export default function Scripts() {
           <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="1.5" style={{width:48,height:48,marginBottom:12}}>
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
-          <div style={{ fontWeight:600, fontSize:15, marginBottom:8 }}>Aucune catégorie disponible</div>
-          <div style={{ fontSize:13 }}>Créez des catégories dans <strong>Admin → Automatisation → Catégories</strong></div>
+          <div style={{ fontWeight:600, fontSize:15, marginBottom:8 }}>{t('automatisation.no_cats')}</div>
+          <div style={{ fontSize:13 }}>{t('automatisation.no_cats_desc').split(' in ')[0]} <strong>{t('automatisation.admin_path') || 'Admin → Automation → Categories'}</strong></div>
         </div>
       )}
 
@@ -164,7 +164,7 @@ export default function Scripts() {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
               </svg>
-              Documents — {leafCat?.name} ({docs.length})
+              {t('automatisation.docs_title')} — {leafCat?.name} ({docs.length})
             </div>
             {canWrite && (
               <button className="btn btn-sm" onClick={()=>setDetailDoc('create')}
@@ -186,12 +186,12 @@ export default function Scripts() {
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
-                  <th style={{ padding:'7px 14px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Nom</th>
-                  <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'45%' }}>Note</th>
-                  <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Fichiers</th>
-                  <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Créé le</th>
-                  <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Par</th>
-                  {leafCat?.type === 'temporary' && <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Validité</th>}
+                  <th style={{ padding:'7px 14px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('automatisation.col_name')}</th>
+                  <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'45%' }}>{t('automatisation.col_note')}</th>
+                  <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('automatisation.col_files')}</th>
+                  <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('automatisation.col_date')}</th>
+                  <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('automatisation.col_by')}</th>
+                  {leafCat?.type === 'temporary' && <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('automatisation.col_validity')}</th>}
                   <th style={{ padding:'7px 8px' }}></th>
                 </tr>
               </thead>
@@ -202,13 +202,13 @@ export default function Scripts() {
                       if (leafCat?.type === 'secured' && !unlockedDocs.current.has(doc.id)) {
                         let globalPwd = '';
                         try { const f = await api.getFeatureFlags(); globalPwd = f.automation_secured_password || ''; } catch {}
-                        const entered = window.prompt('Mot de passe requis pour accéder à ce document sécurisé :');
+                        const entered = window.prompt(t('automatisation.secured_pwd_prompt'));
                         if (entered === null) return;
                         if (!globalPwd) {
                           const docData = await api.automationDocument(doc.id);
                           if (docData.doc_password && entered !== docData.doc_password) {
                             api.automationDocAccessDenied(doc.id).catch(()=>{});
-                            alert('Mot de passe incorrect.'); return;
+                            alert(t('automatisation.secured_wrong_pwd')); return;
                           }
                           unlockedDocs.current.add(doc.id);
                           setDetailDoc(docData);
@@ -288,6 +288,7 @@ export default function Scripts() {
 
 // ── MODAL DOCUMENT (création + édition + détail + historique) ────────────────
 function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRefresh, onDocUpdated }) {
+  const { t } = useI18n();
   // doc = 'create' → création | object → détail/édition
   const isCreate = doc === 'create';
   const [mode, setMode]           = useState(isCreate ? 'edit' : 'view');
@@ -336,12 +337,12 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
 
   async function submit() {
     setError('');
-    if (!form.name.trim()) return setError('Le nom est obligatoire.');
-    if (catType === 'temporary' && !form.valid_until) return setError('La date de fin de validité est obligatoire.');
+    if (!form.name.trim()) return setError(t('automatisation.name_required') || 'Name is required.');
+    if (catType === 'temporary' && !form.valid_until) return setError(t('automatisation.validity_required') || 'Expiry date is required.');
     if (catType === 'secured' && securedGlobalPwd === '' && !form.doc_password.trim())
-      return setError('Un mot de passe est requis pour ce document sécurisé.');
+      return setError(t('automatisation.pwd_required') || 'A password is required for this secured document.');
     if (catType === 'secured' && form.doc_password && form.doc_password === form._userPassword)
-      return setError('Le mot de passe du document ne peut pas être votre mot de passe utilisateur.');
+      return setError(t('automatisation.pwd_not_user') || 'Document password cannot be your user password.');
     setSaving(true);
     try {
       let docId = detail?.id;
@@ -384,7 +385,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
   // Title with history button (edit mode only)
   const titleEl = (
     <div style={{ display:'flex', alignItems:'center', gap:10, width:'100%' }}>
-      <span>{isCreate ? 'Nouveau document' : (mode === 'edit' ? `Modifier "${detail?.name}"` : detail?.name)}</span>
+      <span>{isCreate ? t('automatisation.new_doc') : (mode === 'edit' ? `${t('automatisation.modify')} "${detail?.name}"` : detail?.name)}</span>
       {!isCreate && mode !== 'history' && (
         <button className="btn btn-sm" onClick={()=>{ setMode('history'); loadHistory(); }}
           style={{ marginLeft:'auto', marginRight:6, display:'flex', alignItems:'center', gap:4, fontSize:11,
@@ -397,13 +398,13 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
       )}
       {mode === 'history' && (
         <button className="btn btn-sm" onClick={()=>setMode('view')}
-          style={{ marginLeft:'auto', marginRight:6, fontSize:11 }}>← Retour</button>
+          style={{ marginLeft:'auto', marginRight:6, fontSize:11 }}>← {t('common.back').replace('← ','')}</button>
       )}
     </div>
   );
 
   return (
-    <Modal title={titleEl} onClose={onClose} hideClose={mode !== 'view'}
+    <Modal title={titleEl} onClose={onClose} hideClose={mode !== 'view'} width="750px"
       footer={
         mode === 'edit' || isCreate ? (
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%' }}>
@@ -427,14 +428,14 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
             </div>
             {/* Droite */}
             <div style={{ display:'flex', gap:8 }}>
-              <button className="btn" onClick={()=>{ isCreate ? onClose() : setMode('view'); setError(''); }}>Annuler</button>
+              <button className="btn" onClick={()=>{ isCreate ? onClose() : setMode('view'); setError(''); }}>{t('automatisation.cancel')}</button>
               <button className="btn btn-primary" onClick={submit} disabled={saving}>
-                {saving ? 'Enregistrement…' : (isCreate ? 'Créer' : 'Enregistrer')}
+                {saving ? t('auth.saving') : (isCreate ? t('automatisation.create') : t('automatisation.save'))}
               </button>
             </div>
           </div>
         ) : mode === 'history' ? (
-          <button className="btn" onClick={()=>setMode('view')}>Fermer</button>
+          <button className="btn" onClick={()=>setMode('view')}>{t('automatisation.close')}</button>
         ) : (
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%' }}>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -467,12 +468,12 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
       {(mode === 'edit' || isCreate) && (
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
           <div className="form-group" style={{margin:0}}>
-            <label className="form-label">Nom *</label>
-            <input className="form-control" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} required placeholder="Ex: Certificat SSL wildcard" />
+            <label className="form-label">{t('automatisation.doc_name')}</label>
+            <input className="form-control" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} required placeholder={t('automatisation.doc_name_ph') || 'Ex: SSL wildcard certificate'} />
           </div>
           {catType === 'temporary' && (
             <div className="form-group" style={{margin:0}}>
-              <label className="form-label">Date de fin de validité *</label>
+              <label className="form-label">{t('automatisation.doc_validity')}</label>
               <input type="date" className="form-control" value={form.valid_until} required
                 onChange={e=>setForm(f=>({...f,valid_until:e.target.value}))} style={{ maxWidth:'33%' }} />
             </div>
@@ -481,7 +482,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
             <label className="form-label">Note <span style={{fontWeight:400,color:'var(--muted)'}}>— optionnel</span></label>
             <textarea className="form-control" value={form.note} rows={3}
               onChange={e=>setForm(f=>({...f,note:e.target.value}))}
-              placeholder="Notes libres sur ce document…" style={{ resize:'vertical', fontFamily:'var(--font)' }} />
+              placeholder={t('automatisation.doc_note_ph') || 'Free notes about this document…'} style={{ resize:'vertical', fontFamily:'var(--font)' }} />
           </div>
           {/* Mot de passe pour catégorie sécurisée */}
           {catType === 'secured' && securedGlobalPwd !== null && (
@@ -491,26 +492,26 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
                   <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                 </svg>
                 <span style={{ fontSize:12, fontWeight:700, color: securedGlobalPwd ? 'var(--muted)' : 'var(--warn)' }}>
-                  Document sécurisé
+                  {t('automatisation.secured_label')}
                 </span>
               </div>
               {securedGlobalPwd ? (
                 <div style={{ fontSize:12, color:'var(--muted)' }}>
-                  Un mot de passe global est configuré dans Admin → Automatisation → Options. Il sera appliqué automatiquement.
-                  <span style={{ display:'block', marginTop:4, color:'var(--ok)', fontWeight:600 }}>✓ Mot de passe global actif</span>
+                  {t('automatisation.pwd_global_hint') || 'A global password is configured in Admin → Automation → Options. It will be applied automatically.'}
+                  <span style={{ display:'block', marginTop:4, color:'var(--ok)', fontWeight:600 }}>{t('automatisation.pwd_global_active')}</span>
                 </div>
               ) : (
                 <div>
                   <div style={{ fontSize:12, color:'var(--warn)', marginBottom:8 }}>
-                    Aucun mot de passe global configuré. Vous devez définir un mot de passe pour ce document.
+                    {t('automatisation.pwd_none_set')}
                   </div>
                   <div className="form-group" style={{margin:0}}>
-                    <label className="form-label">Mot de passe du document *</label>
+                    <label className="form-label">{t('automatisation.pwd_doc_label')}</label>
                     <input type="password" className="form-control" value={form.doc_password||''}
                       onChange={e=>setForm(f=>({...f,doc_password:e.target.value}))}
                       placeholder="Ne peut pas être votre mot de passe utilisateur" required />
                     <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>
-                      Ce mot de passe sera demandé lors de la consultation du document.
+                      {t('automatisation.pwd_hint') || 'This password will be required when viewing the document.'}
                     </div>
                   </div>
                 </div>
@@ -540,16 +541,16 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
           {/* 1 ligne 3 colonnes : Créé le | Par | Validité */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, fontSize:12, borderBottom:'1px solid var(--brd)', paddingBottom:12 }}>
             <div>
-              <span style={{ color:'var(--muted)', fontWeight:600, display:'block', fontSize:10, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>Créé le</span>
+              <span style={{ color:'var(--muted)', fontWeight:600, display:'block', fontSize:10, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>{t('automatisation.created_on')}</span>
               <span>{detail.created_at?.slice(0,16).replace('T',' ')}</span>
             </div>
             <div>
-              <span style={{ color:'var(--muted)', fontWeight:600, display:'block', fontSize:10, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>Par</span>
+              <span style={{ color:'var(--muted)', fontWeight:600, display:'block', fontSize:10, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>{t('automatisation.created_by')}</span>
               <span>{detail.created_by_name||'—'}</span>
             </div>
             {catType === 'temporary' && (
               <div>
-                <span style={{ color:'var(--muted)', fontWeight:600, display:'block', fontSize:10, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>Validité</span>
+                <span style={{ color:'var(--muted)', fontWeight:600, display:'block', fontSize:10, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>{t('automatisation.validity_label')}</span>
                 <span style={{ color: isExpired ? 'var(--err)' : detail.valid_until ? 'var(--warn)' : 'var(--muted)', fontWeight: detail.valid_until ? 600 : 400 }}>
                   {isExpired ? '⚠ EXPIRÉ — ' : ''}{detail.valid_until || '—'}
                 </span>
@@ -559,7 +560,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
           {/* Note */}
           {detail.note && (
             <div style={{ background:'var(--surf2)', border:'1px solid var(--brd)', borderRadius:'var(--r)', padding:'10px 12px', fontSize:13, whiteSpace:'pre-wrap', lineHeight:1.6 }}>
-              <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', marginBottom:6, textTransform:'uppercase', letterSpacing:'.06em' }}>Note</div>
+              <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', marginBottom:6, textTransform:'uppercase', letterSpacing:'.06em' }}>{t('automatisation.note_label')}</div>
               {detail.note}
             </div>
           )}
@@ -568,17 +569,17 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
           {/* Fichiers */}
           <div>
             <div style={{ fontSize:12, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:8 }}>
-              Fichiers joints ({detail.files?.length||0})
+              {t('automatisation.files_label', {n: detail.files?.length||0})}
             </div>
             {(!detail.files || detail.files.length === 0) ? (
-              <div style={{ fontSize:13, color:'var(--muted)', padding:'12px 0', textAlign:'center' }}>Aucun fichier joint.</div>
+              <div style={{ fontSize:13, color:'var(--muted)', padding:'12px 0', textAlign:'center' }}>{t('automatisation.no_files')}</div>
             ) : (
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                 <thead>
                   <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
-                    <th style={{ padding:'5px 8px', textAlign:'left', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Fichier</th>
+                    <th style={{ padding:'5px 8px', textAlign:'left', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('automatisation.col_name')}</th>
                     <th style={{ padding:'5px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Taille</th>
-                    <th style={{ padding:'5px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Ajouté le</th>
+                    <th style={{ padding:'5px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('automatisation.col_date')}</th>
                     <th style={{ padding:'5px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Par</th>
                     <th style={{ padding:'5px 8px' }}></th>
                   </tr>
@@ -640,7 +641,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
           {histLoading ? (
             <div style={{ textAlign:'center', padding:24 }}><span className="spinner"/></div>
           ) : history.length === 0 ? (
-            <div style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:12 }}>Aucun historique disponible</div>
+            <div style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:12 }}>{t('automatisation.history_none')}</div>
           ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:0, maxHeight:400, overflowY:'auto' }}>
               {history.map((h, i) => {
@@ -669,7 +670,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
       )}
 
       {confirmFile && (
-        <ConfirmModal message={`Supprimer le fichier "${confirmFile.filename}" ?`}
+        <ConfirmModal message={`{t('automatisation.delete_file', {name: ''}).split(' {name}')[0]} "${confirmFile.filename}" ?`}
           onConfirm={async()=>{ await api.deleteAutomationFile(confirmFile.id); setConfirmFile(null); refreshDetail(); onDocUpdated(); }}
           onCancel={()=>setConfirmFile(null)} />
       )}
@@ -682,6 +683,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
 
 // ── APERÇU FICHIER ────────────────────────────────────────────────────────────
 function FilePreviewModal({ file, catType, onClose }) {
+  const { t } = useI18n();
   const [hlReady, setHlReady]   = useState(false);
   const [wordHtml, setWordHtml] = useState('');
   const [copied, setCopied]     = useState(false);
@@ -795,7 +797,7 @@ function FilePreviewModal({ file, catType, onClose }) {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
         </svg>
-        <span>Aperçu — {file.filename}</span>
+        <span>{t('automatisation.preview_title', {name: file.filename})}</span>
         {isScript && file.type === 'text' && (
           <span style={{ fontSize:10, background:'var(--ok-s)', color:'var(--ok)', border:'1px solid var(--ok)', borderRadius:4, padding:'1px 6px', fontWeight:700 }}>
             {lang.toUpperCase()}
@@ -814,7 +816,7 @@ function FilePreviewModal({ file, catType, onClose }) {
               ? <polyline points="20 6 9 17 4 12"/>
               : <><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>}
           </svg>
-          {copied ? 'Copié !' : 'Copier'}
+          {copied ? t('automatisation.copied') : t('automatisation.copy')}
         </button>
       ) : undefined}
       footer={<button className="btn btn-primary" onClick={onClose}>Fermer</button>}>
@@ -851,12 +853,12 @@ function FilePreviewModal({ file, catType, onClose }) {
         <>
           {wordHtml === '__error__' && (
             <div style={{ textAlign:'center', padding:40, color:'var(--muted)', fontSize:13 }}>
-              Erreur de conversion du document Word.
+              {t('automatisation.word_error')}
             </div>
           )}
           {wordHtml === '__odt__' && (
             <div style={{ textAlign:'center', padding:40, color:'var(--muted)', fontSize:13 }}>
-              Les fichiers ODT ne peuvent pas être prévisualisés. Téléchargez le fichier.
+              {t('automatisation.odt_unsupported')}
             </div>
           )}
           {wordHtml && wordHtml !== '__error__' && wordHtml !== '__odt__' && (
@@ -869,7 +871,7 @@ function FilePreviewModal({ file, catType, onClose }) {
           {!wordHtml && (
             <div style={{ textAlign:'center', padding:40, color:'var(--muted)' }}>
               <span className="spinner"/>
-              <div style={{ marginTop:12, fontSize:13 }}>Chargement de l'aperçu Word…</div>
+              <div style={{ marginTop:12, fontSize:13 }}>{t('automatisation.preview_loading')}</div>
             </div>
           )}
         </>
@@ -877,7 +879,7 @@ function FilePreviewModal({ file, catType, onClose }) {
 
       {file.type === 'unsupported' && (
         <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--muted)', fontSize:13 }}>
-          Format non supporté pour la prévisualisation.
+          {t('automatisation.preview_unsupported')}
         </div>
       )}
     </Modal>

@@ -10,6 +10,49 @@ import { usePerms, invalidatePermsCache } from '../hooks/usePerms.js';
 import { ConfigEmbedded } from './Config.jsx';
 
 // ── APPAREILS TAB (encapsule Config.jsx) ─────────────────────────────────────
+// ── Map des actions d'audit → traductions ────────────────────────────────────
+const AUDIT_ACTION_LABELS = {
+  // Auth
+  'LOGIN_OK':         { en: 'Login success',        fr: 'Connexion réussie' },
+  'LOGIN_FAIL':       { en: 'Login failed',          fr: 'Connexion échouée' },
+  'LOGIN_LOCKED':     { en: 'Account locked',        fr: 'Compte verrouillé' },
+  'LOGOUT':           { en: 'Logout',                fr: 'Déconnexion' },
+  'PWD_CHANGED':      { en: 'Password changed',      fr: 'Mot de passe modifié' },
+  'TOTP_SETUP':       { en: 'TOTP configured',       fr: 'TOTP configuré' },
+  // Backups
+  'BACKUP_IMPORTED':  { en: 'Backup imported',       fr: 'Backup importé' },
+  'BACKUP_DELETED':   { en: 'Backup deleted',        fr: 'Backup supprimé' },
+  'BACKUP_TRIGGER':   { en: 'Backup triggered',      fr: 'Backup déclenché' },
+  // Automation
+  'DOC_CRÉÉ':         { en: 'Document created',      fr: 'Document créé' },
+  'DOC_MODIFIÉ':      { en: 'Document modified',     fr: 'Document modifié' },
+  'DOC_SUPPRIMÉ':     { en: 'Document deleted',      fr: 'Document supprimé' },
+  'DOC_CONSULTÉ':     { en: 'Document viewed',       fr: 'Document consulté' },
+  'DOC_ACCÈS_REFUSÉ': { en: 'Access denied',         fr: 'Accès refusé' },
+  'FICHIER_AJOUTÉ':   { en: 'File added',            fr: 'Fichier ajouté' },
+  'FICHIER_SUPPRIMÉ': { en: 'File deleted',          fr: 'Fichier supprimé' },
+  'FICHIER_TÉLÉCHARGÉ':{ en: 'File downloaded',      fr: 'Fichier téléchargé' },
+  'FICHIER_PRÉVISUALISÉ':{ en: 'File previewed',     fr: 'Fichier prévisualisé' },
+  'FICHIER_COPIÉ':    { en: 'File copied',           fr: 'Fichier copié' },
+  // Categories
+  'CAT_CRÉÉE':        { en: 'Category created',      fr: 'Catégorie créée' },
+  'CAT_MODIFIÉE':     { en: 'Category modified',     fr: 'Catégorie modifiée' },
+  'CAT_SUPPRIMÉE':    { en: 'Category deleted',      fr: 'Catégorie supprimée' },
+  // Admin
+  'USER_CREATED':     { en: 'User created',          fr: 'Utilisateur créé' },
+  'USER_UPDATED':     { en: 'User updated',          fr: 'Utilisateur modifié' },
+  'USER_DELETED':     { en: 'User deleted',          fr: 'Utilisateur supprimé' },
+  'USER_UNLOCKED':    { en: 'User unlocked',         fr: 'Utilisateur débloqué' },
+  'SETTINGS_UPDATED': { en: 'Settings updated',      fr: 'Paramètres modifiés' },
+};
+
+function auditActionLabel(action, lang) {
+  const entry = AUDIT_ACTION_LABELS[action];
+  if (!entry) return action;
+  return (lang === 'fr' ? entry.fr : entry.en) || action;
+}
+
+
 function AppareilsTab() {
   return <ConfigEmbedded />;
 }
@@ -22,11 +65,11 @@ function PersonnalisationTab() {
 // ── SCRIPTS ADMIN TAB ────────────────────────────────────────────────────────
 // ── TYPES DE CATÉGORIES ────────────────────────────────────────────────────────
 const CAT_TYPES = [
-  { value: 'generic',   label: 'Générique',   desc: 'Sans option particulière' },
-  { value: 'temporary', label: 'Temporaire',  desc: 'Avec date de validité (ex: certificat)' },
-  { value: 'procedure', label: 'Procédure',   desc: 'Document Word/PDF avec aperçu' },
-  { value: 'script',    label: 'Scripts',     desc: 'Document de type script avec reconnaissance des balises' },
-  { value: 'secured',   label: 'Sécurisé',    desc: 'Protégé par mot de passe admin' },
+  { value: 'generic',   tKey: 'auto_cat.type_generic',   label: 'Generic' },
+  { value: 'temporary', tKey: 'auto_cat.type_temporary', label: 'Temporary' },
+  { value: 'procedure', tKey: 'auto_cat.type_procedure', label: 'Procedure' },
+  { value: 'script',    tKey: 'auto_cat.type_script',    label: 'Script' },
+  { value: 'secured',   tKey: 'auto_cat.type_secured',   label: 'Secured' },
 ];
 
 function ScriptsAdminTab() {
@@ -41,15 +84,15 @@ function ScriptsAdminTab() {
   return (
     <div>
       <div style={{ display:'flex', gap:2, marginBottom:20, borderBottom:'1px solid var(--brd)' }}>
-        {INNER.map(t => (
-          <button key={t.key} onClick={() => setInnerTab(t.key)} style={{
+        {INNER.map(tab => (
+          <button key={tab.key} onClick={() => setInnerTab(tab.key)} style={{
             display:'flex', alignItems:'center', gap:6,
             padding:'9px 16px', background:'none', border:'none',
-            borderBottom: innerTab===t.key ? '2px solid var(--acc)' : '2px solid transparent',
-            color: innerTab===t.key ? 'var(--acc)' : 'var(--muted)',
-            fontWeight: innerTab===t.key ? 600 : 500,
+            borderBottom: innerTab===tab.key ? '2px solid var(--acc)' : '2px solid transparent',
+            color: innerTab===tab.key ? 'var(--acc)' : 'var(--muted)',
+            fontWeight: innerTab===tab.key ? 600 : 500,
             fontSize:13, cursor:'pointer', fontFamily:'var(--font)', marginBottom:-1,
-          }}>{t.icon} {t.label}</button>
+          }}>{tab.icon} {tab.label}</button>
         ))}
       </div>
       {innerTab === 'categories' && <AutomationCategoriesTab />}
@@ -60,6 +103,7 @@ function ScriptsAdminTab() {
 
 // ── CATÉGORIES ─────────────────────────────────────────────────────────────────
 function AutomationCategoriesTab() {
+  const { t } = useI18n();
   const [cats, setCats]         = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editCat, setEditCat]   = useState(null);   // null = création, object = édition
@@ -78,7 +122,7 @@ function AutomationCategoriesTab() {
   }, []);
 
   const TYPE_COLORS = { generic:'#64748b', temporary:'var(--warn)', procedure:'#0891b2', script:'#16a34a', secured:'var(--err)' };
-  const TYPE_LABEL  = Object.fromEntries(CAT_TYPES.map(t=>[t.value, t.label]));
+  const TYPE_LABEL  = Object.fromEntries(CAT_TYPES.map(ct=>[ct.value, ct.label]));
 
   // Calculer la couleur héritée (teinte différente = rotation hue de 30°)
   function computeChildColor(parentColor) {
@@ -205,9 +249,9 @@ function AutomationCategoriesTab() {
             </colgroup>
             <thead>
               <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
-                <th style={{ padding:'7px 14px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Nom</th>
-                <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Type</th>
-                <th style={{ padding:'7px 8px', textAlign:'left', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Description</th>
+                <th style={{ padding:'7px 14px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('auto_cat.col_name')}</th>
+                <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('auto_cat.col_type')}</th>
+                <th style={{ padding:'7px 8px', textAlign:'left', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('auto_cat.col_desc')}</th>
                 <th style={{ padding:'7px 8px' }}></th>
               </tr>
             </thead>
@@ -232,10 +276,10 @@ function AutomationCategoriesTab() {
           return result;
         };
         return (
-          <Modal title={editCat ? `Modifier "${editCat.name}"` : 'Nouvelle catégorie'} onClose={closeModal}
+          <Modal title={editCat ? `Modifier "${editCat.name}"` : t('auto_cat.new_title')} onClose={closeModal}
             footer={
               <div style={{ display:'flex', gap:8 }}>
-                <button type="button" className="btn" onClick={closeModal}>Annuler</button>
+                <button type="button" className="btn" onClick={closeModal}>{t('auto_cat.cancel')}</button>
                 <button type="button" onClick={()=>document.getElementById('cat-form').requestSubmit()} className="btn btn-primary">
                   {editCat ? 'Enregistrer' : 'Créer'}
                 </button>
@@ -244,26 +288,26 @@ function AutomationCategoriesTab() {
             <form id="cat-form" onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:12 }}>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                 <div className="form-group" style={{margin:0}}>
-                  <label className="form-label">Nom *</label>
+                  <label className="form-label">{t('auto_cat.name_label')}</label>
                   <input className="form-control" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} required />
                 </div>
                 <div className="form-group" style={{margin:0}}>
                   <label className="form-label">Type</label>
                   <select className="form-control" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
-                    {CAT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label} — {t.desc}</option>)}
+                    {CAT_TYPES.map(ct => <option key={ct.value} value={ct.value}>{t(ct.tKey)}</option>)}
                   </select>
                 </div>
                 <div className="form-group" style={{margin:0, gridColumn:'1/-1'}}>
-                  <label className="form-label">Description <span style={{fontWeight:400,color:'var(--muted)'}}>— optionnel</span></label>
+                  <label className="form-label">Description <span style={{fontWeight:400,color:'var(--muted)'}}>{t('auto_cat.desc_opt')}</span></label>
                   <input className="form-control" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="Description de la catégorie" />
                 </div>
                 {/* Ligne pleine largeur 75/25 : parent + couleur */}
                 <div style={{ gridColumn:'1/-1', display:'grid', gridTemplateColumns:'3fr 1fr', gap:10 }}>
                   <div className="form-group" style={{margin:0}}>
-                    <label className="form-label">Catégorie parente</label>
+                    <label className="form-label">{t('auto_cat.parent_label')}</label>
                     <select className="form-control" value={form.parent_id} onChange={e=>handleParentChange(e.target.value)}
                       style={{ color:'var(--txt)', background:'var(--surf2)' }}>
-                      <option value="">— Aucune (catégorie racine) —</option>
+                      <option value="">{t('auto_cat.no_parent')}</option>
                       {buildOptions().map(opt => (
                         <option key={opt.id} value={opt.id} style={{ paddingLeft: opt.depth > 0 ? 16 : 0 }}>
                           {opt.depth > 0 ? '    ↳ ' : ''}{opt.label}
@@ -288,7 +332,7 @@ function AutomationCategoriesTab() {
                 </div>
                 {form.type === 'temporary' && (
                   <div className="form-group" style={{margin:0}}>
-                    <label className="form-label">Date de fin de validité</label>
+                    <label className="form-label">{t('automatisation.doc_validity_opt') || 'Expiry date'}</label>
                     <input type="date" className="form-control" value={form.valid_until} onChange={e=>setForm(f=>({...f,valid_until:e.target.value}))} />
                   </div>
                 )}
@@ -310,6 +354,7 @@ function AutomationCategoriesTab() {
 
 // ── OPTIONS AUTOMATISATION ─────────────────────────────────────────────────────
 function AutomationOptionsTab() {
+  const { t } = useI18n();
   const [colorMode, setColorMode] = useState('same');
   const [securedPwd, setSecuredPwd] = useState('');
   const [saving, setSaving]       = useState(false);
@@ -327,7 +372,7 @@ function AutomationOptionsTab() {
     try {
       await api.setFeatureFlags({ automation_cat_color_mode: mode });
       setColorMode(mode);
-      setMsg('Option sauvegardée.'); setTimeout(()=>setMsg(''),3000);
+      setMsg(t('security.saved')); setTimeout(()=>setMsg(''),3000);
     } catch(e) { setMsg('Erreur : '+e.message); }
     finally { setSaving(false); }
   }
@@ -336,7 +381,7 @@ function AutomationOptionsTab() {
     setSaving(true); setMsg('');
     try {
       await api.setFeatureFlags({ automation_secured_password: securedPwd });
-      setMsg(securedPwd ? 'Mot de passe enregistré.' : 'Mot de passe vide enregistré.');
+      setMsg(securedPwd ? t('auto_opts.pwd_saved') : t('auto_opts.pwd_empty_saved'));
       setTimeout(()=>setMsg(''),3000);
     } catch(e) { setMsg('Erreur : '+e.message); }
     finally { setSaving(false); }
@@ -353,13 +398,13 @@ function AutomationOptionsTab() {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
                 <circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="10" cy="19.5" r="2.5"/>
               </svg>
-              Couleur des catégories
+              {t('auto_opts.color_title') || 'Category colors'}
             </div>
           </div>
           <div style={{ padding:'14px 18px', display:'flex', flexDirection:'column', gap:8 }}>
             {[
-              { value:'same',  label:"Les catégories enfants héritent de la couleur des parents à l'identique." },
-              { value:'shade', label:"Les catégories enfants héritent d'une nuance/teinte différente de la couleur des parents." },
+              { value:'same',  label:t('auto_opts.color_same') },
+              { value:'shade', label:t('auto_opts.color_shade') },
             ].map(opt => (
               <label key={opt.value} style={{ display:'flex', alignItems:'flex-start', gap:10, cursor:'pointer',
                 padding:'10px 12px', borderRadius:'var(--r)',
@@ -382,21 +427,21 @@ function AutomationOptionsTab() {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
               </svg>
-              Mot de passe des documents sécurisés
+              {t('auto_opts.pwd_title') || 'Secured document password'}
             </div>
           </div>
           <div style={{ padding:'14px 18px', display:'flex', flexDirection:'column', gap:12 }}>
             <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>
               Le mot de passe indiqué sera utilisé pour sécuriser l'accès à tous les documents dont la catégorie est "Sécurisé".
               <strong> Si vide</strong>, il faudra indiquer un mot de passe à chaque document.
-              <span style={{ color:'var(--warn)' }}> À vos risques et périls.</span>
+              <span style={{ color:'var(--warn)' }}> {t('auto_opts.at_your_risk') || 'At your own risk.'}</span>
             </div>
             <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
               <div className="form-group" style={{ margin:0, flex:1 }}>
-                <label className="form-label">Mot de passe global</label>
+                <label className="form-label">{t('auto_opts.pwd_global_label')}</label>
                 <input type="password" className="form-control" value={securedPwd}
                   onChange={e=>setSecuredPwd(e.target.value)}
-                  placeholder="Laisser vide pour demander à chaque document" />
+                  placeholder={t('auto_opts.pwd_global_ph')} />
               </div>
               <button className="btn btn-primary" onClick={saveSecuredPwd} disabled={saving}>
                 Enregistrer
@@ -414,31 +459,31 @@ function AutomationOptionsTab() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
               <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
             </svg>
-            Types de catégorie
+            {t('auto_opts.types_title') || 'Category types'}
           </div>
         </div>
         <div style={{ padding:'14px 18px' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead>
               <tr style={{ borderBottom:'1px solid var(--brd)' }}>
-                <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>Type</th>
-                <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>Description</th>
+                <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>{t('auto_cat.col_type')}</th>
+                <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>{t('auto_cat.col_desc')}</th>
               </tr>
             </thead>
             <tbody>
-              {CAT_TYPES.map((t, i) => (
-                <tr key={t.value} style={{ borderBottom:'1px solid var(--brd)', background: i%2?'var(--surf2)':'transparent' }}>
+              {CAT_TYPES.map((ct, i) => (
+                <tr key={ct.value} style={{ borderBottom:'1px solid var(--brd)', background: i%2?'var(--surf2)':'transparent' }}>
                   <td style={{ padding:'10px 10px', whiteSpace:'nowrap' }}>
-                    <span style={{ fontWeight:600, color:({generic:'#64748b',temporary:'var(--warn)',procedure:'#0891b2',script:'#16a34a',secured:'var(--err)'})[t.value] || 'var(--muted)' }}>
-                      {t.label}
+                    <span style={{ fontWeight:600, color:({generic:'#64748b',temporary:'var(--warn)',procedure:'#0891b2',script:'#16a34a',secured:'var(--err)'})[ct.value] || 'var(--muted)' }}>
+                      {ct.label}
                     </span>
                   </td>
                   <td style={{ padding:'10px 10px', color:'var(--muted)', fontSize:12 }}>
-                    {t.value === 'generic'   && 'Sans option particulière. Type par défaut.'}
-                    {t.value === 'temporary' && 'Avec une date de validité. Une notification peut être envoyée avant expiration (configurable dans Sécurité → Notifications → "Expiration de document").'}
-                    {t.value === 'procedure' && "Document de type Word/PDF. Permettra un aperçu du document dans l'interface."}
-                    {t.value === 'script'    && 'Document de type script avec reconnaissance des balises.'}
-                    {t.value === 'secured'   && "Protégé par un mot de passe. En cas de perte, seul un administrateur peut récupérer l'accès."}
+                    {ct.value === 'generic'   && t('auto_opts.type_generic')}
+                    {ct.value === 'temporary' && t('auto_opts.type_temporary')}
+                    {ct.value === 'procedure' && t('auto_opts.type_procedure')}
+                    {ct.value === 'script'    && t('auto_opts.type_script')}
+                    {ct.value === 'secured'   && t('auto_opts.type_secured')}
                   </td>
                 </tr>
               ))}
@@ -465,7 +510,6 @@ function AccountTab() {
   }, []);
 
   async function saveProfile(e) {
-  const { t } = useI18n();
     e.preventDefault(); setErr(''); setMsg('');
     try { await api.updateAccount(data); setMsg('Profil mis à jour.'); } catch (e) { setErr(e.message); }
   }
@@ -494,18 +538,18 @@ function AccountTab() {
               <input className="form-control" value={data.display_name} onChange={e => setData(d => ({ ...d, display_name: e.target.value }))} placeholder="Votre nom complet" />
             </div>
             <div className="form-group">
-              <label className="form-label">Identifiant de connexion</label>
+              <label className="form-label">{t('auth.username')} de connexion</label>
               <input className="form-control" value={data.username} onChange={e => setData(d => ({ ...d, username: e.target.value }))} />
             </div>
             <div className="form-group">
-              <label className="form-label">Adresse e-mail</label>
+              <label className="form-label">{t('account.email')}</label>
               <input className="form-control" type="email" value={data.email} onChange={e => setData(d => ({ ...d, email: e.target.value }))} placeholder="utilisateur@domaine.com" />
             </div>
             <div className="form-group">
               <label className="form-label">{t('users.role')}</label>
               <input className="form-control" value={user?.role || ''} disabled style={{ opacity: .6 }} />
             </div>
-            <button className="btn btn-primary" type="submit">Enregistrer</button>
+            <button className="btn btn-primary" type="submit">{t('auto_cat.save')}</button>
           </form>
         </div>
       </div>
@@ -574,8 +618,8 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
 
   async function submit() {
     setError('');
-    if (!data.username.trim()) return setError('Identifiant requis');
-    if (!data.email.trim()) return setError('Adresse e-mail obligatoire');
+    if (!data.username.trim()) return setError(`${t('auth.username')} requis`);
+    if (!data.email.trim()) return setError(`${t('account.email')} obligatoire`);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email.trim())) return setError('Email invalide (ex: nom@domaine.com)');
     if (!isNew && data.password && data.password.length < 14)
       return setError('Mot de passe : 14 caractères minimum');
@@ -607,7 +651,7 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>Annuler</button>
+          <button className="btn" onClick={onClose}>{t('auto_cat.cancel')}</button>
           <button className="btn btn-primary" onClick={submit} disabled={loading}>
             {loading ? '…' : isNew ? t('users.save') : t('users.update')}
           </button>
@@ -644,9 +688,9 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
         <div className="form-group">
           <label className="form-label">{t('users.role')}</label>
           <select className="form-control" value={data.role} onChange={set('role')}>
-            <option value="admin">Administrateur</option>
-            <option value="operator">Opérateur</option>
-            <option value="viewer">Lecteur</option>
+            <option value="admin">{t('users.role_admin')}</option>
+            <option value="operator">{t('users.role_operator')}</option>
+            <option value="viewer">{t('users.role_viewer')}</option>
           </select>
         </div>
         {/* Mot de passe uniquement en mode édition */}
@@ -697,12 +741,12 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
           <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}>
             <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
           </svg>
-          <span style={{ color: 'var(--acc)', fontWeight: 600 }}>TOTP activé</span>
+          <span style={{ color: 'var(--acc)', fontWeight: 600 }}>{t('security.totp_active') || '2FA enabled'}</span>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', cursor: 'pointer', fontSize: 11 }}>
             <input type="checkbox" checked={data.reset_totp}
               onChange={e => setData(d => ({ ...d, reset_totp: e.target.checked }))}
               style={{ accentColor: 'var(--warn)' }} />
-            <span style={{ color: 'var(--warn)', fontWeight: 600 }}>Réinitialiser le TOTP</span>
+            <span style={{ color: 'var(--warn)', fontWeight: 600 }}>{t('security.totp_reset') || 'Reset 2FA'}</span>
           </label>
         </div>
       )}
@@ -732,8 +776,8 @@ function UsersTab() {
 
   const roleBadge = r => {
     if (r === 'admin') return <span className="badge badge-err">Admin</span>;
-    if (r === 'operator') return <span className="badge badge-warn">Opérateur</span>;
-    return <span className="badge badge-muted">Lecteur</span>;
+    if (r === 'operator') return <span className="badge badge-warn">{t('users.role_operator')}</span>;
+    return <span className="badge badge-muted">{t('users.role_viewer')}</span>;
   };
 
   return (
@@ -752,12 +796,12 @@ function UsersTab() {
         <thead>
           <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('users.username')}</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Nom</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('auto_cat.col_name')}</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>E-mail</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('users.role')}</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Statut</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('users.last_login')}</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Créé le</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('automatisation.created_on')}</th>
             <th style={{ padding:'7px 8px', background:'var(--surf2)', borderBottom:'1px solid var(--brd)' }}></th>
           </tr>
         </thead>
@@ -771,18 +815,18 @@ function UsersTab() {
               <td style={{ padding:'9px 8px', textAlign:'center' }}>
                 {u.locked_until && new Date(u.locked_until.replace(' ','T')) > new Date()
                   ? <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'center' }}>
-                      <span className="badge badge-err" title={`Verrouillé jusqu'à ${u.locked_until}`}>
-                        <span className="dot" style={{ background:'var(--err)' }}/>Verrouillé
+                      <span className="badge badge-err" title={`t('users.locked') jusqu'à ${u.locked_until}`}>
+                        <span className="dot" style={{ background:'var(--err)' }}/>t('users.locked')
                       </span>
                       <button className="btn btn-sm" style={{ borderColor:'var(--warn)', color:'var(--warn)', padding:'1px 6px', fontSize:10 }}
                         onClick={async () => { await api.unlockUser(u.id); load(); }}
-                        title="Débloquer le compte">
-                        Débloquer
+                        title={`${t('users.unlock')} le compte`}>
+                        t('users.unlock')
                       </button>
                     </div>
                   : u.enabled
                     ? <span className="badge badge-ok"><span className="dot dot-ok" />{t('users.enabled')}</span>
-                    : <span className="badge badge-muted"><span className="dot dot-muted" />Désactivé</span>
+                    : <span className="badge badge-muted"><span className="dot dot-muted" />{t('common.disabled')}</span>
                 }
               </td>
               <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>
@@ -792,7 +836,7 @@ function UsersTab() {
               </td>
               <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{u.created_at?.slice(0, 10)}</td>
               <td style={{ padding:'9px 8px', textAlign:'right', whiteSpace:'nowrap' }}>
-                <button className="btn btn-sm" onClick={() => setModal(u)} style={{ marginRight:4 }}>Modifier</button>
+                <button className="btn btn-sm" onClick={() => setModal(u)} style={{ marginRight:4 }}>{t('common.edit')}</button>
                 {!(u.role === 'admin' && adminCount <= 1) && (
                   <button className="btn btn-sm btn-danger" onClick={() => setConfirm(u)}>Suppr.</button>
                 )}
@@ -825,7 +869,7 @@ const PERM_DEFS = [
     ],
   },
   {
-    section: 'Scripts',
+    section: 'Automatisation',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
     perms: [
       { key: 'automatisation_read',  label: 'Consulter les scripts' },
@@ -869,7 +913,7 @@ const PERM_DEFS = [
     section: 'Administration',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
     perms: [
-      { key: 'audit_access',    label: "Accès au Journal d'audit" },
+      { key: 'audit_access',    label: "Accès au t('audit.title')" },
       { key: 'audit_archive',   label: "Accès aux archives d'audit" },
       { key: 'security_access', label: "Accès à Sécurité" },
     ],
@@ -891,6 +935,7 @@ function useRoles() {
 }
 
 function RolePermissionsCard() {
+  const { t } = useI18n();
   const ROLES = useRoles();
   const [perms, setPerms] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -928,7 +973,7 @@ function RolePermissionsCard() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
           </svg>
-          Droits d'accès par rôle
+          t('security.rights') par rôle
         </div>
         <button className="btn btn-primary" onClick={save} disabled={saving}>
           {saving ? 'Enregistrement…' : 'Enregistrer'}
@@ -1008,7 +1053,7 @@ function SecurityTab() {
   const TABS = [
       { key: 'general',  label: t('security.general'),           icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M1 12h3M20 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg> },
       { key: 'rights',   label: t('security.rights'),     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
-      { key: 'oidc',     label: t('security.auth'),   icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg> },
+      { key: 'oidc',     label: t('security.auth_tab') || 'Authentication', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg> },
       { key: 'notifs',   label: t('security.notifs'),      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> },
       { key: 'cron',     label: t('security.cron'),      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
     ];
@@ -1021,17 +1066,17 @@ function SecurityTab() {
     <div>
       {/* Tabs horizontaux */}
       <div style={{ display: 'flex', gap: 2, marginBottom: 16, borderBottom: '1px solid var(--brd)' }}>
-        {TABS.map(t => (
-          <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+        {TABS.map(tab => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '9px 16px', background: 'none', border: 'none',
-            borderBottom: activeTab === t.key ? '2px solid var(--acc)' : '2px solid transparent',
-            color: activeTab === t.key ? 'var(--acc)' : 'var(--muted)',
-            fontWeight: activeTab === t.key ? 600 : 500,
+            borderBottom: activeTab === tab.key ? '2px solid var(--acc)' : '2px solid transparent',
+            color: activeTab === tab.key ? 'var(--acc)' : 'var(--muted)',
+            fontWeight: activeTab === tab.key ? 600 : 500,
             fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font)',
             marginBottom: -1, transition: 'color .15s, border-color .15s',
           }}>
-            {t.icon}{t.label}
+            {tab.icon}{tab.label}
           </button>
         ))}
       </div>
@@ -1083,7 +1128,7 @@ function SecurityGeneralTab() {
     setUrlSaving(true); setUrlMsg('');
     try {
       await api.smtpSave({ app_url: appUrl });
-      setUrlMsg('Enregistré.');
+      setUrlMsg(t('security.saved') || 'Saved.');
     } catch { setUrlMsg('Erreur.'); }
     finally { setUrlSaving(false); }
   }
@@ -1133,12 +1178,12 @@ function SecurityGeneralTab() {
           </div>
           <div style={{ padding: 16 }}>
             <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-              Durée d'inactivité avant déconnexion. Alerte 60 s avant expiration.
+              {t('security.timeout_desc') || 'Inactivity duration before logout. Alert 60s before expiry.'}
             </p>
             {msg && <div className={`alert ${msg.startsWith('Erreur') ? 'alert-err' : 'alert-ok'}`} style={{ marginBottom: 10 }}>{msg}</div>}
             <form onSubmit={saveTimeout} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
               <div className="form-group" style={{ margin: 0, flex: 1 }}>
-                <label className="form-label">Durée d'inactivité</label>
+                <label className="form-label">{t('security.timeout') || 'Session timeout'}</label>
                 <select className="form-control" value={timeout} onChange={e => setTimeout_(e.target.value)}>
                   <option value="5">5 minutes</option>
                   <option value="10">10 minutes</option>
@@ -1207,7 +1252,7 @@ function SecurityGeneralTab() {
               </select>
             </div>
             <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Durée du verrouillage</label>
+              <label className="form-label">{t('security.lock_duration') || 'Lock duration'}</label>
               <select className="form-control" value={bruteWin} onChange={e => setBruteWin(e.target.value)}>
                 {[5,10,15,20,30,60].map(m => <option key={m} value={m}>{m} minutes</option>)}
               </select>
@@ -1228,12 +1273,12 @@ function SecurityGeneralTab() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
-            Liste d'accès IP / URL
+            {t('security.whitelist') || 'IP / URL access list'}
           </div>
         </div>
         <div style={{ padding: 16 }}>
           <div className="alert alert-warn" style={{ marginBottom: 14, justifyContent: 'center', textAlign: 'center' }}>
-            Liste vide = tous les accès sont autorisés. Dès qu'une règle est active, seules les adresses listées peuvent accéder.
+            {t('security.whitelist_desc') || 'Empty list = all access allowed. Once a rule is active, only '}les adresses listées peuvent accéder.
           </div>
           {wlError && <div className="alert alert-err">{wlError}</div>}
           <form onSubmit={addRule} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -1243,10 +1288,10 @@ function SecurityGeneralTab() {
             </select>
             <input className="form-control" style={{ flex: 1, minWidth: 160 }} value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))} placeholder={form.type === 'ip' ? '192.168.1.0' : 'https://mon-domaine.com'} />
             <input className="form-control" style={{ flex: 1, minWidth: 120 }} value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="Description (optionnel)" />
-            <button className="btn btn-primary" type="submit">Ajouter</button>
+            <button className="btn btn-primary" type="submit">{t('auto_cat.add')}</button>
           </form>
           <table>
-            <thead><tr><th>Type</th><th>Valeur</th><th>Label</th><th>Statut</th><th>Ajouté le</th><th></th></tr></thead>
+            <thead><tr><th>{t('auto_cat.col_type')}</th><th>Valeur</th><th>Label</th><th>Statut</th><th>{t('common.added_on') || 'Added on'}</th><th></th></tr></thead>
             <tbody>
               {rows.map(r => (
                 <tr key={r.id}>
@@ -1265,7 +1310,7 @@ function SecurityGeneralTab() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>Aucune règle</td></tr>
+                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>{t('security.no_rules') || 'No rules'}</td></tr>
               )}
             </tbody>
           </table>
@@ -1287,16 +1332,30 @@ function SecurityGeneralTab() {
 function SmtpModal({ onClose, onSaved }) {
   const { t } = useI18n();
   const [s, setS] = useState({ host:'', port:'587', secure:false, user:'', pass:'', from:'' });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [msg, setMsg]         = useState('');
-  const [err, setErr]         = useState('');
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState(false);
+  const [testing, setTesting]     = useState(false);
+  const [msg, setMsg]             = useState('');
+  const [err, setErr]             = useState('');
+  const [hasExistingPass, setHasExistingPass] = useState(false);
   useEffect(() => {
-    api.smtpConfig().then(c => setS({ host:c.host||'', port:String(c.port||587), secure:!!c.secure, user:c.user||'', pass:'', from:c.from||'' })).catch(()=>{}).finally(()=>setLoading(false));
+    api.smtpConfig().then(c => {
+      setS({ host:c.host||'', port:String(c.port||587), secure:!!c.secure,
+             user:c.user||'', pass:'', from:c.from||'' });
+      setHasExistingPass(!!(c.pass));
+    }).catch(()=>{}).finally(()=>setLoading(false));
   }, []);
-  const save = async e => { e.preventDefault(); setSaving(true); setMsg(''); setErr('');
-    try { await api.smtpSave({ ...s, port:parseInt(s.port)||587 }); onSaved('email'); setMsg('Enregistré.'); } catch(e){setErr(e.message);} finally{setSaving(false);} };
+  const save = async e => {
+    e.preventDefault(); setSaving(true); setMsg(''); setErr('');
+    try {
+      const payload = { ...s, port:parseInt(s.port)||587 };
+      // Ne pas écraser le mot de passe existant si le champ est vide
+      if (!payload.pass) delete payload.pass;
+      await api.smtpSave(payload);
+      if (s.pass) setHasExistingPass(true);
+      onSaved('email');
+      setMsg('Enregistré.');
+    } catch(e){setErr(e.message);} finally{setSaving(false);} };
   const test = async () => { setTesting(true); setMsg(''); setErr('');
     try { const r=await api.smtpTest(); setMsg(`Email de test envoyé à ${r.to}`); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
   return (
@@ -1306,11 +1365,14 @@ function SmtpModal({ onClose, onSaved }) {
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-          <div className="form-group" style={{margin:0}}><label className="form-label">Hôte SMTP</label><input className="form-control" value={s.host} onChange={e=>setS(x=>({...x,host:e.target.value}))} placeholder="smtp.gmail.com"/></div>
+          <div className="form-group" style={{margin:0}}><label className="form-label">{t('security.smtp_host') || 'SMTP host'}</label><input className="form-control" value={s.host} onChange={e=>setS(x=>({...x,host:e.target.value}))} placeholder="smtp.gmail.com"/></div>
           <div className="form-group" style={{margin:0}}><label className="form-label">Port</label><input className="form-control" type="number" value={s.port} onChange={e=>setS(x=>({...x,port:e.target.value}))} placeholder="587"/></div>
           <div className="form-group" style={{margin:0}}><label className="form-label">{t('audit.user')}</label><input className="form-control" value={s.user} onChange={e=>setS(x=>({...x,user:e.target.value}))} placeholder="user@domaine.com"/></div>
-          <div className="form-group" style={{margin:0}}><label className="form-label">Mot de passe</label><input className="form-control" type="password" value={s.pass} onChange={e=>setS(x=>({...x,pass:e.target.value}))} placeholder="••••••••"/></div>
-          <div className="form-group" style={{margin:0,gridColumn:'1/-1'}}><label className="form-label">Expéditeur (From)</label><input className="form-control" value={s.from} onChange={e=>setS(x=>({...x,from:e.target.value}))} placeholder="NexusVault <no-reply@domaine.com>"/></div>
+          <div className="form-group" style={{margin:0}}>
+            <label className="form-label">{t('security.smtp_password') || 'Password'}{hasExistingPass && !s.pass && <span style={{fontSize:10,color:'var(--ok)',marginLeft:6,fontWeight:600}}>✓ configuré</span>}</label>
+            <input className="form-control" type="password" value={s.pass} onChange={e=>setS(x=>({...x,pass:e.target.value}))} placeholder={hasExistingPass ? '••••••• (laisser vide pour conserver)' : '••••••••'}/>
+          </div>
+          <div className="form-group" style={{margin:0,gridColumn:'1/-1'}}><label className="form-label">{t('security.smtp_from') || 'Sender (From)'}</label><input className="form-control" value={s.from} onChange={e=>setS(x=>({...x,from:e.target.value}))} placeholder="NexusVault <no-reply@domaine.com>"/></div>
         </div>
         <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,marginTop:10,cursor:'pointer'}}>
           <input type="checkbox" checked={s.secure} onChange={e=>setS(x=>({...x,secure:e.target.checked}))}/>SSL/TLS (port 465)
@@ -1321,29 +1383,30 @@ function SmtpModal({ onClose, onSaved }) {
 }
 
 function TelegramModal({ onClose, onSaved }) {
-  const [t, setT] = useState({ bot_token:'', chat_id:'' });
+  const { t } = useI18n();
+  const [tg, setTg] = useState({ bot_token:'', chat_id:'' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
   const [testing, setTesting] = useState(false);
   const [msg, setMsg]         = useState('');
   const [err, setErr]         = useState('');
   useEffect(() => {
-    api.telegramConfig().then(c=>setT({bot_token:c.bot_token||'',chat_id:c.chat_id||''})).catch(()=>{}).finally(()=>setLoading(false));
+    api.telegramConfig().then(c=>setTg({bot_token:c.bot_token||'',chat_id:c.chat_id||''})).catch(()=>{}).finally(()=>setLoading(false));
   }, []);
   const save = async () => { setSaving(true); setMsg(''); setErr('');
-    try { await api.telegramSave(t); onSaved('telegram'); setMsg('Enregistré.'); } catch(e){setErr(e.message);} finally{setSaving(false);} };
+    try { await api.telegramSave(tg); onSaved('telegram'); setMsg('Enregistré.'); } catch(e){setErr(e.message);} finally{setSaving(false);} };
   const test = async () => { setTesting(true); setMsg(''); setErr('');
     try { await api.telegramTest(); setMsg('Message Telegram envoyé !'); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
   return (
     <Modal title="Configuration Telegram" onClose={onClose}
-      footer={<><button className="btn" onClick={test} disabled={testing||!t.bot_token||!t.chat_id}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={<><button className="btn" onClick={test} disabled={testing||!tg.bot_token||!tg.chat_id}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
-        <p style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>Créez un bot via <code>@BotFather</code> sur Telegram pour obtenir votre Bot Token. L'ID du chat peut être récupéré via <code>@userinfobot</code>.</p>
+        <p style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>{t('security.slack_bot_hint') || 'Create a bot via'} <code>@BotFather</code> sur Telegram pour obtenir votre Bot Token. L'ID du chat peut être récupéré via <code>@userinfobot</code>.</p>
         <div style={{display:'flex',flexDirection:'column',gap:12}}>
-          <div className="form-group" style={{margin:0}}><label className="form-label">Bot Token</label><input className="form-control" type="password" value={t.bot_token} onChange={e=>setT(x=>({...x,bot_token:e.target.value}))} placeholder="1234567890:ABCDefGhIJK..."/></div>
-          <div className="form-group" style={{margin:0}}><label className="form-label">Chat ID / Canal ID</label><input className="form-control" value={t.chat_id} onChange={e=>setT(x=>({...x,chat_id:e.target.value}))} placeholder="-1001234567890"/></div>
+          <div className="form-group" style={{margin:0}}><label className="form-label">Bot Token</label><input className="form-control" type="password" value={tg.bot_token} onChange={e=>setTg(x=>({...x,bot_token:e.target.value}))} placeholder="1234567890:ABCDefGhIJK..."/></div>
+          <div className="form-group" style={{margin:0}}><label className="form-label">Chat ID / Canal ID</label><input className="form-control" value={tg.chat_id} onChange={e=>setTg(x=>({...x,chat_id:e.target.value}))} placeholder="-1001234567890"/></div>
         </div>
       </>}
     </Modal>
@@ -1351,6 +1414,7 @@ function TelegramModal({ onClose, onSaved }) {
 }
 
 function SlackModal({ onClose, onSaved }) {
+  const { t } = useI18n();
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
@@ -1370,7 +1434,7 @@ function SlackModal({ onClose, onSaved }) {
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
-        <p style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>Créez une Incoming Webhook dans votre espace Slack : <br/>Paramètres → Apps → Incoming Webhooks → Ajouter.</p>
+        <p style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>{t('security.slack_webhook_hint') || 'Create an Incoming Webhook in your Slack workspace:'} <br/>{t('security.slack_steps') || 'Settings → Apps → Incoming Webhooks → Add.'}</p>
         <div className="form-group" style={{margin:0}}><label className="form-label">Webhook URL</label><input className="form-control" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://hooks.slack.com/services/T.../B.../..."/></div>
       </>}
     </Modal>
@@ -1378,6 +1442,7 @@ function SlackModal({ onClose, onSaved }) {
 }
 
 function SecurityNotifTab() {
+  const { t } = useI18n();
   const [configs,   setConfigs]   = useState([]);
   const [catalog,   setCatalog]   = useState({ channels: {} });
   const [saving,    setSaving]    = useState({});
@@ -1444,7 +1509,7 @@ function SecurityNotifTab() {
         <div style={{ padding: '14px 18px' }}>
           {/* Message style alerte comme OIDC */}
           <div className="alert alert-warn" style={{ marginBottom: 16, fontSize: 12, justifyContent: 'center', textAlign: 'center' }}>
-            Les notifications sont envoyées aux administrateurs uniquement !
+            {t('security.notif_admin_only') || 'Notifications are sent to administrators only!'}
           </div>
           {/* Boutons canaux */}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -1486,13 +1551,13 @@ function SecurityNotifTab() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
-            Règles de notification
+            {t('security.notif_rules') || 'Notification rules'}
           </div>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--brd)' }}>
-              <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', fontWeight: 600, width: '100%' }}>Événement</th>
+              <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', fontWeight: 600, width: '100%' }}>{t('security.event') || 'Event'}</th>
               {channelList.map(ch => (
                 <th key={ch} style={{ padding: '8px 8px', textAlign: 'center', width: 56, fontSize: 10, color: CHAN_CONFIG[ch].color, fontWeight: 700, whiteSpace: 'nowrap' }}>
                   {CHAN_CONFIG[ch].label}
@@ -1596,6 +1661,7 @@ function SecurityNotifTab() {
 
 // ── CARTE LDAP ────────────────────────────────────────────────────────────────
 function LdapCard() {
+  const { t } = useI18n();
   const [ldap, setLdap] = useState({
     enabled: false, url: '', base_dn: '', bind_dn: '', bind_password: '',
     user_attr: 'sAMAccountName', group_filter: '', required_group: '', tls: false,
@@ -1638,7 +1704,7 @@ function LdapCard() {
           <input type="checkbox" checked={ldap.enabled}
             onChange={e => setLdap(l => ({ ...l, enabled: e.target.checked }))} />
           <span style={{ fontWeight: 600, color: ldap.enabled ? 'var(--ok)' : 'var(--muted)' }}>
-            {ldap.enabled ? 'Activé' : 'Désactivé'}
+            {ldap.enabled ? (t('common.enabled') || 'Enabled') : (t('common.disabled') || 'Disabled')}
           </span>
         </label>
       </div>
@@ -1687,6 +1753,7 @@ function LdapCard() {
 }
 
 function SecurityOidcTab() {
+  const { t } = useI18n();
   const [cfg, setCfg] = useState({
     enabled: false,
     provider_name: '',
@@ -1755,7 +1822,7 @@ function SecurityOidcTab() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}>
               <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><line x1="12" y1="15" x2="12" y2="17"/>
             </svg>
-            Authentification à deux facteurs (TOTP)
+            {t('security.totp_title') || '2FA (TOTP)'}
           </div>
         </div>
         <div style={{padding:'14px 18px', display:'flex', flexDirection:'column', gap:10}}>
@@ -1765,9 +1832,9 @@ function SecurityOidcTab() {
             <input type="checkbox" checked={totpRequired} onChange={toggleTotp} disabled={totpSaving}
               style={{marginTop:2, accentColor:'var(--acc)', width:16, height:16}} />
             <div>
-              <div style={{fontWeight:600, fontSize:13}}>Rendre le TOTP obligatoire</div>
+              <div style={{fontWeight:600, fontSize:13}}>{t('security.totp_mandatory') || 'Require TOTP for all users'}</div>
               <div style={{fontSize:12, color:'var(--muted)', marginTop:2}}>
-                Quand cette option est activée, tous les utilisateurs doivent configurer une application d'authentification (Google Authenticator, Authy…) lors de leur prochaine connexion.
+                {t('security.totp_required_desc') || 'When this option is enabled, all users must configure an authenticator app.'}lication d'authentification (Google Authenticator, Authy…) lors de leur prochaine connexion.
               </div>
             </div>
           </label>
@@ -1777,7 +1844,7 @@ function SecurityOidcTab() {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13,flexShrink:0}}>
                 <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
               </svg>
-              Les utilisateurs sans TOTP configuré seront invités à scanner un QR code lors de leur prochaine connexion. Pour réinitialiser le TOTP d'un utilisateur, rendez-vous dans <strong>Utilisateurs</strong> → modifier le compte → <em>Réinitialiser le TOTP</em>.
+              {t('security.totp_mandatory_desc') || 'Users without TOTP configured will be prompted to scan a QR code at login.'} leur prochaine connexion. Pour réinitialiser le TOTP d'un utilisateur, rendez-vous dans <strong>Utilisateurs</strong> → modifier le compte → <em>{t('security.totp_reset') || 'Reset 2FA'}</em>.
             </div>
           )}
         </div>
@@ -1789,13 +1856,13 @@ function SecurityOidcTab() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
               <circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/>
             </svg>
-            Authentification OIDC / OAuth2
+            {t('security.oidc_title') || 'OIDC / OAuth2'}
           </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
             <input type="checkbox" checked={cfg.enabled}
               onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
             <span style={{ fontWeight: 600, color: cfg.enabled ? 'var(--ok)' : 'var(--muted)' }}>
-              {cfg.enabled ? 'Activé' : 'Désactivé'}
+              {cfg.enabled ? (t('common.enabled') || 'Enabled') : (t('common.disabled') || 'Disabled')}
             </span>
           </label>
         </div>
@@ -1805,7 +1872,7 @@ function SecurityOidcTab() {
 
           {/* Info */}
           <div className="alert alert-warn" style={{ marginBottom: 16, fontSize: 12, justifyContent: 'center', textAlign: 'center' }}>
-            L'authentification OIDC est complémentaire à l'authentification locale. Les comptes locaux restent accessibles même si OIDC est activé.
+            {t('security.oidc_desc') || 'OIDC authentication complements local authentication. Local accounts remain active.'}tes locaux restent accessibles même si OIDC est activé.
           </div>
 
           <form onSubmit={save}>
@@ -1822,15 +1889,15 @@ function SecurityOidcTab() {
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--txt)', cursor: 'pointer' }}>
                 <input type="checkbox" checked={cfg.auto_create_users}
                   onChange={e => setCfg(c => ({ ...c, auto_create_users: e.target.checked }))} />
-                Créer automatiquement les utilisateurs OIDC inconnus
+                {t('security.oidc_auto_create') || 'Automatically create unknown OIDC users'}
               </label>
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Rôle par défaut (nouveaux utilisateurs)</label>
+                <label className="form-label">{t('security.default_role') || 'Default role (new users)'}</label>
                 <select className="form-control" value={cfg.default_role}
                   onChange={e => setCfg(c => ({ ...c, default_role: e.target.value }))}>
                   <option value="viewer">Utilisateur (lecture seule)</option>
-                  <option value="operator">Opérateur</option>
-                  <option value="admin">Administrateur</option>
+                  <option value="operator">{t('users.role_operator')}</option>
+                  <option value="admin">{t('users.role_admin')}</option>
                 </select>
               </div>
             </div>
@@ -1838,7 +1905,7 @@ function SecurityOidcTab() {
             {/* Endpoints calculés */}
             {cfg.issuer_url && (
               <div style={{ background: 'var(--surf2)', border: '1px solid var(--brd)', borderRadius: 'var(--r)', padding: 12, marginBottom: 14, fontSize: 11 }}>
-                <div style={{ fontWeight: 600, color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.4px' }}>Endpoints OIDC (calculés automatiquement)</div>
+                <div style={{ fontWeight: 600, color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.4px' }}>{t('security.oidc_endpoints') || 'OIDC endpoints (calculated automatically)'}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {[
                     ['Authorization', `${cfg.issuer_url}/protocol/openid-connect/auth`],
@@ -1867,10 +1934,10 @@ function SecurityOidcTab() {
       {/* Bouton de connexion OIDC (aperçu) */}
       {cfg.enabled && cfg.provider_name && (
         <div className="card">
-          <div className="card-header"><div className="card-title">Aperçu du bouton de connexion</div></div>
+          <div className="card-header"><div className="card-title">{t('perso.login_btn_preview') || 'Login button preview'}</div></div>
           <div style={{ padding: 16 }}>
             <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-              Ce bouton apparaître sur la page de connexion sous le formulaire habituel.
+              {t('security.oidc_btn_desc') || 'This button will appear on the login page below the usual form.'}
             </p>
             <button className="btn" style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--brd)', background: 'var(--surf2)' }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
@@ -1981,7 +2048,7 @@ function SecurityCronTab() {
                   </div>
                   {cronStatus.last_result && (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <span style={{ color: 'var(--muted)', minWidth: 100 }}>Résultat :</span>
+                      <span style={{ color: 'var(--muted)', minWidth: 100 }}>{t('audit.result')}</span>
                       <span style={{ color: 'var(--ok)', fontWeight: 600 }}>{cronStatus.last_result}</span>
                     </div>
                   )}
@@ -2053,7 +2120,7 @@ function ArchiveListModal({ onClose }) {
 
   return (
     <Modal title="Archives du journal d'audit" onClose={onClose}
-      footer={<button className="btn" onClick={onClose}>Fermer</button>}>
+      footer={<button className="btn" onClick={onClose}>{t('common.close')}</button>}>
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><span className="spinner" /></div>
       ) : years.length === 0 ? (
@@ -2137,16 +2204,16 @@ function ActivityMenuTab() {
   return (
     <div>
       <div style={{ display: 'flex', gap: 2, marginBottom: 20, borderBottom: '1px solid var(--brd)' }}>
-        {INNER_TABS.map(t => (
-          <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+        {INNER_TABS.map(tab => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '9px 16px', background: 'none', border: 'none',
-            borderBottom: activeTab === t.key ? '2px solid var(--acc)' : '2px solid transparent',
-            color: activeTab === t.key ? 'var(--acc)' : 'var(--muted)',
-            fontWeight: activeTab === t.key ? 600 : 500,
+            borderBottom: activeTab === tab.key ? '2px solid var(--acc)' : '2px solid transparent',
+            color: activeTab === tab.key ? 'var(--acc)' : 'var(--muted)',
+            fontWeight: activeTab === tab.key ? 600 : 500,
             fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font)', marginBottom: -1,
           }}>
-            {t.icon} {t.label}
+            {tab.icon} {tab.label}
           </button>
         ))}
       </div>
@@ -2157,6 +2224,7 @@ function ActivityMenuTab() {
 }
 
 function ActivityOptionsTab() {
+  const { t } = useI18n();
   const [customDate, setCustomDate] = useState(false);
   const [saving, setSaving]         = useState(false);
   const [msg, setMsg]               = useState('');
@@ -2301,7 +2369,7 @@ function ActivityOptionsTab() {
               border: '1px solid var(--brd)', display: 'flex', alignItems: 'center', minHeight: 60 }}>
               {logoPreview
                 ? <img src={logoPreview} alt="Logo PDF" style={{ maxHeight: 60, maxWidth: '100%', objectFit: 'contain' }} />
-                : <span style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Aucun logo — texte "NEXUSVAULT" utilisé</span>
+                : <span style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>{t('perso.no_logo') || 'No logo — "NEXUSVAULT" text used'}</span>
               }
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -2342,8 +2410,8 @@ function ActivityOptionsTab() {
               Importation de suivi d'activité au format CSV avec un séparateur ; (point-virgule) : <span style={{ fontFamily:'var(--mono)', color:'var(--acc)' }}>ANNEE;MOIS;JOUR;TAG;NOTE</span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surf2)', borderRadius: 'var(--r)', padding: '8px 12px', fontFamily: 'var(--mono)', lineHeight: 1.8 }}>
-              <span style={{ fontSize: 11 }}>Ex: 2026;01;15;SECU;Mise à jour du firewall</span><br/>
-              <span style={{ fontSize: 11 }}>TAG absent → créé auto. Date future → preview.</span>
+              <span style={{ fontSize: 11 }}>{t('activity.import_csv_ex') || 'Ex: 2026;01;15;SECU;Firewall update'}</span><br/>
+              <span style={{ fontSize: 11 }}>{t('activity.import_tag_hint') || 'Missing TAG → auto-created. Future date → preview.'}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               {csvFile && (
@@ -2370,9 +2438,9 @@ function ActivityOptionsTab() {
             </div>
             {importResult && (
               <div className="alert alert-ok" style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <strong>✓ Import terminé</strong>
+                <strong>✓ {t('activity.import_done') || 'Import complete'}</strong>
                 <span>{importResult.imported} importée(s), {importResult.skipped} ignorée(s)</span>
-                {importResult.tagsCreated?.length > 0 && <span>Tags créés : <strong>{importResult.tagsCreated.join(', ')}</strong></span>}
+                {importResult.tagsCreated?.length > 0 && <span>{t('activity.import_tags_created') || 'Tags created:'} <strong>{importResult.tagsCreated.join(', ')}</strong></span>}
                 {importResult.errors?.length > 0 && (
                   <details><summary style={{ cursor:'pointer', fontSize:11 }}>{importResult.errors.length} ligne(s) ignorée(s)</summary>
                     <div style={{ marginTop:4, fontFamily:'var(--mono)', fontSize:11, lineHeight:1.6 }}>
@@ -2392,6 +2460,7 @@ function ActivityOptionsTab() {
 }
 
 function ActivityTagsTab() {
+  const { t } = useI18n();
   const [tags, setTags]       = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editTag, setEditTag] = useState(null);   // null=création, obj=édition
@@ -2445,46 +2514,46 @@ function ActivityTagsTab() {
         </colgroup>
         <thead>
           <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Code / Aperçu</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Libellé</th>
-            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>Couleur</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('activity_tags.preview')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('activity_tags.label')}</th>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('activity_tags.color')}</th>
             <th style={{ padding:'7px 8px' }}></th>
           </tr>
         </thead>
         <tbody>
-          {tags.map(t => (
-            <tr key={t.id} style={{ borderBottom:'1px solid var(--brd)' }}>
+          {tags.map(tag_item => (
+            <tr key={tag_item.id} style={{ borderBottom:'1px solid var(--brd)' }}>
               <td style={{ padding:'9px 8px', textAlign:'center' }}>
                 <span style={{
                   display:'inline-block',
-                  background:`rgba(${parseInt(t.color.slice(1,3),16)},${parseInt(t.color.slice(3,5),16)},${parseInt(t.color.slice(5,7),16)},0.12)`,
-                  color:t.color, border:`1px solid ${t.color}`,
+                  background:`rgba(${parseInt(tag_item.color.slice(1,3),16)},${parseInt(tag_item.color.slice(3,5),16)},${parseInt(tag_item.color.slice(5,7),16)},0.12)`,
+                  color:tag_item.color, border:`1px solid ${tag_item.color}`,
                   padding:'2px 10px', borderRadius:4, fontSize:12, fontWeight:700, fontFamily:'var(--mono)'
-                }}>{t.code}</span>
+                }}>{tag_item.code}</span>
               </td>
-              <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{t.label}</td>
+              <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{tag_item.label}</td>
               <td style={{ padding:'9px 8px', textAlign:'center' }}>
                 <div style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-                  <span style={{ width:16, height:16, borderRadius:'50%', background:t.color, display:'inline-block', flexShrink:0 }}/>
-                  <span style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--muted)' }}>{t.color}</span>
+                  <span style={{ width:16, height:16, borderRadius:'50%', background:tag_item.color, display:'inline-block', flexShrink:0 }}/>
+                  <span style={{ fontSize:11, fontFamily:'var(--mono)', color:'var(--muted)' }}>{tag_item.color}</span>
                 </div>
               </td>
               <td style={{ padding:'9px 8px', textAlign:'right', whiteSpace:'nowrap' }}>
-                <button className="btn btn-sm" onClick={()=>openEdit(t)} style={{ marginRight:4 }}>Édit.</button>
-                <button className="btn btn-sm" onClick={()=>setConfirm(t)} style={{ color:'var(--err)', borderColor:'var(--err)' }}>✕</button>
+                <button className="btn btn-sm" onClick={()=>openEdit(tag_item)} style={{ marginRight:4 }}>Édit.</button>
+                <button className="btn btn-sm" onClick={()=>setConfirm(tag_item)} style={{ color:'var(--err)', borderColor:'var(--err)' }}>✕</button>
               </td>
             </tr>
           ))}
-          {tags.length === 0 && <tr><td colSpan={5} style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:13 }}>Aucun tag — cliquez sur "Ajouter" pour en créer un.</td></tr>}
+          {tags.length === 0 && <tr><td colSpan={5} style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:13 }}>{t('activity_tags.none') || 'No tags — click "Add" to create one.'}</td></tr>}
         </tbody>
       </table>
 
       {/* Modal création / édition */}
       {showModal && (
-        <Modal title={editTag ? `Modifier "${editTag.code}"` : 'Nouveau tag'} onClose={closeModal}
+        <Modal title={editTag ? `Modifier "${editTag.code}"` : t('activity_tags.new')} onClose={closeModal}
           footer={
             <div style={{ display:'flex', gap:8 }}>
-              <button className="btn" onClick={closeModal}>Annuler</button>
+              <button className="btn" onClick={closeModal}>{t('auto_cat.cancel')}</button>
               <button className="btn btn-primary" onClick={()=>document.getElementById('tag-form').requestSubmit()}>
                 {editTag ? 'Enregistrer' : 'Créer'}
               </button>
@@ -2498,15 +2567,15 @@ function ActivityTagsTab() {
                 placeholder="Ex: SECU, NET, ADM…"
                 onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g,'')}))}
                 style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:600 }} />
-              <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>Majuscules et chiffres uniquement, max 10 caractères.</div>
+              <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>{t('activity_tags.code_hint') || 'Uppercase and digits only, max 10 characters.'}</div>
             </div>
             <div className="form-group" style={{margin:0}}>
-              <label className="form-label">Libellé *</label>
+              <label className="form-label">{t('activity_tags.label_req') || 'Label *'}</label>
               <input className="form-control" value={form.label} placeholder="Ex: Sécurité, Réseau, Administration…"
                 onChange={e=>setForm(f=>({...f,label:e.target.value}))} />
             </div>
             <div className="form-group" style={{margin:0}}>
-              <label className="form-label">Couleur</label>
+              <label className="form-label">{t('activity_tags.color')}</label>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                 <input type="color" value={form.color} onChange={e=>setForm(f=>({...f,color:e.target.value}))}
                   style={{ width:38, height:32, padding:2, border:'1px solid var(--brd)', borderRadius:'var(--r)', cursor:'pointer', background:'var(--surf2)', flexShrink:0 }} />
@@ -2549,7 +2618,7 @@ function ActivityTagsTab() {
 
       {usageError && (
         <Modal title={`Tag [${usageError.tagCode}] — impossible de supprimer`} onClose={()=>setUsageError(null)}
-          footer={<button className="btn" onClick={()=>setUsageError(null)}>Fermer</button>}>
+          footer={<button className="btn" onClick={()=>setUsageError(null)}>{t('common.close')}</button>}>
           <div className="alert alert-err" style={{ fontSize:12, marginBottom:12 }}>
             Ce tag est utilisé dans des notes et ne peut pas être supprimé.
           </div>
@@ -2564,7 +2633,7 @@ function ActivityTagsTab() {
               </div>
             ))}
           </div>
-          {usageError.usages.length>=20 && <div style={{ fontSize:11, color:'var(--muted)', marginTop:8 }}>Seules les 20 premières notes sont affichées.</div>}
+          {usageError.usages.length>=20 && <div style={{ fontSize:11, color:'var(--muted)', marginTop:8 }}>{t('activity.import_preview_hint') || 'Only the first 20 notes are shown.'}</div>}
         </Modal>
       )}
     </div>
@@ -2595,13 +2664,13 @@ function ArchiveViewModal({ archive, onClose }) {
 
   return (
     <Modal title={`Archive — ${MONTHS_AUDIT[archive.month - 1]} ${archive.year}`} onClose={onClose}
-      footer={<button className="btn" onClick={onClose}>Fermer</button>}>
+      footer={<button className="btn" onClick={onClose}>{t('common.close')}</button>}>
       <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>{archive.entry_count} entrée{archive.entry_count > 1 ? 's' : ''} · archivé le {archive.archived_at?.slice(0, 16)} par {archive.archived_by}</span>
         <div style={{ marginLeft: 'auto' }}>
           <select className="form-control" style={{ padding: '4px 8px', fontSize: 12, height: 28 }}
             value={filterSuccess} onChange={e => setFilterSuccess(e.target.value)}>
-            <option value="">Tous résultats</option>
+            <option value="">{t('audit.all')}</option>
             <option value="1">OK uniquement</option>
             <option value="0">Échecs uniquement</option>
           </select>
@@ -2613,11 +2682,11 @@ function ArchiveViewModal({ archive, onClose }) {
             <thead>
               <tr style={{ background: 'var(--surf2)', position: 'sticky', top: 0 }}>
                 <th style={{ padding: '5px 8px', textAlign: 'left', width: 130 }}>{t('audit.date')}</th>
-                <th style={{ padding: '5px 8px', textAlign: 'left', width: 90 }}>Sévérité</th>
+                <th style={{ padding: '5px 8px', textAlign: 'left', width: 90 }}>{t('audit.severity')}</th>
                 <th style={{ padding: '5px 8px', textAlign: 'left' }}>{t('audit.action')}</th>
                 <th style={{ padding: '5px 8px', textAlign: 'left', width: 100 }}>{t('audit.user')}</th>
                 <th style={{ padding: '5px 8px', textAlign: 'left' }}>{t('audit.detail')}</th>
-                <th style={{ padding: '5px 8px', textAlign: 'center', width: 60 }}>Résultat</th>
+                <th style={{ padding: '5px 8px', textAlign: 'center', width: 60 }}>{t('audit.result')}</th>
               </tr>
             </thead>
             <tbody>
@@ -2664,7 +2733,7 @@ const CAT_COLORS = {
 };
 
 function AuditTab() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { can } = usePerms();
   const [logs, setLogs]           = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -2701,27 +2770,27 @@ function AuditTab() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0 }}>
           <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
             value={filters.success} onChange={sf('success')}>
-            <option value="">Résultat</option>
+            <option value="">{t('audit.result')}</option>
             <option value="0">✗ Échec</option>
             <option value="1">✓ OK</option>
           </select>
           <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
             value={filters.severity} onChange={sf('severity')}>
-            <option value="">Sévérité</option>
+            <option value="">{t('audit.severity')}</option>
             <option value="warn">Alerte</option>
             <option value="error">Erreur</option>
             <option value="info">Info</option>
           </select>
           <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28 }}
             value={filters.category} onChange={sf('category')}>
-            <option value="">Catégorie</option>
+            <option value="">{t('audit.category')}</option>
             <option value="admin">Admin</option>
             <option value="auth">Auth</option>
             <option value="automatisation">Automatisation</option>
             <option value="backup">Backup</option>
             <option value="config">Config</option>
             <option value="suivi">Suivi</option>
-            <option value="sécurité">Sécurité</option>
+            <option value="sécurité">{t('admin.security')}</option>
           </select>
           <select className="form-control" style={{ padding: '3px 6px', fontSize: 12, height: 28, width: 60 }}
             value={filters.limit} onChange={sf('limit')}>
@@ -2825,7 +2894,7 @@ function AuditTab() {
                     </span>
                   </td>
                   <td style={{ fontSize: 12, padding:'6px 4px', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign:'center' }}>{l.username || '—'}</td>
-                  <td style={{ fontWeight: 600, fontSize: 12, padding:'6px 4px' }}>{l.action}</td>
+                  <td style={{ fontWeight: 600, fontSize: 12, padding:'6px 4px' }}>{auditActionLabel(l.action, lang)}</td>
                   <td style={{ fontSize: 11, padding:'6px 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.detail}>
                     <span style={{ color: l.success === 0 && l.detail?.includes('Identifiant tenté') ? 'var(--err)' : 'var(--muted)' }}>
                       {l.detail}
@@ -2954,7 +3023,7 @@ export default function Admin() {
       <div className="page-header">
         <div>
           <div className="page-title">Administration</div>
-          <div className="page-sub">Configuration, Personnalisation, Gestion des accès utilisateurs, Administration et Sécurité</div>
+          <div className="page-sub">{t('admin.subtitle')}</div>
         </div>
       </div>
       <div className="config-layout">
@@ -2963,12 +3032,12 @@ export default function Admin() {
             // Grouper les tabs par section pour afficher la bande verticale
             const groups = [];
             let cur = { label: null, key: null, items: [] };
-            visibleTabs.forEach(t => {
-              if (t.sectionLabel) {
+            visibleTabs.forEach(tab => {
+              if (tab.sectionLabel) {
                 groups.push({ ...cur });
-                cur = { label: t.sectionLabel, key: t.key, items: [] };
+                cur = { label: tab.sectionLabel, key: tab.key, items: [] };
               } else {
-                cur.items.push(t);
+                cur.items.push(tab);
               }
             });
             groups.push({ ...cur });
@@ -3000,26 +3069,26 @@ export default function Admin() {
                 )}
                 {/* Items du groupe */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  {group.items.map(t => {
-                    if (t.sep) {
-                      return <div key={t.key} style={{ margin: '4px 10px', borderTop: '1px solid var(--brd)', opacity: .4 }} />;
+                  {group.items.map(menu_item => {
+                    if (menu_item.sep) {
+                      return <div key={menu_item.key} style={{ margin: '4px 10px', borderTop: '1px solid var(--brd)', opacity: .4 }} />;
                     }
-                    const accessible = canAccessTab(t.key);
+                    const accessible = canAccessTab(menu_item.key);
                     return (
-                      <div key={t.key}
-                        className={`side-item ${active === t.key ? 'active' : ''}`}
+                      <div key={menu_item.key}
+                        className={`side-item ${active === menu_item.key ? 'active' : ''}`}
                         onClick={() => {
                           if (!accessible) return;
-                          if (t.key === 'logout') doLogout();
-                          else setSp({ tab: t.key });
+                          if (menu_item.key === 'logout') doLogout();
+                          else setSp({ tab: menu_item.key });
                         }}
                         title={!accessible ? 'Acces non autorise' : undefined}
                         style={{
                           fontSize: 12,
-                          ...(t.key === 'logout' ? { color: 'var(--err)' } : {}),
+                          ...(menu_item.key === 'logout' ? { color: 'var(--err)' } : {}),
                           ...(accessible ? {} : { opacity: 0.35, cursor: 'not-allowed' }),
                         }}>
-                        {t.icon}{t.label}
+                        {menu_item.icon}{menu_item.label}
                         {!accessible && <span style={{ marginLeft:'auto', fontSize:9 }}>&#128274;</span>}
                       </div>
                     );

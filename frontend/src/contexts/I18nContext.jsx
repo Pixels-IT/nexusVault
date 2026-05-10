@@ -1,7 +1,13 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { LANGUAGES, initI18n, getLangFromStorage, saveLangToStorage, t as translate } from '../i18n/index.js';
 
-const I18nCtx = createContext({});
+const I18nCtx = createContext({
+  t: translate,
+  lang: 'en',
+  ready: false,
+  changeLang: () => {},
+  LANGUAGES,  // Use the real imported LANGUAGES array
+});
 
 export function I18nProvider({ children }) {
   const [lang, setLang]     = useState(getLangFromStorage());

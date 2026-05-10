@@ -34,6 +34,7 @@ function TagBadge({ tag, size = 'normal' }) {
 
 // ── MODAL AJOUT / EDITION ─────────────────────────────────────────────────────
 function HistoryModal({ entryId, onClose }) {
+  const { t } = useI18n();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -63,7 +64,7 @@ function HistoryModal({ entryId, onClose }) {
 
   return (
     <Modal title="Historique de la note" onClose={onClose}
-      footer={<button className="btn" onClick={onClose}>Fermer</button>}>
+      footer={<button className="btn" onClick={onClose}>{t('activity.close')}</button>}>
       {loading ? <div style={{ textAlign:'center', padding:24 }}><span className="spinner"/></div> : (
         history.length === 0 ? (
           <div style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:12 }}>Aucun historique disponible</div>
@@ -243,7 +244,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, c
     <>
     <Modal
       title={<div style={{display:'flex',alignItems:'center',gap:10,width:'100%'}}>
-        <span>{isEdit ? 'Modifier la note' : 'Ajouter une note'}</span>
+        <span>{isEdit ? t('activity.modify') : 'Ajouter une note'}</span>
         {isEdit && (
           <button className="btn btn-sm" onClick={() => setShowHistory(true)}
             style={{marginLeft:'auto',marginRight:6,display:'flex',alignItems:'center',gap:4,fontSize:11,
@@ -265,7 +266,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, c
               style={{borderColor:'var(--ok)',color:'var(--ok)',display:'flex',alignItems:'center',gap:6}}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>Importer</button>
+              </svg>{t('activity.import_btn')}</button>
             <input ref={fileInputRef} type="file" multiple style={{display:'none'}} onChange={handleFileSelect}/>
             <button className="btn" onClick={() => setShowFilesModal(true)}
               style={{display:'flex',alignItems:'center',gap:6}}>
@@ -289,7 +290,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, c
       {!isEdit && (
         <div className="form-row">
           <div className="form-group">
-            <label className="form-label">Année</label>
+            <label className="form-label">{t('activity.year_label') || 'Year'}</label>
             <select className="form-control" value={year} onChange={e => setYear(parseInt(e.target.value))}>
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
@@ -305,17 +306,17 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, c
       <div className="form-group">
         <label className="form-label">Tag</label>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:6, justifyContent:'center' }}>
-          {tags.map(t => (
-            <button key={t.code} onClick={() => { setTagCode(t.code); setTagError(false); }} style={{
+          {tags.map(tag => (
+            <button key={tag.code} onClick={() => { setTagCode(tag.code); setTagError(false); }} style={{
               display:'inline-flex', alignItems:'center', gap:6,
               padding:'5px 12px', borderRadius:4, cursor:'pointer',
-              border: `2px solid ${tagCode===t.code ? t.color : 'var(--brd)'}`,
-              background: tagCode===t.code ? `rgba(${parseInt(t.color.slice(1,3),16)},${parseInt(t.color.slice(3,5),16)},${parseInt(t.color.slice(5,7),16)},0.12)` : 'var(--surf2)',
-              color: tagCode===t.code ? t.color : 'var(--muted)',
+              border: `2px solid ${tagCode===tag.code ? tag.color : 'var(--brd)'}`,
+              background: tagCode===tag.code ? `rgba(${parseInt(tag.color.slice(1,3),16)},${parseInt(tag.color.slice(3,5),16)},${parseInt(tag.color.slice(5,7),16)},0.12)` : 'var(--surf2)',
+              color: tagCode===tag.code ? tag.color : 'var(--muted)',
             }}>
-              <span style={{ width:8, height:8, borderRadius:'50%', background:t.color, flexShrink:0 }}/>
-              <strong style={{ fontFamily:'var(--mono)', fontWeight:700, fontSize:12 }}>{t.code}</strong>
-              <span style={{ fontSize:11, fontWeight:400, fontFamily:'var(--font)', color:'var(--muted)', lineHeight:1 }}>{t.label}</span>
+              <span style={{ width:8, height:8, borderRadius:'50%', background:tag.color, flexShrink:0 }}/>
+              <strong style={{ fontFamily:'var(--mono)', fontWeight:700, fontSize:12 }}>{tag.code}</strong>
+              <span style={{ fontSize:11, fontWeight:400, fontFamily:'var(--font)', color:'var(--muted)', lineHeight:1 }}>{tag.label}</span>
             </button>
           ))}
         </div>
@@ -349,7 +350,7 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, c
                 border: `1px solid ${hasSecret ? '#d97706' : 'var(--brd)'}`,
                 display:'flex', alignItems:'center', gap:12, transition:'all .12s' }}>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>Mode Secret</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>{t('activity.mode_secret')}</div>
                   <div style={{ fontSize:11, color:'var(--muted)', lineHeight:1.45 }}>
                     Pour masquer des données sensibles (mots de passe, clés…) par <span style={{ fontFamily:'var(--mono)' }}>●●●●●</span>, sélectionnez le texte puis cliquez sur le bouton. Les données restent en clair uniquement en mode édition.
                   </div>
@@ -383,9 +384,9 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, c
               border: `1px solid ${isPreview ? '#6366f1' : 'var(--brd)'}`,
               display:'flex', alignItems:'center', gap:12, transition:'all .12s' }}>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>Mode Brouillon</div>
+                <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>{t('activity.mode_draft')}</div>
                 <div style={{ fontSize:11, color:'var(--muted)', lineHeight:1.45 }}>
-                  Pour commencer un suivi sans qu'il soit pris en compte dans les statistiques ou l'export PDF.
+                  t('activity.draft_desc')
                 </div>
               </div>
               <button type="button" onClick={() => setIsPreview(p => !p)}
@@ -412,9 +413,9 @@ function EntryModal({ tags, entry, defaultYear, defaultMonth, onClose, onSave, c
               border: `1px solid ${displayDate ? '#14b8a6' : 'var(--brd)'}`,
               display:'flex', alignItems:'center', gap:12, transition:'all .12s' }}>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>Mode Affichage</div>
+                <div style={{ fontSize:12, fontWeight:700, color:'var(--txt)', marginBottom:2 }}>{t('activity.mode_display')}</div>
                 <div style={{ fontSize:11, color:'var(--muted)', lineHeight:1.45 }}>
-                  Pour changer la date réelle du suivi. Cela modifie l'affichage mais pas l'historique.
+                  t('activity.display_desc')
                   {displayDate && (
                     <span style={{ marginLeft:6, color:'#14b8a6', fontWeight:600 }}>
                       → {new Date(displayDate+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})}
@@ -493,6 +494,7 @@ function renderMasked(text) {
 }
 // ── MODAL FICHIERS JOINTS ─────────────────────────────────────────────────────
 function FilesModal({ entryId, files, setFiles, fileError, setFileError, onClose, fmtSize, fmtDate, toggleLock, deleteFile, downloadFile }) {
+  const { t } = useI18n();
   return (
     <Modal
       title={
@@ -509,7 +511,7 @@ function FilesModal({ entryId, files, setFiles, fileError, setFileError, onClose
         </div>
       }
       onClose={onClose}
-      footer={<button className="btn" onClick={onClose}>Fermer</button>}
+      footer={<button className="btn" onClick={onClose}>{t('activity.close')}</button>}
     >
       {fileError && <div className="alert alert-err" style={{fontSize:11,marginBottom:10}}>{fileError}</div>}
       {files.length === 0 ? (
@@ -583,7 +585,7 @@ function FilesModal({ entryId, files, setFiles, fileError, setFileError, onClose
 }
 
 function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
-  const tag = tags.find(t => t.code === entry.tag_code);
+  const tag = tags.find(tag => tag.code === entry.tag_code);
   const isPreview = !!entry.is_preview;
 
   if (isPreview) {
@@ -758,8 +760,8 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateE
         {loaded && (
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginLeft: 4 }}>
             {[...new Set(entries.map(e => e.tag_code))].map(code => {
-              const t = tags.find(x => x.code === code);
-              return t ? <TagBadge key={code} tag={t} size="small" /> : null;
+              const found = tags.find(x => x.code === code);
+              return found ? <TagBadge key={code} tag={found} size="small" /> : null;
             })}
           </div>
         )}
@@ -828,7 +830,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateE
   );
 }
 
-// ── ANNÉE SECTION ─────────────────────────────────────────────────────────────
+// ── t('activity.year_label') || 'YEAR' SECTION ─────────────────────────────────────────────────────────────
 function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle, customDateEnabled, openMonths, onToggleMonth, hideHeader }) {
     const { t } = useI18n();
   const [open, setOpen] = useState(isOpenDefault || false);
@@ -918,10 +920,10 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
   const CHART_TYPES = [
-    { value:'pie',   label:'Camembert' },
-    { value:'donut', label:'Donut' },
-    { value:'bar-h', label:'Barres horizontales' },
-    { value:'bar-v', label:'Barres verticales' },
+    { value:'pie',   label:t('activity.chart_pie') },
+    { value:'donut', label:t('activity.chart_donut') },
+    { value:'bar-h', label:t('activity.chart_barh') },
+    { value:'bar-v', label:t('activity.chart_barv') },
   ];
 
   async function doExport() {
@@ -950,7 +952,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
       } catch { /* audit optionnel */ }
 
       const tagColors = {};
-      tags.forEach(t => { tagColors[t.code] = t.color; });
+      tags.forEach(tag => { tagColors[tag.code] = tag.color; });
 
       // Charger le logo PDF si défini
       let pdfLogo = null;
@@ -1006,7 +1008,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
       }
 
       const who = targetUserName || user?.displayName || user?.username || '';
-      const modeLabel = mode === 'month' ? `${MONTHS[month-1]} ${year}` : mode === 'year' ? `Année ${year}` : mode === 'all' ? 'Toutes les années' : `Tag ${filterTag || 'tous'}`;
+      const modeLabel = mode === 'month' ? `${MONTHS[month-1]} ${year}` : mode === 'year' ? `Année ${year}` : mode === 'all' ? t('activity.all_years') : `Tag ${filterTag || 'tous'}`;
       const exportDate = new Date().toLocaleDateString('fr-FR', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
 
       // Lignes du tableau
@@ -1063,7 +1065,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
           });
           const svgPie=`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${slices}</svg>`;
           const svgLegend=`<svg width="120" height="${14+tagEntries.length*17}">${legend}</svg>`;
-          chartSection=`<div class="chart-block"><h3 class="chart-title">Répartition par TAG</h3><div class="chart-inner"><div class="pie-wrap">${svgPie}</div><div class="legend-wrap">${svgLegend}</div></div>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">{t('activity.chart_tag_dist') || 'TAG distribution'}</h3><div class="chart-inner"><div class="pie-wrap">${svgPie}</div><div class="legend-wrap">${svgLegend}</div></div>`;
 
         } else if (chartType === 'bar-h') {
           const bw=300, bh=20, gap=6, maxVal=tagEntries[0]?.[1]||1;
@@ -1075,7 +1077,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
             bars+=`<g transform="translate(0,${y})"><rect x="0" y="0" width="${w}" height="${bh}" rx="3" fill="${col}"/><text x="${w+6}" y="${bh/2+4}" font-size="9" fill="#444" font-family="Arial" dominant-baseline="middle">${code} (${count})</text></g>`;
           });
           const svgH=`<svg width="450" height="${tagEntries.length*(bh+gap)}" font-family="Arial">${bars}</svg>`;
-          chartSection=`<div class="chart-block"><h3 class="chart-title">Répartition par TAG</h3><div class="chart-inner">${svgH}</div>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">{t('activity.chart_tag_dist') || 'TAG distribution'}</h3><div class="chart-inner">${svgH}</div>`;
 
         } else if (chartType === 'bar-v') {
           const barW=36, gap2=10, maxVal2=tagEntries[0]?.[1]||1, chartH=120;
@@ -1087,7 +1089,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
             bars2+=`<g transform="translate(${x},0)"><rect x="0" y="${chartH-h}" width="${barW}" height="${h}" rx="3" fill="${col}"/><text x="${barW/2}" y="${chartH+12}" text-anchor="middle" font-size="8" fill="#444" font-family="monospace">${code}</text><text x="${barW/2}" y="${chartH-h-4}" text-anchor="middle" font-size="8" fill="#444">${count}</text></g>`;
           });
           const svgV=`<svg width="${totalW}" height="${chartH+24}" font-family="Arial">${bars2}</svg>`;
-          chartSection=`<div class="chart-block"><h3 class="chart-title">Répartition par TAG</h3><div class="chart-inner">${svgV}</div>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">{t('activity.chart_tag_dist') || 'TAG distribution'}</h3><div class="chart-inner">${svgV}</div>`;
         }
         if(chartSection) chartSection += `</div>`;
       }
@@ -1198,7 +1200,7 @@ ${statPillsHtml}
       <div className="form-group">
         <label className="form-label">Périmètre de l'export</label>
         <div style={{ display: 'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap: 8 }}>
-          {[{ k:'month', l:'Par mois' },{ k:'year', l:'Par année' },{ k:'all', l:'Toutes les années' },{ k:'tag', l:'Par tag' }].map(({ k, l }) => (
+          {[{ k:'month', l:t('activity.month') },{ k:'year', l:t('activity.year_mode') },{ k:'all', l:t('activity.all_years') },{ k:'tag', l:t('activity.by_tag') }].map(({ k, l }) => (
             <button key={k} onClick={() => setMode(k)} style={{
               padding:'7px 8px', fontSize:12, fontWeight: mode===k ? 700 : 500,
               border: `2px solid ${mode===k ? 'var(--acc)' : 'var(--brd)'}`,
@@ -1214,7 +1216,7 @@ ${statPillsHtml}
       {(mode === 'month' || mode === 'year') && (
         <div className="form-row" style={{ marginBottom: mode === 'year' ? 16 : 0 }}>
           <div className="form-group">
-            <label className="form-label">Année</label>
+            <label className="form-label">{t('activity.year_label') || 'Year'}</label>
             <select className="form-control" value={year} onChange={e => setYear(parseInt(e.target.value))}>
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
@@ -1234,16 +1236,16 @@ ${statPillsHtml}
         <div className="form-group">
           <label className="form-label">Tag</label>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-            {tags.map(t => {
-              const hex = t.color; const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
-              const sel = filterTag === t.code;
+            {tags.map(tag => {
+              const hex = tag.color; const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+              const sel = filterTag === tag.code;
               return (
-                <button key={t.code} onClick={() => setFilterTag(sel ? '' : t.code)} style={{
+                <button key={tag.code} onClick={() => setFilterTag(sel ? '' : tag.code)} style={{
                   padding:'4px 12px', borderRadius:4, cursor:'pointer', fontFamily:'var(--mono)', fontSize:11, fontWeight:700,
                   border: `2px solid ${sel ? hex : 'var(--brd)'}`,
                   background: sel ? `rgba(${r},${g},${b},0.12)` : 'var(--surf2)',
                   color: sel ? hex : 'var(--muted)',
-                }}>{t.code}</button>
+                }}>{tag.code}</button>
               );
             })}
           </div>
@@ -1256,7 +1258,7 @@ ${statPillsHtml}
         <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginBottom: showChart ? 10 : 0 }}>
           <input type="checkbox" checked={showChart} onChange={e=>setShowChart(e.target.checked)}
             style={{ accentColor:'var(--acc)', width:14, height:14 }} />
-          <span style={{ fontSize:12, fontWeight:600 }}>Inclure un graphique de répartition par TAG</span>
+          <span style={{ fontSize:12, fontWeight:600 }}>{t('activity.include_chart')}</span>
         </label>
         {showChart && (
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
@@ -1283,7 +1285,7 @@ ${statPillsHtml}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:12, height:12 }}>
             <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
           </svg>
-          Un graphique de répartition par TAG sera inclus dans le PDF
+          t('activity.chart_included') || 'A TAG distribution chart will be included in the PDF'
         </div>
       )}
     </Modal>
@@ -1392,7 +1394,7 @@ export default function Activity() {
               <select className="form-control" style={{ padding: '5px 8px', fontSize: 12, height: 30, minWidth: 120 }}
                 value={filterTag} onChange={e => setFilterTag(e.target.value)}>
                 <option value="">{t('activity.all_tags')}</option>
-                {tags.map(t => <option key={t.code} value={t.code}>{t.code} — {t.label}</option>)}
+                {tags.map(tag => <option key={tag.code} value={tag.code}>{tag.code} — {tag.label}</option>)}
               </select>
               {filterTag && (
                 <button className="btn btn-sm" onClick={() => setFilterTag('')} title="Effacer" style={{ padding: '4px 7px' }}>✕</button>
@@ -1421,14 +1423,14 @@ export default function Activity() {
       </div>
 
       {filterTag && (() => {
-        const t = tags.find(x => x.code === filterTag);
-        const hex = t?.color || '#066fd1';
+        const foundTag = tags.find(x => x.code === filterTag);
+        const hex = foundTag?.color || '#066fd1';
         const rgb = `${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)}`;
         return (
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: `rgba(${rgb},.1)`, border: `1px solid ${hex}`, borderRadius: 'var(--r)', padding: '5px 14px', fontSize: 12, color: hex, fontWeight: 600 }}>
               <span style={{ fontFamily: 'var(--mono)' }}>{filterTag}</span>
-              {t && <span style={{ fontWeight: 400, color: 'var(--muted)', fontFamily: 'var(--font)' }}>{t.label}</span>}
+              {foundTag && <span style={{ fontWeight: 400, color: 'var(--muted)', fontFamily: 'var(--font)' }}>{foundTag.label}</span>}
               <button onClick={() => setFilterTag('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: hex, fontSize: 13, lineHeight: 1, padding: '0 2px' }}>✕</button>
             </div>
           </div>
@@ -1459,7 +1461,7 @@ export default function Activity() {
               {tileYears.map((y, idx) => {
                 const isActive = activeTile === y;
                 const color = TILE_COLORS[idx];
-                const subtitles = ['Année en cours', 'Année précédente', 'N-2'];
+                const subtitles = [t('activity.year_current'), t('activity.year_n1'), 'N-2'];
                 return (
                   <div key={y} role="button" tabIndex={0}
                     onClick={() => { if (activeTile !== y) setOpenMonths({}); setActiveTile(isActive ? null : y); }}
@@ -1499,7 +1501,7 @@ export default function Activity() {
                 );
               })}
 
-              {/* Tuile Archives */}
+              {/* Tuile t('activity.archives') */}
               {(() => {
                 const isArchiveActive = !!(activeTile && !tileYears.includes(activeTile));
                 const color = TILE_COLORS[3];
@@ -1525,11 +1527,11 @@ export default function Activity() {
                           </svg>
                         </span>
                         <span style={{ fontSize:14, color:'var(--txt)', fontWeight:600 }}>
-                          {isArchiveActive ? activeTile : 'Archives'}
+                          {isArchiveActive ? activeTile : t('activity.archives')}
                         </span>
                       </div>
                       <div style={{ fontSize:13, color:'var(--muted)', paddingLeft:20 }}>
-                        {isArchiveActive ? 'Année archivée' : olderYears.length > 0 ? `${olderYears.length} année(s) disponible(s)` : 'Aucune archive'}
+                        {isArchiveActive ? 'Année archivée' : olderYears.length > 0 ? `${olderYears.length} année(s) disponible(s)` : t('activity.no_archive')}
                       </div>
                     </div>
                     <div style={{ position:'absolute', bottom:10, right:14, lineHeight:1 }}>
@@ -1560,10 +1562,10 @@ export default function Activity() {
 
             {/* Modal archives */}
             {olderModal && (
-              <Modal title="Archives — années précédentes" onClose={() => setOlderModal(false)}>
+              <Modal title={`${t('activity.archives')} — années précédentes`} onClose={() => setOlderModal(false)}>
                 <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                   {olderYears.length === 0 ? (
-                    <div style={{ color:'var(--muted)', fontSize:13 }}>Aucune année archivée disponible.</div>
+                    <div style={{ color:'var(--muted)', fontSize:13 }}>{t('activity.no_archive')}</div>
                   ) : olderYears.map(y => (
                     <button key={y} onClick={() => { setOpenMonths({}); setActiveTile(y); setOlderModal(false); }}
                       style={{ display:'flex', alignItems:'center', justifyContent:'space-between',

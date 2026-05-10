@@ -54,7 +54,7 @@ function StatCard({ icon, label, sub, value, color }) {
    └─────────────────────────────────────────┘
 */
 function Top3Card({ icon, label, sub, value, color, top3, tags }) {
-  const getColor = code => (tags || []).find(t => t.code === code)?.color || '#066fd1';
+  const getColor = code => (tags || []).find(tag => tag.code === code)?.color || '#066fd1';
   return (
     <div style={{
       background: 'var(--surf)', border: '1px solid var(--brd)', borderRadius: 'var(--rl)',
@@ -169,20 +169,20 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <SectionTitle icon={icons.backup}>Backups de configuration</SectionTitle>
+      <SectionTitle icon={icons.backup}>{t('dash.backups')}</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 28 }}>
         <StatCard icon={icons.backup} label="Backups total" value={stats?.backups} color="var(--acc)"  />
-        <StatCard icon={icons.device} label="Équipements"   value={stats?.devices} color="#0891b2"     />
-        <StatCard icon={icons.site}   label="Sites"         value={stats?.sites}   color="var(--ok)"   />
-        <StatCard icon={icons.model}  label="Modèles"       value={stats?.models}  color="var(--warn)" />
+        <StatCard icon={icons.device} label={t('dash.devices')}   value={stats?.devices} color="#0891b2"     />
+        <StatCard icon={icons.site}   label={t('dash.sites')}         value={stats?.sites}   color="var(--ok)"   />
+        <StatCard icon={icons.model}  label={t('dash.models')}       value={stats?.models}  color="var(--warn)" />
       </div>
 
-      <SectionTitle icon={icons.backup}>Automatisation</SectionTitle>
+      <SectionTitle icon={icons.backup}>{t('dash.automation')}</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 28 }}>
 
         {/* Tuile 1 — Nombre total de documents */}
         <StatCard icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:18,height:18}}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>}
-          label="Documents total" value={stats?.automation?.total ?? '—'} color="#a855f7" />
+          label={t('dash.auto_total')} value={stats?.automation?.total ?? '—'} color="#a855f7" />
 
         {/* Tuile 2 — 3 derniers documents */}
         <div className="stat-card" style={{ height: CARD_H, boxSizing:'border-box', background:'var(--surf)', border:'1px solid var(--brd)', borderTop:'3px solid #a855f7', borderRadius:'var(--rl)', padding:'14px 16px', position:'relative', overflow:'hidden' }}>
@@ -191,7 +191,7 @@ export default function Dashboard() {
               <span style={{ color:'#a855f7' }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               </span>
-              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>Derniers documents</span>
+              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>{t('dash.auto_recent')}</span>
             </div>
             {stats?.automation?.recent?.length > 0
               ? stats.automation.recent.map((d,i) => (
@@ -200,7 +200,7 @@ export default function Dashboard() {
                     <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.name}</span>
                   </div>
                 ))
-              : <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>Aucun document</div>
+              : <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>{t('dash.auto_no_docs')}</div>
             }
           </div>
         </div>
@@ -212,7 +212,7 @@ export default function Dashboard() {
               <span style={{ color:'#a855f7' }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
               </span>
-              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>Top catégories</span>
+              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>{t('dash.auto_top_cats')}</span>
             </div>
             {stats?.automation?.top3cats?.length > 0
               ? stats.automation.top3cats.map((c,i) => (
@@ -224,7 +224,7 @@ export default function Dashboard() {
                     <span style={{ fontWeight:700, color:c.color||'#a855f7', marginLeft:8, flexShrink:0 }}>{c.doc_count}</span>
                   </div>
                 ))
-              : <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>Aucune donnée</div>
+              : <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>{t('dash.auto_no_data')}</div>
             }
           </div>
         </div>
@@ -236,7 +236,7 @@ export default function Dashboard() {
               <span style={{ color: stats?.automation?.expiring?.length > 0 ? 'var(--warn)' : '#a855f7' }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
               </span>
-              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>Expirations</span>
+              <span style={{ fontSize:13, fontWeight:600, color:'var(--txt)' }}>{t('dash.auto_expiring')}</span>
             </div>
             {stats?.automation?.expiring?.length > 0
               ? stats.automation.expiring.map((d,i) => {
@@ -249,14 +249,14 @@ export default function Dashboard() {
                     </div>
                   );
                 })
-              : <div style={{ fontSize:11, color:'var(--ok)', marginTop:4, fontWeight:600 }}>✓ Pas d'expiration de documents</div>
+              : <div style={{ fontSize:11, color:'var(--ok)', marginTop:4, fontWeight:600 }}>{t('dash.auto_no_expiry')}</div>
             }
           </div>
         </div>
 
       </div>
 
-      <SectionTitle icon={icons.cal}>Suivi d'activité</SectionTitle>
+      <SectionTitle icon={icons.cal}>{t('dash.activity')}</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
         <StatCard  icon={icons.note}  label={t('dash.notes_total')}        sub="toutes périodes" value={act?.total           ?? null} color="var(--acc)"  />
         <StatCard  icon={icons.cal}   label={MONTHS_FR[curMonth-1]} sub={t('dash.note_count')} value={act?.month           ?? null} color="var(--ok)"   />

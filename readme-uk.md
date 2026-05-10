@@ -2,11 +2,11 @@
 
 # nexusVault — New EXperience for USer Vault — IT Secure Vault Environment
 
-IT critical element vault interface: network equipment configuration, activity tracking, scripts & automation.
-
-> 🇫🇷 [Version française ici](README.md)
+IT critical element vault interface: network equipment configuration, activity tracking, automation and secure document management.
 
 ---
+
+> 🇫🇷 [Version française ici](README.md)
 
 ## Why nexusVault?
 
@@ -17,60 +17,72 @@ If compromised, attackers have everything at their fingertips!
 
 ## Key Features
 
-### Backups
+### Configuration Backups
 - **Network equipment configuration backup: Switches, NAS, Firewalls, Others**
-- **Manual and automatic backup import**
+- **Manual and automatic backup import (SSH)**
 - **Visual diff between two versions (additions in green, deletions in red)**
 - **Country, site, equipment and device model management**
 - **Optional site grouping by country (enable in Devices → Options)**
 - **CSV.gz backup export**
 
+### Automation
+- **Hierarchical categories** by type: Generic, Temporary, Procedure, Script, Secured
+- **Documents**: creation, editing, full change history
+- **File attachments** per document: multiple upload, download, deletion
+- **Integrated file preview**: native PDF (iframe), Word/ODT (LibreOffice → PDF), scripts (syntax highlighting via highlight.js — yaml, json, python, bash, sql…)
+- **Secured documents**: password protection globally (Admin → Automation → Options) or per document
+- **Temporary documents**: expiry date with expiration alerts on the dashboard
+- **One-click copy** of script content to clipboard with audit trail
+- **Full audit** of every access, modification, preview, copy and failed attempt
+
 ### Activity Tracking
 - **IT team activity tracking per user via TAGs with filtering**
 - **Custom TAGs with colors: SECU, ADM, NET, BACKUP, INCIDENT…**
-- **File attachments per note: upload, lock, delete, download**
-- **`[secret]...[/secret]` tag** to mask sensitive data (passwords, keys…) — displayed as `●●●●●` in the list, visible only when editing
-- **Cosmetic display date** (Admin → Activity → Options): change the displayed date without affecting the real history
-- **CSV import** of historical notes (format `YEAR;MONTH;DAY;TAG;NOTE`, Admin → Activity → Options)
-- **PDF export** with custom logo, full content, date and TAG columns
+- **File attachments per note**: upload, lock, delete, download
+- **`[secret]...[/secret]` tag** to mask sensitive data — displayed as `●●●●●` in the list, visible only when editing
+- **Cosmetic display date** (Admin → Activity → Options)
+- **CSV import** of historical notes (format `YEAR;MONTH;DAY;TAG;NOTE`)
+- **PDF export** with custom logo — 4 modes: by month, by year, all periods, by TAG
 - **Note protection**: TAG deletion blocked if used in notes
-- **Mandatory TOTP 2FA** configurable by admin (Admin → Security → Authentication)
+
+### Dashboard
+- **Backups section**: total backups, equipment, sites, models
+- **Automation section**: total documents, 3 latest added, top 3 categories with color codes, upcoming expirations
+- **Activity section**: total notes, current month activity, top 3 tags by year (N and N-1)
 
 ### Audit Log
-- **Full audit: Login OK/NOK, Add/Delete/View/Edit**
+- **Full audit**: Login OK/NOK, Add/Delete/View/Edit
 - **Brute-force detection and logging**
-- **Automatic monthly archiving (configurable cron: execution time)**
-- **Archive browsing by year/month, CSV.gz download**
-- **Audited actions: LOGIN_SUCCESS/FAIL/BLOCKED, LOGOUT/TIMEOUT, BACKUP_*, AUDIT_ARCHIVED, SUIVI_IMPORTÉ, LOGO_PDF_MODIFIÉ, TOTP_CONFIGURE, etc.**
+- **Automatic monthly archiving** (configurable cron)
+- **Archive browsing** by year/month, CSV.gz download
+- **Action translations** according to the interface language
 
 ### Security
-- **Role-based access control (Admin, Operator, Reader)**
-- **Configurable brute-force protection: number of attempts and lockout duration**
-- **Configurable session timeout with visual countdown and automatic audit**
-- **TOTP authentication (Google Authenticator, Authy…) mandatory or optional**
-- **Manual account unlock from Admin interface**
+- **Role-based access control** (Admin, Operator, Reader)
+- **Configurable brute-force protection**: number of attempts and lockout duration
+- **Configurable session timeout** with visual countdown and automatic audit
+- **TOTP authentication** (Google Authenticator, Authy…) mandatory or optional
+- **Manual account unlock** from Admin interface
 - **Dark / light mode**
-- **i18n multilingual support (11 languages: fr, en, de, es, it, ja, nl, pl, pt, ru, zh)**
-- **LDAP/LDAPS, OIDC authentication *(not tested yet)***
-- **Notifications via SMTP, Telegram and Slack *(not tested yet)***
+- **i18n multilingual support (11 languages)**: `fr`, `en`, `de`, `es`, `it`, `ja`, `nl`, `pl`, `pt`, `ru`, `zh`
+- **LDAP/LDAPS, OIDC authentication** *(not tested yet)*
+- **Notifications via SMTP, Telegram and Slack** *(not tested yet)*
 - **AES-256 encryption** of all sensitive data in SQLite database
 
 ### Administration
-- **User management with lock/unlock, TOTP reset**
+- **User management** with lock/unlock, TOTP reset
 - **Configurable application URL**
-- **Archiving scheduler (1st of the month, configurable time)**
-- **Custom PDF logo** (Admin → Activity → Options, max height 120px)
-- **Interface customization *(coming soon)***
+- **Archiving scheduler** (1st of the month, configurable time)
+- **Custom PDF logo** (max height 120px)
+- **Automation administration**: categories, types, colors, global password for secured documents
 
 ---
 
 ## Coming Soon
 
 - **GDPR: Element anonymization**
-- **Dashboard customization: displayed elements, colors, TOP3, etc.**
-- **Full i18n for all pages**
-- **Shared multi-user activity tracking with user-identification TAGs**
-- **Automation section: script storage by type, environment, tag**
+- **Dashboard customization**: displayed elements, colors, TOP3, etc.
+- **Shared multi-user activity tracking** with user-identification TAGs
 
 ---
 
@@ -150,12 +162,11 @@ nexusvault/
 ├── .gitignore
 ├── README.md                   # French documentation
 ├── readme-uk.md                # English documentation (this file)
-├── deploy.sh                   # Git + Docker Hub deployment script (in .gitignore)
+├── deploy.sh                   # Git + Docker Hub deployment script
 ├── backend/
 │   ├── server.js               # Express REST API — all routes
 │   ├── db.js                   # SQLite init + AES-256 encryption + migrations
 │   ├── auth.js                 # JWT middleware, requirePerm, brute-force
-│   ├── ssh.js                  # SSH connections
 │   ├── notifications.js        # SMTP / Telegram / Slack
 │   ├── entrypoint.sh           # Chown /data then su-exec app-nexus
 │   ├── package.json
@@ -170,28 +181,27 @@ nexusvault/
         ├── api.js              # All API methods (fetch)
         ├── index.css           # CSS variables, light/dark themes
         ├── contexts/
-        │   ├── AuthContext.jsx  # JWT, logout(source) with LOGOUT/TIMEOUT audit
+        │   ├── AuthContext.jsx  # JWT, logout(source) with audit
         │   ├── ThemeContext.jsx
-        │   └── I18nContext.jsx
+        │   └── I18nContext.jsx  # i18n provider, language switcher
         ├── hooks/
-        │   ├── useSessionTimeout.js  # Timeout trigger + logout('timeout')
-        │   └── usePerms.js           # Role-based permission checks
+        │   ├── useSessionTimeout.js
+        │   └── usePerms.js
         ├── components/
-        │   ├── Navbar.jsx       # Main navigation
+        │   ├── Navbar.jsx
         │   ├── LangSwitcher.jsx # Language selector (11 languages)
-        │   └── UI.jsx           # Modal, Alert, ConfirmModal, etc.
+        │   └── UI.jsx
         ├── i18n/
-        │   ├── index.js
+        │   ├── index.js         # i18n engine, static EN import, fallback
         │   └── locales/         # fr, en, de, es, it, ja, nl, pl, pt, ru, zh
         └── pages/
-            ├── Login.jsx        # Login page, password reset, full i18n
-            ├── Dashboard.jsx    # Dashboard
-            ├── Backups.jsx      # Network backups, country grouping, diff
-            ├── Activity.jsx     # Activity tracking with tags
-            ├── Config.jsx       # Devices: Countries, Sites, Models, Equipment, Options
-            ├── Admin.jsx        # Admin: Account, Perso, Users, Rights, Security, Audit
-            ├── Scripts.jsx      # Automation (placeholder page)
-            └── Personnalisation.jsx  # Customization (coming soon)
+            ├── Login.jsx        # Login page, password reset
+            ├── Dashboard.jsx    # Dashboard (3 sections)
+            ├── Backups.jsx      # Network backups, diff, country grouping
+            ├── Activity.jsx     # Activity tracking, tags, PDF export
+            ├── Config.jsx       # Devices: Countries, Sites, Models, Equipment
+            ├── Scripts.jsx      # Automation: categories, documents, files
+            └── Admin.jsx        # Full administration
 ```
 
 **2 Docker containers:**
@@ -209,8 +219,8 @@ The backend is **never directly exposed** — all traffic goes through Nginx.
 
 Both containers run as **non-root user** `app-nexus`:
 
-- **Backend**: `entrypoint.sh` runs as root, performs `chown -R app-nexus /data` (for mounted volumes), then starts `su-exec app-nexus node server.js`.
-- **Frontend**: `nginx:alpine` configured with `pid /tmp/nginx.pid` and temporary paths in `/tmp/nginx/`. The `root` password is randomly generated at each build (32 bytes from `/dev/urandom`).
+- **Backend**: `entrypoint.sh` runs as root, performs `chown -R app-nexus /data`, then starts `su-exec app-nexus node server.js`.
+- **Frontend**: `nginx:alpine` with `pid /tmp/nginx.pid`. The `root` password is randomly generated at each build.
 
 ---
 
@@ -219,15 +229,13 @@ Both containers run as **non-root user** `app-nexus`:
 NexusVault uses **double encryption** from a single key (`ENCRYPTION_KEY`):
 
 ### Level 1 — SQLite file (SQLCipher)
-The `nexusvault.db` file is fully encrypted by **SQLCipher** (AES-256 + PBKDF2-HMAC-SHA512, 256,000 iterations). Opened with a hex editor or SQLite Browser without the key, the file is unreadable — it only shows random bytes.
+The `nexusvault.db` file is fully encrypted by **SQLCipher** (AES-256 + PBKDF2-HMAC-SHA512, 256,000 iterations).
 
 ### Level 2 — Sensitive columns (AES-256-CBC)
-In addition to file encryption, each sensitive value is individually encrypted before being written:
+Each sensitive value is individually encrypted with a random IV before being written:
 - Equipment names, IP addresses, SSH credentials and passwords
 - Backed-up configuration file contents
 - Site names, contacts, notes
-
-Thus, even if someone obtained the SQLCipher key, the configuration data would remain AES-256 encrypted with a random IV per value.
 
 ---
 
@@ -241,15 +249,15 @@ Thus, even if someone obtained the SQLCipher key, the configuration data would r
 | Configuration (read) | ✓ | ✓ | ✓ |
 | Configuration (write) | ✓ | ✓ | ✗ |
 | Audit log | ✓ | ✗ | ✗ |
-| Audit archiving | ✓ | ✗ | ✗ |
 | Security access | ✓ | ✗ | ✗ |
 | Activity tracking (write) | ✓ | ✓ | ✓ |
 | Activity tracking (read) | ✓ | ✓ | ✗ |
 | Automation (read) | ✓ | ✓ | ✓ |
+| Automation (write) | ✓ | ✓ | ✗ |
 
 ---
 
-## Change the port
+## Change the Port
 
 Edit `.env`:
 ```env
@@ -264,14 +272,10 @@ docker compose up -d
 
 ## Data Backup
 
-SQLite data is stored in a Docker volume whose name includes the project directory name.
-
-> **Identify the exact volume name** (Docker prefixes the project directory name):
+> **Identify the exact volume name**:
 > ```bash
 > docker volume ls | grep nexusvault
 > ```
-> Example: directory `nexusVault` → volume `nexusvault_nexusvault-data`.
-> Replace `VOLUME_NAME` in all commands with this name.
 
 > ⚠️ **Stop containers before backing up** — SQLite locks the `.db` file during execution.
 
@@ -279,7 +283,7 @@ SQLite data is stored in a Docker volume whose name includes the project directo
 # 1. Stop
 docker compose down
 
-# 2. Backup (-C / data archives the 'data' folder from root)
+# 2. Backup
 docker run --rm \
   -v VOLUME_NAME:/data \
   -v $(pwd):/backup \
@@ -300,7 +304,7 @@ docker compose up -d
 
 ## Restore a Backup
 
-> The `ENCRYPTION_KEY` in `.env` must be **identical** to the source instance — without it, encrypted data will be unreadable.
+> The `ENCRYPTION_KEY` in `.env` must be **identical** to the source instance.
 
 **1. Prepare**
 ```bash
@@ -336,42 +340,30 @@ docker compose up -d
 
 ## Password Reset
 
-If you lose access, reset a user password from the Docker host:
-
 ```bash
 docker exec -it nexusvault-backend node server.js reset-password <username>
 ```
 
-**Example:**
-```bash
-docker exec -it nexusvault-backend node server.js reset-password admin
-```
-
-The password is reset to `changeme` and a mandatory change is enforced on next login. The account is also unlocked if necessary.
+Password reset to `changeme`, mandatory change enforced on next login. Account also unlocked if necessary.
 
 ---
 
 ## LOG_LEVEL Variable
 
-Configures log verbosity for the backend container (`docker logs nexusvault-backend`):
-
 | Value | What is shown |
 |---|---|
-| `debug` | Everything: cron ticks, API calls, detailed activity. Useful for debugging. |
-| `info` | **(default)** Important information: startup, accounts, emails, archiving. |
-| `warn` | Warnings: brute-force, missing SMTP, non-critical anomalies. |
-| `error` | Critical errors only: unhandled exceptions, database failures, crashes. |
+| `debug` | Everything: cron ticks, API calls, detailed activity |
+| `info` | **(default)** Startup, accounts, emails, archiving |
+| `warn` | Brute-force, missing SMTP, non-critical anomalies |
+| `error` | Critical errors only |
 
-Example in `.env`:
-```env
-LOG_LEVEL=warn
-```
+> 💡 SMTP configuration generates detailed `info` logs (`docker logs nexusvault-backend`) to help diagnose delivery issues.
 
 ---
 
 ## Automatic Audit Log Archiving
 
-The audit log is **automatically archived on the 1st of each month** at the time configured in **Administration → Security → Scheduler**. The archiving process:
+The audit log is **automatically archived on the 1st of each month** at the time configured in **Administration → Security → Scheduler**:
 
 1. Copies all entries from the previous month into `audit_archives`
 2. Deletes those entries from the active log
@@ -384,22 +376,28 @@ Archives can be viewed and downloaded as **CSV.gz** (UTF-8 BOM, Excel-compatible
 
 ## Country Option
 
-Country-based organization is **optional** and can be enabled from **Devices → Options → Enable Country option**.
+Country-based organization is **optional**, enabled from **Devices → Options → Enable Country option**:
 
-Once enabled:
-- A country manager appears in the Options tab (add, edit, delete, drag-and-drop reorder)
-- In the **Sites** tab, each site can be assigned to a country
-- In **Backups**, sites are grouped by country (alphabetical order), expandable on click
+- Country manager in the Options tab (add, edit, delete, drag-and-drop reorder)
+- Each site can be assigned to a country in the **Sites** tab
+- Sites are grouped by country in **Backups** (alphabetical order), expandable on click
 
 ---
 
-*Current version: see `.build_meta` for the exact build number.*
+## Internationalisation (i18n)
+
+| Code | Language | Status |
+|---|---|---|
+| `en` | English | ✅ Complete (reference) |
+| `fr` | Français | ✅ Complete |
+| `de` `es` `it` `pt` `nl` `pl` `ru` `ja` `zh` | Others | 🔧 Partial — contributions welcome |
+
+To contribute, edit the corresponding file in `frontend/src/i18n/locales/XX.js`.
+Missing keys automatically fall back to English.
 
 ---
 
 ## `[secret]` Tag — Masking Sensitive Data
-
-In activity tracking notes, wrap sensitive information with the `[secret]` tag:
 
 ```
 Server password: [secret]MyPassword123![/secret]
@@ -407,9 +405,12 @@ API key: [secret]sk-xxxxxxxxxxxxxxxxxxxx[/secret]
 ```
 
 **Behavior:**
-- **Activity page**: the content is displayed as `●●●●●` (orange background), not readable by onlookers
-- **Edit modal**: the real text is visible and editable normally
-- **PDF export**: masked data appears as `●●●●●`
+- **Activity page**: displayed as `●●●●●` (orange background)
+- **Edit modal**: real text visible and editable
+- **PDF export**: masked data shown as `●●●●●`
 
-> ⚠️ Data is stored **in plain text** in the encrypted database. The masking is visual only on the interface.
+> ⚠️ Data is stored **in plain text** in the encrypted database. Masking is visual only.
 
+---
+
+*Current version: see `frontend/src/version.js` or the interface footer.*
