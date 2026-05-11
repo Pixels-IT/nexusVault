@@ -277,8 +277,8 @@ function DevicesTab() {
   const load = () => api.devices().then(d => setDevices([...d].sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:"base"})))).catch(() => {});
   useEffect(() => {
     load();
-    api.sites().then(setSites).catch(() => {});
-    api.models().then(setModels).catch(() => {});
+    api.sites().then(d => setSites([...d].sort((a,b) => a.name.localeCompare(b.name, undefined, {sensitivity:'base'})))).catch(() => {});
+    api.models().then(d => setModels([...d].sort((a,b) => (a.vendor+' '+a.model).localeCompare(b.vendor+' '+b.model, undefined, {sensitivity:'base'})))).catch(() => {});
   }, []);
 
   async function duplicateDevice(device) {

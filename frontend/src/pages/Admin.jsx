@@ -495,9 +495,9 @@ function AutomationOptionsTab() {
   );
 }
 // ── MON COMPTE ────────────────────────────────────────────────────────────────
-function AccountTab() {
+function AccountTab({ forcePasswordChange }) {
   const { t } = useI18n();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [data, setData] = useState({ username: '', display_name: '', email: '' });
   const [pwData, setPwData] = useState({ cur: '', nw: '', confirm: '' });
   const [msg, setMsg] = useState('');
@@ -520,12 +520,21 @@ function AccountTab() {
     if (pwData.nw !== pwData.confirm) return setPwErr('Les mots de passe ne correspondent pas');
     try {
       await api.changePassword(pwData.cur, pwData.nw);
-      setPwMsg('Mot de passe modifié. Il vous sera demandé à la prochaine connexion.');
+      setPwMsg('Mot de passe modifié.');
       setPwData({ cur: '', nw: '', confirm: '' });
+      // If forced change, reload page to get fresh token without must_change_password
+      if (forcePasswordChange) setTimeout(() => logout('pwd_changed'), 1200);
     } catch (e) { setPwErr(e.message); }
   }
 
   return (
+    <div>
+    {forcePasswordChange && (
+      <div style={{ background:'var(--warn-bg,rgba(234,179,8,.15))', border:'1px solid var(--warn)', borderRadius:'var(--r)', padding:'12px 18px', marginBottom:16, display:'flex', alignItems:'center', gap:10 }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--warn)" strokeWidth="2" style={{width:20,height:20,flexShrink:0}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <strong>{t('auth.must_change_pwd') || 'You must change your default password before continuing.'}</strong>
+      </div>
+    )}
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
       <div className="card">
         <div className="card-header"><div className="card-title">Informations du compte</div></div>
@@ -582,6 +591,7 @@ function AccountTab() {
           </form>
         </div>
       </div>
+    </div>
     </div>
   );
 }
@@ -1715,38 +1725,28 @@ function LdapCard() {
           LDAP est complémentaire à l’authentification locale. Les comptes locaux restent accessibles même si LDAP est activé.
         </div>
         <form onSubmit={save}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            {f('url', 'URL du serveur', 'text', 'ldap://192.168.1.10 ou ldaps://...')}
-            {f('base_dn', 'Base DN', 'text', 'dc=monentreprise,dc=com')}
-            {f('bind_dn', 'DN de service (Bind DN)', 'text', 'cn=svc-nexusvault,ou=services,dc=...')}
-            {f('bind_password', 'Mot de passe Bind', 'password', '••••••••')}
-            {f('user_attr', 'Attribut identifiant', 'text', 'sAMAccountName (AD) ou uid (OpenLDAP)')}
-            {f('required_group', 'Groupe requis (DN complet)', 'text', 'cn=NexusVault-Users,ou=groups,dc=...')}
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Filtre de groupe (optionnel)</label>
-              <input className="form-control" value={ldap.group_filter || ''}
-                onChange={e => setLdap(l => ({ ...l, group_filter: e.target.value }))}
-                placeholder="(memberOf=cn=NexusVault,ou=groups,dc=...)" />
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                Filtre LDAP supplémentaire pour restreindre l’accès. Laissez vide pour autoriser tous les utilisateurs du Base DN.
-              </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+              {f('url',  'URL LDAP/LDAPS', 'text', 'ldap://192.168.1.10 ou ldaps://…')}
+              {f('base_dn', 'Base DN', 'text', 'dc=company,dc=fr')}
+              {f('bind_dn', 'Bind DN (compte de liaison)', 'text', 'cn=svc-nexus,dc=company,dc=fr')}
+              {f('bind_password', 'Mot de passe', 'password', '••••••••')}
+              {f('user_attr', 'Attribut identifiant', 'text', 'sAMAccountName')}
+              {f('group_filter', 'Filtre groupe (optionnel)', 'text', '(memberOf=cn=IT,dc=company,dc=fr)')}
             </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
-              <input type="checkbox" checked={ldap.tls}
-                onChange={e => setLdap(l => ({ ...l, tls: e.target.checked }))} />
-              Utiliser LDAPS (TLS) — port 636
-            </label>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Enregistrement…' : 'Enregistrer'}
-            </button>
-          </div>
-        </form>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+              {f('required_group', 'Groupe requis (optionnel)', 'text', 'cn=nexus-users,dc=…')}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={ldap.tls}
+                  onChange={e => setLdap(l => ({ ...l, tls: e.target.checked }))} />
+                Utiliser STARTTLS
+              </label>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                {saving ? 'Enregistrement…' : (t('auto_cat.save') || 'Enregistrer')}
+              </button>
+            </div>
+          </form>
       </div>
     </div>
   );
@@ -1764,6 +1764,10 @@ function SecurityOidcTab() {
     scopes: 'openid email profile',
     auto_create_users: false,
     default_role: 'viewer',
+    allow_local_login: true,
+    authorization_endpoint: '',
+    token_endpoint: '',
+    userinfo_endpoint: '',
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg]       = useState('');
@@ -1875,61 +1879,68 @@ function SecurityOidcTab() {
             {t('security.oidc_desc') || 'OIDC authentication complements local authentication. Local accounts remain active.'}tes locaux restent accessibles même si OIDC est activé.
           </div>
 
+        </div>
+      </div>
+
           <form onSubmit={save}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-              {field('provider_name', 'Nom du fournisseur', 'text', 'Ex: Keycloak, Authentik, Azure AD')}
-              {field('issuer_url', 'URL Issuer (Discovery)', 'text', 'https://auth.example.com/realms/nexusvault')}
+              {field('provider_name', t('security.oidc_provider') || 'Nom du fournisseur', 'text', 'Keycloak, Authentik, Azure…')}
+              {field('issuer_url', 'Issuer URL', 'text', 'https://auth.example.com/realm/nexus')}
               {field('client_id', 'Client ID', 'text', 'nexusvault')}
               {field('client_secret', 'Client Secret', 'password', '••••••••')}
-              {field('redirect_uri', 'URI de redirection', 'text', 'https://nexusvault.example.com/auth/callback')}
+              {field('redirect_uri', t('security.oidc_redirect_uri') || 'Redirect URI', 'text', 'https://nexusvault.example.com/oidc-callback')}
               {field('scopes', 'Scopes', 'text', 'openid email profile')}
             </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--txt)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={cfg.auto_create_users}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                {t('security.oidc_endpoints') || 'Custom endpoints (optional — overrides issuer discovery)'}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                {field('authorization_endpoint', 'Authorization endpoint', 'text', 'Auto')}
+                {field('token_endpoint', 'Token endpoint', 'text', 'Auto')}
+                {field('userinfo_endpoint', 'UserInfo endpoint', 'text', 'Auto')}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--muted)' }}>
+                {t('security.oidc_endpoints_hint') || 'Leave empty to auto-detect from Issuer URL'}
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', padding: '8px 10px', borderRadius: 'var(--r)', background: cfg.auto_create_users ? 'var(--acc-s)' : 'var(--surf2)', border: `1px solid ${cfg.auto_create_users ? 'var(--acc)' : 'var(--brd)'}` }}>
+                <input type="checkbox" checked={cfg.auto_create_users} style={{ marginTop: 2, accentColor: 'var(--acc)' }}
                   onChange={e => setCfg(c => ({ ...c, auto_create_users: e.target.checked }))} />
-                {t('security.oidc_auto_create') || 'Automatically create unknown OIDC users'}
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{t('security.oidc_auto_create') || 'Auto-create OIDC users'}</div>
+                </div>
               </label>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">{t('security.default_role') || 'Default role (new users)'}</label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', padding: '8px 10px', borderRadius: 'var(--r)', background: cfg.allow_local_login !== false ? 'var(--acc-s)' : 'var(--surf2)', border: `1px solid ${cfg.allow_local_login !== false ? 'var(--acc)' : 'var(--brd)'}` }}>
+                <input type="checkbox" checked={cfg.allow_local_login !== false} style={{ marginTop: 2, accentColor: 'var(--acc)' }}
+                  onChange={e => setCfg(c => ({ ...c, allow_local_login: e.target.checked }))} />
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{t('security.oidc_allow_local') || 'Keep local login'}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{t('security.oidc_allow_local_desc') || 'Users can still log in with local credentials'}</div>
+                </div>
+              </label>
+            </div>
+            {cfg.enabled && cfg.allow_local_login === false && (
+              <div className="alert alert-warn" style={{ marginBottom: 14, fontSize: 12 }}>
+                {t('security.oidc_no_local_warn') || 'Local login disabled: login page will redirect to SSO automatically.'}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', justifyContent: 'space-between' }}>
+              <div className="form-group" style={{ margin: 0, flex: 1 }}>
+                <label className="form-label">{t('security.default_role') || 'Default role'}</label>
                 <select className="form-control" value={cfg.default_role}
                   onChange={e => setCfg(c => ({ ...c, default_role: e.target.value }))}>
-                  <option value="viewer">Utilisateur (lecture seule)</option>
+                  <option value="viewer">{t('users.role_viewer') || 'Lecteur'}</option>
                   <option value="operator">{t('users.role_operator')}</option>
                   <option value="admin">{t('users.role_admin')}</option>
                 </select>
               </div>
-            </div>
-
-            {/* Endpoints calculés */}
-            {cfg.issuer_url && (
-              <div style={{ background: 'var(--surf2)', border: '1px solid var(--brd)', borderRadius: 'var(--r)', padding: 12, marginBottom: 14, fontSize: 11 }}>
-                <div style={{ fontWeight: 600, color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.4px' }}>{t('security.oidc_endpoints') || 'OIDC endpoints (calculated automatically)'}</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {[
-                    ['Authorization', `${cfg.issuer_url}/protocol/openid-connect/auth`],
-                    ['Token',         `${cfg.issuer_url}/protocol/openid-connect/token`],
-                    ['UserInfo',      `${cfg.issuer_url}/protocol/openid-connect/userinfo`],
-                    ['Discovery',     `${cfg.issuer_url}/.well-known/openid-configuration`],
-                  ].map(([label, url]) => (
-                    <div key={label} style={{ display: 'flex', gap: 8 }}>
-                      <span style={{ color: 'var(--muted)', minWidth: 90 }}>{label} :</span>
-                      <span style={{ fontFamily: 'var(--mono)', color: 'var(--acc)', fontSize: 10 }}>{url}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? 'Enregistrement…' : 'Enregistrer'}
+              <button type="submit" className="btn btn-primary" disabled={saving} style={{ flexShrink: 0 }}>
+                {saving ? (t('common.saving') || 'Saving…') : (t('auto_cat.save') || 'Save')}
               </button>
             </div>
           </form>
-        </div>
-      </div>
 
       {/* Bouton de connexion OIDC (aperçu) */}
       {cfg.enabled && cfg.provider_name && (
@@ -2981,7 +2992,7 @@ function AuditTab() {
 // sep = séparateur visuel dans le menu
 
 
-export default function Admin() {
+export default function Admin({ forcePasswordChange = false }) {
   const { user, logout: doLogout } = useAuth();
   const { t } = useI18n();
   const [sp, setSp] = useSearchParams();
@@ -3099,7 +3110,7 @@ export default function Admin() {
           })()}
         </div>
         <div>
-          {active === 'account' && <AccountTab />}
+          {active === 'account' && <AccountTab forcePasswordChange={forcePasswordChange} />}
           {active === 'personnalisation' && <PersonnalisationTab />}
           {active === 'appareils' && <AppareilsTab />}
           {active === 'users' && isAdmin && <UsersTab />}

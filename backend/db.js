@@ -365,6 +365,22 @@ function seedDemoData() {
   const cfg2 = `hostname sw-paris-core-01\nvlan 10 name SERVERS\nvlan 20 name USERS\nvlan 30 name WIFI_GUEST\nvlan 40 name IOT_DEVICES\nvlan 99 name MGMT\ninterface GigabitEthernet1/0/1\n  switchport mode access\n  switchport access vlan 20\nspanning-tree mode rapid-pvst\nspanning-tree vlan 1-4094 priority 4096`;
   db.prepare('INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc) VALUES (?,?,?,?,?,?)').run(d1.lastInsertRowid, 1, encrypt(cfg1), cfg1.length, 'ok', encrypt('Configuration initiale'));
   db.prepare('INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc) VALUES (?,?,?,?,?,?)').run(d1.lastInsertRowid, 2, encrypt(cfg2), cfg2.length, 'ok', encrypt('Ajout VLAN 40 IOT + spanning-tree'));
+
+  // Entrées de suivi d'activité pour N-1 et N-2 — évite la boucle dashboard sur années vides
+  const now = new Date();
+  const yearN1 = now.getFullYear() - 1;
+  const yearN2 = now.getFullYear() - 2;
+  const adminUser = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
+  const userId = adminUser ? adminUser.id : 1;
+  // Créer un tag NET par défaut si nécessaire
+  let netTagId = db.prepare("SELECT id FROM activity_tags WHERE id = 1").get();
+  if (!netTagId) {
+    db.prepare('INSERT INTO activity_tags (code_enc, label_enc, color) VALUES (?,?,?)').run(encrypt('NET'), encrypt('Réseau'), '#066fd1');
+  }
+  const entryStmt = db.prepare('INSERT INTO activity_entries (user_id, tag_code_enc, note_enc, display_date, created_at, updated_at) VALUES (?,?,?,?,?,?)');
+  [`${yearN2}-06-15`, `${yearN1}-03-20`, `${yearN1}-09-10`].forEach(date => {
+    entryStmt.run(userId, encrypt('NET'), encrypt('Entrée de démonstration'), date, `${date}T10:00:00.000Z`, `${date}T10:00:00.000Z`);
+  });
   console.log('[DB] Données de démonstration insérées');
 }
 

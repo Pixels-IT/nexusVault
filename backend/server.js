@@ -488,16 +488,35 @@ app.get('/api/oidc/config', authMiddleware, requirePerm('security_access'), (req
 app.put('/api/oidc/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const ip = getClientIp(req);
-  const { enabled, provider_name, issuer_url, client_id, client_secret, redirect_uri, scopes, auto_create_users, default_role } = req.body;
+  const {
+    enabled, provider_name, issuer_url, client_id, client_secret,
+    redirect_uri, scopes, auto_create_users, default_role,
+    allow_local_login,
+    authorization_endpoint, token_endpoint, userinfo_endpoint,
+  } = req.body;
   // Récupérer l'ancien secret si le nouveau est masqué
   let finalSecret = client_secret;
   if (client_secret === '••••••••') {
     const existing = db.prepare("SELECT value FROM settings WHERE key='oidc_config'").get();
     if (existing) { try { finalSecret = JSON.parse(existing.value).client_secret || ''; } catch {} }
   }
-  const cfg = { enabled: !!enabled, provider_name: provider_name || '', issuer_url: issuer_url || '', client_id: client_id || '', client_secret: finalSecret || '', redirect_uri: redirect_uri || '', scopes: scopes || 'openid email profile', auto_create_users: !!auto_create_users, default_role: default_role || 'viewer' };
+  const cfg = {
+    enabled: !!enabled,
+    provider_name: provider_name || '',
+    issuer_url: issuer_url || '',
+    client_id: client_id || '',
+    client_secret: finalSecret || '',
+    redirect_uri: redirect_uri || '',
+    scopes: scopes || 'openid email profile',
+    auto_create_users: !!auto_create_users,
+    default_role: default_role || 'viewer',
+    allow_local_login: allow_local_login !== false, // true by default
+    authorization_endpoint: authorization_endpoint || '',
+    token_endpoint: token_endpoint || '',
+    userinfo_endpoint: userinfo_endpoint || '',
+  };
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('oidc_config', ?)").run(JSON.stringify(cfg));
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'OIDC_CONFIG_MODIFIÉ', category: 'admin', severity: 'info', detail: `OIDC ${cfg.enabled ? 'activé' : 'désactivé'} — provider: ${cfg.provider_name || '(vide)'}`, ip, success: 1 });
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'OIDC_CONFIG_MODIFIÉ', category: 'security', ip });
   res.json({ success: true });
 });
 
@@ -505,11 +524,22 @@ app.put('/api/oidc/config', authMiddleware, requirePerm('security_access'), (req
 app.get('/api/oidc/public', (req, res) => {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key='oidc_config'").get();
-  if (!row) return res.json({ enabled: false });
+  if (!row) return res.json({ enabled: false, allow_local_login: true });
   try {
     const cfg = JSON.parse(row.value);
-    res.json({ enabled: !!cfg.enabled, provider_name: cfg.provider_name || '', issuer_url: cfg.issuer_url || '' });
-  } catch { res.json({ enabled: false }); }
+    res.json({
+      enabled: !!cfg.enabled,
+      provider_name: cfg.provider_name || '',
+      issuer_url: cfg.issuer_url || '',
+      client_id: cfg.client_id || '',
+      redirect_uri: cfg.redirect_uri || '',
+      scopes: cfg.scopes || 'openid email profile',
+      allow_local_login: cfg.allow_local_login !== false,
+      authorization_endpoint: cfg.authorization_endpoint || '',
+      token_endpoint: cfg.token_endpoint || '',
+      userinfo_endpoint: cfg.userinfo_endpoint || '',
+    });
+  } catch { res.json({ enabled: false, allow_local_login: true }); }
 });
 
 
@@ -2340,7 +2370,18 @@ app.listen(PORT, () => {
         logger.info('[SMTP] Configuration chargée depuis la base de données');
       }
       if (cfg.app_url) process.env.APP_URL = cfg.app_url;
+      // If env APP_URL set but not yet in DB, persist it
+      else if (process.env.APP_URL && !cfg.app_url) {
+        cfg.app_url = process.env.APP_URL;
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('smtp_config', ?)").run(JSON.stringify(cfg));
+        logger.info('[APP_URL] URL injectée depuis la variable d\'environnement: ' + process.env.APP_URL);
+      }
     } catch {}
+  } else if (process.env.APP_URL) {
+    // No smtp_config yet — create one with just app_url
+    const cfg = { host:'', port:587, secure:false, user:'', pass:'', from:'', app_url: process.env.APP_URL };
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('smtp_config', ?)").run(JSON.stringify(cfg));
+    logger.info('[APP_URL] URL injectée depuis la variable d\'environnement (config SMTP vide): ' + process.env.APP_URL);
   }
   // Charger config Slack
   const slackRow = db.prepare("SELECT value FROM settings WHERE key='slack_config'").get();

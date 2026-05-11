@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
@@ -76,11 +76,11 @@ function ForgotPasswordModal({ onClose }) {
 
 // ── PAGE LOGIN ─────────────────────────────────────────────────────────────────
 export default function Login() {
-  const { login }       = useAuth();
+  const { login }        = useAuth();
   const { dark, toggle } = useTheme();
-  const { t }           = useI18n();
-  const navigate        = useNavigate();
-  const [searchParams]  = useSearchParams();
+  const { t }            = useI18n();
+  const navigate         = useNavigate();
+  const [searchParams]   = useSearchParams();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -88,15 +88,43 @@ export default function Login() {
   const [loading, setLoading]   = useState(false);
   const [showForgot, setShowForgot] = useState(false);
 
-  // États TOTP
-  const [step, setStep]           = useState('credentials'); // 'credentials' | 'totp' | 'totp-setup'
-  const [totpCode, setTotpCode]   = useState('');
+  // TOTP states
+  const [step, setStep]             = useState('credentials');
+  const [totpCode, setTotpCode]     = useState('');
   const [setupToken, setSetupToken] = useState('');
-  const [qrData, setQrData]       = useState(null); // { qr, secret, username }
+  const [qrData, setQrData]         = useState(null);
   const [totpLoading, setTotpLoading] = useState(false);
-  const [totpError, setTotpError] = useState('');
+  const [totpError, setTotpError]   = useState('');
+
+  // OIDC public config
+  const [oidc, setOidc] = useState(null);
 
   const passwordChanged = searchParams.get('changed') === '1';
+
+  useEffect(() => {
+    api.oidcPublic().then(cfg => {
+      setOidc(cfg);
+      if (cfg.enabled && !cfg.allow_local_login) redirectToOidc(cfg);
+    }).catch(() => setOidc({ enabled: false, allow_local_login: true }));
+  }, []);
+
+  function redirectToOidc(cfg) {
+    const base = cfg.issuer_url ? cfg.issuer_url.replace(/\/$/, '') : '';
+    const authEndpoint = cfg.authorization_endpoint || (base ? base + '/protocol/openid-connect/auth' : '');
+    if (!authEndpoint || !cfg.client_id) return;
+    const redirectUri = cfg.redirect_uri || (window.location.origin + '/oidc-callback');
+    const state = btoa(Math.random().toString(36).slice(2));
+    sessionStorage.setItem('oidc_state', state);
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: cfg.client_id,
+      redirect_uri: redirectUri,
+      scope: cfg.scopes || 'openid email profile',
+      state,
+    });
+    window.location.href = authEndpoint + '?' + params.toString();
+  }
+
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -201,6 +229,25 @@ export default function Login() {
             </div>
             {/* Version */}
             <div style={{textAlign:'center', marginTop:24, fontSize:12, color:'var(--muted)', fontWeight:500, letterSpacing:'.2px', marginBottom:0}}>
+            {/* OIDC button */}
+            {oidc?.enabled && (
+              <div style={{marginTop:16, textAlign:'center'}}>
+                <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:12}}>
+                  <div style={{flex:1, height:1, background:'var(--brd)'}}/>
+                  <span style={{fontSize:11, color:'var(--muted)', whiteSpace:'nowrap'}}>
+                    {t('auth.or_sso') || 'ou SSO'}
+                  </span>
+                  <div style={{flex:1, height:1, background:'var(--brd)'}}/>
+                </div>
+                <button type="button" className="btn" onClick={() => redirectToOidc(oidc)}
+                  style={{width:'100%', justifyContent:'center', gap:8, display:'flex', alignItems:'center'}}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}>
+                    <circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                  </svg>
+                  {oidc.provider_name || t('auth.sso_login') || 'SSO / OIDC'}
+                </button>
+              </div>
+            )}
               {APP_VERSION}
             </div>
           </div>
