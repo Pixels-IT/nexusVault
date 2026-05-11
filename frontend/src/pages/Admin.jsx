@@ -2074,11 +2074,278 @@ function SecurityCronTab() {
         </div>
       </div>
 
+      {/* ── Planification sauvegardes automatiques ── */}
+      <BackupScheduleCard />
+
     </div>
   );
 }
 
-// ── MODAL LISTE DES ARCHIVES ──────────────────────────────────────────────────
+// ── CARD PLANIFICATION SAUVEGARDES ───────────────────────────────────────────
+const DAYS_FR = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+const FREQ_LABELS = { daily: 'Quotidien', weekly: 'Hebdomadaire', monthly: 'Mensuel' };
+
+function BackupScheduleCard() {
+  const { t } = useI18n();
+  const [schedules, setSchedules] = useState([]);
+  const [states,    setStates]    = useState({});
+  const [devices,   setDevices]   = useState([]);
+  const [editing,   setEditing]   = useState(null);   // id being edited inline
+  const [devModal,  setDevModal]  = useState(null);   // schedule id for device picker
+  const [runResult, setRunResult] = useState(null);   // { scheduleId, results }
+  const [msg,       setMsg]       = useState('');
+
+  const load = () => {
+    api.backupSchedules().then(setSchedules).catch(() => {});
+    api.backupScheduleStates().then(setStates).catch(() => {});
+  };
+  useEffect(() => {
+    load();
+    api.devices().then(d => setDevices([...d].sort((a,b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })))).catch(() => {});
+  }, []);
+
+  async function createSchedule() {
+    await api.backupScheduleCreate({ label: 'Nouvelle planification', frequency: 'daily', hour: 2, minute: 0 });
+    load();
+  }
+
+  async function deleteSchedule(id) {
+    if (!window.confirm('Supprimer cette planification ?')) return;
+    await api.backupScheduleDelete(id);
+    load();
+  }
+
+  async function saveSchedule(s) {
+    await api.backupScheduleUpdate(s.id, { label: s.label, frequency: s.frequency, hour: s.hour, minute: s.minute, day_of_week: s.day_of_week, day_of_month: s.day_of_month, enabled: s.enabled });
+    setEditing(null);
+    load();
+  }
+
+  async function runNow(id) {
+    setMsg('');
+    try {
+      const r = await api.backupScheduleRunNow(id);
+      setRunResult({ scheduleId: id, results: r.results });
+      load();
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+  }
+
+  const minutes5 = Array.from({ length: 12 }, (_, i) => i * 5);
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
+          </svg>
+          {t('cron.backup_schedules') || 'Sauvegarde automatique des équipements'}
+        </div>
+        <button className="btn btn-sm" onClick={createSchedule}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, borderColor: 'var(--ok)', color: 'var(--ok)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          {t('cron.add_schedule') || 'Ajouter un cron'}
+        </button>
+      </div>
+
+      <div style={{ padding: 16 }}>
+        {msg && <div className="alert alert-err" style={{ marginBottom: 12 }}>{msg}</div>}
+        {schedules.length === 0 && (
+          <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 13, padding: '24px 0' }}>
+            {t('cron.no_schedules') || 'Aucune planification. Cliquez sur "Ajouter un cron".'}
+          </div>
+        )}
+
+        {schedules.map(s => (
+          <ScheduleRow key={s.id} s={s} state={states[s.id]}
+            editing={editing} setEditing={setEditing}
+            onSave={saveSchedule} onDelete={deleteSchedule}
+            onRunNow={runNow} onDevices={id => setDevModal(id)}
+            runResult={runResult}
+            t={t}
+          />
+        ))}
+      </div>
+
+      {/* Device picker modal */}
+      {devModal !== null && (
+        <DevicePickerModal
+          scheduleId={devModal}
+          schedules={schedules}
+          devices={devices}
+          onClose={() => setDevModal(null)}
+          onSave={async (id, deviceIds) => { await api.backupScheduleDevices(id, { device_ids: deviceIds }); setDevModal(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function ScheduleRow({ s, state, editing, setEditing, onSave, onDelete, onRunNow, onDevices, runResult, t }) {
+  const [draft, setDraft] = useState({ ...s });
+  const isEditing = editing === s.id;
+  const minutes5 = Array.from({ length: 12 }, (_, i) => i * 5);
+
+  return (
+    <div style={{ border: '1px solid var(--brd)', borderRadius: 'var(--r)', marginBottom: 12, background: 'var(--surf2)' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--brd)', flexWrap: 'wrap' }}>
+        <input type="checkbox" checked={!!s.enabled} style={{ accentColor: 'var(--ok)', width: 15, height: 15 }}
+          onChange={async e => { await api.backupScheduleUpdate(s.id, { ...s, enabled: e.target.checked }); onSave({ ...s, enabled: e.target.checked }, true); }} />
+        {isEditing ? (
+          <input className="form-control" value={draft.label} style={{ flex: 1, height: 30, padding: '2px 8px', fontSize: 13, fontWeight: 600, minWidth: 140 }}
+            onChange={e => setDraft(d => ({ ...d, label: e.target.value }))} />
+        ) : (
+          <span style={{ flex: 1, fontWeight: 600, fontSize: 13, color: s.enabled ? 'var(--txt)' : 'var(--muted)' }}>{s.label}</span>
+        )}
+        {!isEditing && (
+          <span style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surf)', padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>
+            {FREQ_LABELS[s.frequency] || s.frequency}
+            {s.frequency === 'weekly'  ? ` — ${DAYS_FR[s.day_of_week ?? 0]}` : ''}
+            {s.frequency === 'monthly' ? ` — J${s.day_of_month ?? 1}` : ''}
+            {` ${String(s.hour).padStart(2,'0')}:${String(s.minute).padStart(2,'0')}`}
+          </span>
+        )}
+        {state && !isEditing && (
+          <span style={{ fontSize: 10, color: state.lastResult?.some(r => r.status !== 'ok') ? 'var(--err)' : 'var(--ok)', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: state.lastResult?.some(r => r.status !== 'ok') ? 'var(--err)' : 'var(--ok)', display: 'inline-block' }}/>
+            {state.lastRun?.slice(0, 16)}
+          </span>
+        )}
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {isEditing ? (<>
+            <button className="btn btn-sm btn-primary" onClick={() => onSave(draft)} style={{ fontSize: 11 }}>✓</button>
+            <button className="btn btn-sm" onClick={() => { setEditing(null); setDraft({ ...s }); }} style={{ fontSize: 11 }}>✕</button>
+          </>) : (<>
+            <button className="btn btn-sm" onClick={() => onDevices(s.id)}
+              style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 12, height: 12 }}>
+                <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h-3a1 1 0 0 0-1 1v3M8 3h3a1 1 0 0 1 1 1v3"/>
+              </svg>
+              {t('cron.devices') || 'Équipements'} ({s.devices?.length ?? 0})
+            </button>
+            <button className="btn btn-sm" onClick={() => { setEditing(s.id); setDraft({ ...s }); }} style={{ fontSize: 11 }}>✎</button>
+            <button className="btn btn-sm" onClick={() => onRunNow(s.id)} title="Exécuter maintenant"
+              style={{ fontSize: 11, borderColor: 'var(--acc)', color: 'var(--acc)' }}>▶</button>
+            <button className="btn btn-sm" onClick={() => onDelete(s.id)}
+              style={{ fontSize: 11, color: 'var(--err)', borderColor: 'var(--err)' }}>✕</button>
+          </>)}
+        </div>
+      </div>
+
+      {/* Edit form */}
+      {isEditing && (
+        <div style={{ padding: '12px 14px', display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">{t('cron.frequency') || 'Fréquence'}</label>
+            <select className="form-control" value={draft.frequency} onChange={e => setDraft(d => ({ ...d, frequency: e.target.value }))}>
+              <option value="daily">{t('cron.daily') || 'Quotidien'}</option>
+              <option value="weekly">{t('cron.weekly') || 'Hebdomadaire'}</option>
+              <option value="monthly">{t('cron.monthly') || 'Mensuel'}</option>
+            </select>
+          </div>
+          {draft.frequency === 'weekly' && (
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">{t('cron.day_of_week') || 'Jour'}</label>
+              <select className="form-control" value={draft.day_of_week ?? 1} onChange={e => setDraft(d => ({ ...d, day_of_week: parseInt(e.target.value) }))}>
+                {DAYS_FR.map((day, i) => <option key={i} value={i}>{day}</option>)}
+              </select>
+            </div>
+          )}
+          {draft.frequency === 'monthly' && (
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">{t('cron.day_of_month') || 'Jour du mois'}</label>
+              <select className="form-control" value={draft.day_of_month ?? 1} onChange={e => setDraft(d => ({ ...d, day_of_month: parseInt(e.target.value) }))}>
+                {Array.from({ length: 28 }, (_, i) => i + 1).map(day => <option key={day} value={day}>{day}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">{t('cron.hour') || 'Heure'}</label>
+            <select className="form-control" value={draft.hour} onChange={e => setDraft(d => ({ ...d, hour: parseInt(e.target.value) }))}>
+              {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2,'0')}</option>)}
+            </select>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">{t('cron.minute') || 'Minute'}</label>
+            <select className="form-control" value={draft.minute} onChange={e => setDraft(d => ({ ...d, minute: parseInt(e.target.value) }))}>
+              {minutes5.map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* Devices chips */}
+      {!isEditing && s.devices?.length > 0 && (
+        <div style={{ padding: '8px 14px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {s.devices.map(d => (
+            <span key={d.id} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'var(--surf)', border: '1px solid var(--brd)' }}>
+              {d.name}{d.site ? ` (${d.site})` : ''}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Last run result */}
+      {runResult?.scheduleId === s.id && (
+        <div style={{ padding: '8px 14px', borderTop: '1px solid var(--brd)', fontSize: 12 }}>
+          {runResult.results.map(r => (
+            <div key={r.deviceId} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: r.status === 'ok' ? 'var(--ok)' : 'var(--err)', flexShrink: 0, display: 'inline-block' }}/>
+              <strong>{r.deviceName}</strong>
+              {r.status === 'ok'
+                ? <span style={{ color: 'var(--ok)' }}>✓ v{r.version}</span>
+                : <span style={{ color: 'var(--err)' }}>✗ {r.errorMsg}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DevicePickerModal({ scheduleId, schedules, devices, onClose, onSave }) {
+  const { t } = useI18n();
+  const schedule = schedules.find(s => s.id === scheduleId);
+  const initial = (schedule?.devices || []).map(d => d.id);
+  const [selected, setSelected] = useState(initial);
+
+  const toggle = id => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+      onClick={onClose}>
+      <div style={{ background: 'var(--surf)', borderRadius: 'var(--rl)', padding: 24, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,.4)' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
+          {t('cron.select_devices') || 'Équipements'} — {schedule?.label}
+        </div>
+        <div style={{ overflowY: 'auto', flex: 1, marginBottom: 16 }}>
+          {devices.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13 }}>{t('backup.no_devices') || 'Aucun équipement.'}</div>}
+          {devices.map(d => (
+            <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', cursor: 'pointer', borderRadius: 'var(--r)', background: selected.includes(d.id) ? 'var(--acc-s)' : 'transparent', marginBottom: 2 }}>
+              <input type="checkbox" checked={selected.includes(d.id)} onChange={() => toggle(d.id)} style={{ accentColor: 'var(--acc)', width: 15, height: 15 }} />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</div>
+                {d.site && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.site}</div>}
+              </div>
+            </label>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose}>{t('common.cancel') || 'Annuler'}</button>
+          <button className="btn btn-primary" onClick={() => onSave(scheduleId, selected)}>
+            {t('auto_cat.save') || 'Enregistrer'} ({selected.length})
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 const MONTHS_AUDIT = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
 function ArchiveListModal({ onClose }) {

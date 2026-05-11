@@ -42,6 +42,12 @@ const EVENT_CATALOG = {
     description: 'Envoie une notification x jours avant la fin de la validité d\'une catégorie temporaire.',
     options:     { days_before: 30 },
   },
+  backup_schedule_result: {
+    key:         'backup_schedule_result',
+    label:       'Résultat des sauvegardes automatiques',
+    description: 'Envoie un rapport après chaque exécution de planification : statut (succès/échec) pour chaque équipement.',
+    options:     { notify_on_success: true, notify_on_failure: true },
+  },
 };
 
 module.exports.EVENT_CATALOG = EVENT_CATALOG;

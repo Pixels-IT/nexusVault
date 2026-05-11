@@ -1121,6 +1121,199 @@ app.put('/api/cron/config', authMiddleware, requireRole('admin'), (req, res) => 
 });
 
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── PLANIFICATION DES SAUVEGARDES AUTOMATIQUES ───────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/backup-schedules — liste
+app.get('/api/backup-schedules', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const schedules = db.prepare('SELECT * FROM backup_schedules ORDER BY id ASC').all();
+  const result = schedules.map(s => {
+    const devices = db.prepare(`
+      SELECT d.id, d.name_enc, s2.name_enc as site_name_enc
+      FROM backup_schedule_devices bsd
+      JOIN devices d ON d.id = bsd.device_id
+      LEFT JOIN sites s2 ON s2.id = d.site_id
+      WHERE bsd.schedule_id = ?
+      ORDER BY d.name_enc ASC
+    `).all(s.id).map(d => ({ id: d.id, name: decrypt(d.name_enc), site: decrypt(d.site_name_enc) }));
+    return { ...s, devices };
+  });
+  res.json(result);
+});
+
+// POST /api/backup-schedules — créer
+app.post('/api/backup-schedules', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const ip = getClientIp(req);
+  const { label, frequency, hour, minute, day_of_week, day_of_month } = req.body;
+  const r = db.prepare(`
+    INSERT INTO backup_schedules (label, frequency, hour, minute, day_of_week, day_of_month, enabled, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+  `).run(label || 'Planification', frequency || 'daily', parseInt(hour ?? 2), parseInt(minute ?? 0),
+         day_of_week != null ? parseInt(day_of_week) : null,
+         day_of_month != null ? parseInt(day_of_month) : null,
+         req.user.id);
+  audit(db, { userId: req.user.id, username: req.user.username,
+    action: 'BACKUP_CRON_CRÉÉ', category: 'backup', severity: 'info',
+    detail: `Planification #${r.lastInsertRowid} — ${label || 'Planification'} (${frequency})`,
+    ip, success: 1 });
+  res.json({ id: r.lastInsertRowid });
+});
+
+// PUT /api/backup-schedules/:id — modifier
+app.put('/api/backup-schedules/:id', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const ip = getClientIp(req);
+  const { label, frequency, hour, minute, day_of_week, day_of_month, enabled } = req.body;
+  db.prepare(`
+    UPDATE backup_schedules SET label=?, frequency=?, hour=?, minute=?, day_of_week=?, day_of_month=?, enabled=?, updated_at=datetime('now','localtime')
+    WHERE id=?
+  `).run(label, frequency || 'daily', parseInt(hour ?? 2), parseInt(minute ?? 0),
+         day_of_week != null ? parseInt(day_of_week) : null,
+         day_of_month != null ? parseInt(day_of_month) : null,
+         enabled ? 1 : 0, req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username,
+    action: 'BACKUP_CRON_MODIFIÉ', category: 'backup', severity: 'info',
+    detail: `Planification #${req.params.id} — ${label} modifiée`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+// DELETE /api/backup-schedules/:id — supprimer
+app.delete('/api/backup-schedules/:id', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const ip = getClientIp(req);
+  const s = db.prepare('SELECT label FROM backup_schedules WHERE id=?').get(req.params.id);
+  db.prepare('DELETE FROM backup_schedules WHERE id=?').run(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username,
+    action: 'BACKUP_CRON_SUPPRIMÉ', category: 'backup', severity: 'warn',
+    detail: `Planification #${req.params.id} — ${s ? s.label : '?'} supprimée`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+// PUT /api/backup-schedules/:id/devices — set devices list
+app.put('/api/backup-schedules/:id/devices', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const ip = getClientIp(req);
+  const { device_ids } = req.body; // array of device ids
+  db.prepare('DELETE FROM backup_schedule_devices WHERE schedule_id=?').run(req.params.id);
+  const stmt = db.prepare('INSERT OR IGNORE INTO backup_schedule_devices (schedule_id, device_id) VALUES (?,?)');
+  (device_ids || []).forEach(did => stmt.run(req.params.id, did));
+  audit(db, { userId: req.user.id, username: req.user.username,
+    action: 'BACKUP_CRON_ÉQUIPEMENTS_MAJ', category: 'backup', severity: 'info',
+    detail: `Planification #${req.params.id} — ${(device_ids||[]).length} équipements`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+// POST /api/backup-schedules/:id/run-now — exécution manuelle
+app.post('/api/backup-schedules/:id/run-now', authMiddleware, requireRole('admin'), async (req, res) => {
+  const results = await runBackupSchedule(parseInt(req.params.id), { userId: req.user.id, username: req.user.username }, getClientIp(req));
+  res.json({ results });
+});
+
+// ── Moteur d'exécution des planifications ────────────────────────────────────
+const scheduleState = {}; // { [id]: { lastRun, lastResult } }
+
+async function runBackupSchedule(scheduleId, triggerUser, ip = 'system') {
+  const db = getDb();
+  const schedule = db.prepare('SELECT * FROM backup_schedules WHERE id=?').get(scheduleId);
+  if (!schedule || !schedule.enabled) return [];
+
+  const deviceRows = db.prepare(`
+    SELECT d.*, m.backup_method_enc, m.backup_command_enc
+    FROM backup_schedule_devices bsd
+    JOIN devices d ON d.id = bsd.device_id
+    LEFT JOIN device_models m ON m.id = d.model_id
+    WHERE bsd.schedule_id = ?
+  `).all(scheduleId);
+
+  const results = [];
+  for (const deviceRow of deviceRows) {
+    const deviceName = decrypt(deviceRow.name_enc);
+    const deviceIp   = decrypt(deviceRow.ip_enc);
+    const sshPort    = decrypt(deviceRow.ssh_port_enc) || '22';
+    const sshUser    = decrypt(deviceRow.ssh_user_enc);
+    const sshPass    = decrypt(deviceRow.ssh_password_enc);
+    const method     = decrypt(deviceRow.backup_method_enc) || 'SSH';
+    const command    = decrypt(deviceRow.backup_command_enc) || 'show running-config';
+    const last       = db.prepare('SELECT MAX(version) as v FROM backups WHERE device_id=?').get(deviceRow.id);
+    const version    = (last.v || 0) + 1;
+
+    let content = '', status = 'ok', errorMsg = '';
+    if (method === 'SSH') {
+      try {
+        content = await sshExec({ host: deviceIp, port: parseInt(sshPort)||22, username: sshUser, password: sshPass, command, timeout: 45000 });
+        if (!content || content.trim().length < 10) throw new Error('Sortie SSH vide');
+      } catch (err) {
+        status = 'error'; errorMsg = err.message;
+        content = `! ERREUR BACKUP SSH — ${new Date().toISOString()}\n! ${deviceName} (${deviceIp})\n! ${err.message}`;
+      }
+    } else {
+      status = 'warn'; errorMsg = `Méthode ${method} non supportée`;
+      content = `! Méthode ${method} non supportée — ${deviceName}`;
+    }
+
+    const r = db.prepare(`INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc, triggered_by) VALUES (?,?,?,?,?,?,?)`)
+      .run(deviceRow.id, version, encrypt(content), content.length, status, encrypt(`Planification: ${schedule.label}`), triggerUser.userId || null);
+
+    audit(db, { userId: triggerUser.userId || null, username: triggerUser.username || 'cron',
+      action: status === 'ok' ? 'BACKUP_DÉCLENCHÉ' : 'BACKUP_ÉCHEC',
+      category: 'backup', severity: status === 'ok' ? 'info' : 'error',
+      detail: `[CRON] ${schedule.label} — ${deviceName} (${deviceIp}) — ${status === 'ok' ? `v${version} OK` : `ERREUR: ${errorMsg}`}`,
+      ip, success: status === 'ok' ? 1 : 0 });
+
+    results.push({ deviceId: deviceRow.id, deviceName, status, version, errorMsg });
+  }
+
+  scheduleState[scheduleId] = { lastRun: nowLocal(), lastResult: results };
+
+  // Envoyer notification si configurée
+  try {
+    const { dispatch } = require('./notifications.js');
+    const ok    = results.filter(r => r.status === 'ok').length;
+    const fail  = results.filter(r => r.status !== 'ok').length;
+    const body  = results.map(r => `${r.status === 'ok' ? '✓' : '✗'} ${r.deviceName} — ${r.status === 'ok' ? `v${r.version} succès` : `ERREUR: ${r.errorMsg}`}`).join('\n');
+    await dispatch('backup_schedule_result', {
+      subject: `[NexusVault] Planification "${schedule.label}" — ${ok} OK / ${fail} erreur(s)`,
+      html: `<h3>Planification : ${schedule.label}</h3><pre style="font-family:monospace">${body}</pre><p>Exécuté le ${nowLocal()}</p>`,
+      text: `Planification: ${schedule.label}\n${body}\n\nExécuté le ${nowLocal()}`,
+      ok, fail,
+    }, db);
+  } catch (e) { logger.warn('[BACKUP_CRON] Notification error: ' + e.message); }
+
+  return results;
+}
+
+// ── Tick toutes les minutes — vérifie si un cron doit tourner ─────────────────
+setInterval(() => {
+  const db = getDb();
+  const schedules = db.prepare('SELECT * FROM backup_schedules WHERE enabled=1').all();
+  const now = new Date();
+  const h = now.getHours(), m = now.getMinutes(), dow = now.getDay(), dom = now.getDate();
+
+  for (const s of schedules) {
+    if (s.hour !== h || s.minute !== m) continue;
+    // Check frequency
+    if (s.frequency === 'weekly'  && s.day_of_week  !== dow) continue;
+    if (s.frequency === 'monthly' && s.day_of_month !== dom) continue;
+    // Avoid double-run in same minute
+    const last = scheduleState[s.id]?.lastRun;
+    if (last) {
+      const lastDate = new Date(last.replace(' ', 'T'));
+      if ((now - lastDate) < 60000) continue;
+    }
+    logger.info(`[BACKUP_CRON] Exécution planification #${s.id} "${s.label}"`);
+    runBackupSchedule(s.id, { userId: null, username: 'cron' }, 'cron').catch(e => logger.error('[BACKUP_CRON] ' + e.message));
+  }
+}, 60 * 1000);
+
+// GET /api/backup-schedules/states — last run states
+app.get('/api/backup-schedules/states', authMiddleware, requireRole('admin'), (req, res) => {
+  res.json(scheduleState);
+});
+
+
 // ── AUDIT : ARCHIVER MAINTENANT (manuel / test) ────────────────────────────
 app.post('/api/audit/archive-now', authMiddleware, requireRole('admin'), (req, res) => {
   const db = getDb();

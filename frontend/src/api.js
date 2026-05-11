@@ -149,6 +149,15 @@ const api = {
   smtpTest: () => request('POST', '/smtp/test'),
   cronStatus: () => request('GET', '/cron/status'),
   cronConfig: (d) => request('PUT', '/cron/config', d),
+
+  // Backup schedules
+  backupSchedules:        ()      => request('GET',    '/backup-schedules'),
+  backupScheduleCreate:   (d)     => request('POST',   '/backup-schedules', d),
+  backupScheduleUpdate:   (id, d) => request('PUT',    `/backup-schedules/${id}`, d),
+  backupScheduleDelete:   (id)    => request('DELETE', `/backup-schedules/${id}`),
+  backupScheduleDevices:  (id, d) => request('PUT',    `/backup-schedules/${id}/devices`, d),
+  backupScheduleRunNow:   (id)    => request('POST',   `/backup-schedules/${id}/run-now`),
+  backupScheduleStates:   ()      => request('GET',    '/backup-schedules/states'),
   auditArchiveGet: (id) => request('GET', `/audit/archives/${id}`),
   // Sites
   sites: () => request('GET', '/sites'),

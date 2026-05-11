@@ -290,6 +290,31 @@ function initSchema() {
   try { db.exec("ALTER TABLE users ADD COLUMN totp_secret TEXT"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}
 
+  // ── Planification des sauvegardes automatiques ───────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS backup_schedules (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      label       TEXT NOT NULL DEFAULT 'Planification',
+      frequency   TEXT NOT NULL DEFAULT 'daily',  -- daily | weekly | monthly
+      hour        INTEGER NOT NULL DEFAULT 2,
+      minute      INTEGER NOT NULL DEFAULT 0,
+      day_of_week INTEGER,   -- 0=dim..6=sam (hebdo)
+      day_of_month INTEGER,  -- 1-31 (mensuel)
+      enabled     INTEGER NOT NULL DEFAULT 1,
+      created_by  INTEGER REFERENCES users(id),
+      created_at  TEXT DEFAULT (datetime('now','localtime')),
+      updated_at  TEXT DEFAULT (datetime('now','localtime'))
+    );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS backup_schedule_devices (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      schedule_id INTEGER NOT NULL REFERENCES backup_schedules(id) ON DELETE CASCADE,
+      device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      UNIQUE(schedule_id, device_id)
+    );
+  `);
+
   // Admin par défaut
   const adminExists = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
   if (!adminExists) {
