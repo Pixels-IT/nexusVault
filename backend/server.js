@@ -1157,7 +1157,7 @@ app.post('/api/backup-schedules', authMiddleware, requireRole('admin'), (req, re
          req.user.id);
   audit(db, { userId: req.user.id, username: req.user.username,
     action: 'BACKUP_CRON_CRÉÉ', category: 'backup', severity: 'info',
-    detail: `Planification #${r.lastInsertRowid} — ${label || 'Planification'} (${frequency})`,
+    detail: `"${label || 'Planification'}" créée — ${frequency} à ${String(parseInt(hour??2)).padStart(2,'0')}:${String(parseInt(minute??0)).padStart(2,'0')}`,
     ip, success: 1 });
   res.json({ id: r.lastInsertRowid });
 });
@@ -1176,7 +1176,7 @@ app.put('/api/backup-schedules/:id', authMiddleware, requireRole('admin'), (req,
          enabled ? 1 : 0, req.params.id);
   audit(db, { userId: req.user.id, username: req.user.username,
     action: 'BACKUP_CRON_MODIFIÉ', category: 'backup', severity: 'info',
-    detail: `Planification #${req.params.id} — ${label} modifiée`, ip, success: 1 });
+    detail: `"${label}" modifiée — ${frequency} à ${String(parseInt(hour??2)).padStart(2,'0')}:${String(parseInt(minute??0)).padStart(2,'0')}`, ip, success: 1 });
   res.json({ success: true });
 });
 
@@ -1254,32 +1254,64 @@ async function runBackupSchedule(scheduleId, triggerUser, ip = 'system') {
       content = `! Méthode ${method} non supportée — ${deviceName}`;
     }
 
-    const r = db.prepare(`INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc, triggered_by) VALUES (?,?,?,?,?,?,?)`)
-      .run(deviceRow.id, version, encrypt(content), content.length, status, encrypt(`Planification: ${schedule.label}`), triggerUser.userId || null);
+    // ── Déduplication : ne pas créer si identique à la dernière version ────────
+    let isDuplicate = false;
+    if (status === 'ok') {
+      const lastBackup = db.prepare(
+        'SELECT content_enc FROM backups WHERE device_id=? ORDER BY version DESC LIMIT 1'
+      ).get(deviceRow.id);
+      if (lastBackup) {
+        try {
+          const lastContent = decrypt(lastBackup.content_enc);
+          // Comparaison normalisée (ignore espaces en fin de ligne et lignes vides finales)
+          const normalize = s => s.replace(/[ \t]+$/mg, '').trim();
+          if (normalize(lastContent) === normalize(content)) {
+            isDuplicate = true;
+          }
+        } catch {}
+      }
+    }
 
-    audit(db, { userId: triggerUser.userId || null, username: triggerUser.username || 'cron',
-      action: status === 'ok' ? 'BACKUP_DÉCLENCHÉ' : 'BACKUP_ÉCHEC',
-      category: 'backup', severity: status === 'ok' ? 'info' : 'error',
-      detail: `[CRON] ${schedule.label} — ${deviceName} (${deviceIp}) — ${status === 'ok' ? `v${version} OK` : `ERREUR: ${errorMsg}`}`,
-      ip, success: status === 'ok' ? 1 : 0 });
+    if (isDuplicate) {
+      logger.info(`[BACKUP_CRON] ${deviceName} — identique à la dernière version, pas de nouvelle backup`);
+      audit(db, { userId: triggerUser.userId || null, username: triggerUser.username || 'cron',
+        action: 'BACKUP_IDENTIQUE', category: 'backup', severity: 'info',
+        detail: `[CRON] "${schedule.label}" (${schedule.frequency} ${String(schedule.hour).padStart(2,'0')}:${String(schedule.minute).padStart(2,'0')}) — ${deviceName} (${deviceIp}) — identique à v${version - 1}, ignoré`,
+        ip, success: 1 });
+      results.push({ deviceId: deviceRow.id, deviceName, status: 'identical', version: version - 1, errorMsg: '' });
+    } else {
+      const r = db.prepare(`INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc, triggered_by, created_at) VALUES (?,?,?,?,?,?,?,?)`)
+        .run(deviceRow.id, version, encrypt(content), content.length, status, encrypt(`Planification: ${schedule.label}`), String(triggerUser.userId || 'cron'), nowLocal());
 
-    results.push({ deviceId: deviceRow.id, deviceName, status, version, errorMsg });
+      audit(db, { userId: triggerUser.userId || null, username: triggerUser.username || 'cron',
+        action: status === 'ok' ? 'BACKUP_DÉCLENCHÉ' : 'BACKUP_ÉCHEC',
+        category: 'backup', severity: status === 'ok' ? 'info' : 'error',
+        detail: `[CRON] "${schedule.label}" (${schedule.frequency} ${String(schedule.hour).padStart(2,'0')}:${String(schedule.minute).padStart(2,'0')}) — ${deviceName} (${deviceIp}) — ${status === 'ok' ? `v${version} OK` : `ERREUR: ${errorMsg}`}`,
+        ip, success: status === 'ok' ? 1 : 0 });
+
+      results.push({ deviceId: deviceRow.id, deviceName, status, version, errorMsg });
+    }
   }
 
   scheduleState[scheduleId] = { lastRun: nowLocal(), lastResult: results };
 
   // Envoyer notification si configurée
   try {
-    const { dispatch } = require('./notifications.js');
-    const ok    = results.filter(r => r.status === 'ok').length;
-    const fail  = results.filter(r => r.status !== 'ok').length;
-    const body  = results.map(r => `${r.status === 'ok' ? '✓' : '✗'} ${r.deviceName} — ${r.status === 'ok' ? `v${r.version} succès` : `ERREUR: ${r.errorMsg}`}`).join('\n');
+    const ok      = results.filter(r => r.status === 'ok').length;
+    const fail    = results.filter(r => r.status !== 'ok' && r.status !== 'identical').length;
+    const same    = results.filter(r => r.status === 'identical').length;
+    const body    = results.map(r => {
+      if (r.status === 'ok')        return `✓ ${r.deviceName} — v${r.version} sauvegardé`;
+      if (r.status === 'identical') return `≡ ${r.deviceName} — identique à v${r.version}, ignorée`;
+      return `✗ ${r.deviceName} — ERREUR: ${r.errorMsg}`;
+    }).join('\n');
+    const subject = `[NexusVault] ${schedule.label} — ${ok} OK${same ? ` / ${same} inchangé(s)` : ''}${fail ? ` / ${fail} erreur(s)` : ''}`;
     await dispatch('backup_schedule_result', {
-      subject: `[NexusVault] Planification "${schedule.label}" — ${ok} OK / ${fail} erreur(s)`,
+      subject,
       html: `<h3>Planification : ${schedule.label}</h3><pre style="font-family:monospace">${body}</pre><p>Exécuté le ${nowLocal()}</p>`,
       text: `Planification: ${schedule.label}\n${body}\n\nExécuté le ${nowLocal()}`,
-      ok, fail,
-    }, db);
+      ok, fail, same,
+    }, getDb);
   } catch (e) { logger.warn('[BACKUP_CRON] Notification error: ' + e.message); }
 
   return results;
@@ -1289,8 +1321,14 @@ async function runBackupSchedule(scheduleId, triggerUser, ip = 'system') {
 setInterval(() => {
   const db = getDb();
   const schedules = db.prepare('SELECT * FROM backup_schedules WHERE enabled=1').all();
-  const now = new Date();
-  const h = now.getHours(), m = now.getMinutes(), dow = now.getDay(), dom = now.getDate();
+  // Utiliser l'heure locale du serveur (configurable via TZ env var dans docker-compose)
+  const nowStr = nowLocal(); // format: YYYY-MM-DD HH:MM:SS — heure locale (TZ Docker)
+  const h = parseInt(nowStr.slice(11,13));
+  const m = parseInt(nowStr.slice(14,16));
+  // Pour le jour de la semaine et du mois, utiliser aussi l'heure locale
+  const localDate = new Date();
+  const dow = localDate.getDay();
+  const dom = localDate.getDate();
 
   for (const s of schedules) {
     if (s.hour !== h || s.minute !== m) continue;
@@ -1301,7 +1339,8 @@ setInterval(() => {
     const last = scheduleState[s.id]?.lastRun;
     if (last) {
       const lastDate = new Date(last.replace(' ', 'T'));
-      if ((now - lastDate) < 60000) continue;
+      const nowMs = Date.now();
+      if ((nowMs - lastDate.getTime()) < 60000) continue;
     }
     logger.info(`[BACKUP_CRON] Exécution planification #${s.id} "${s.label}"`);
     runBackupSchedule(s.id, { userId: null, username: 'cron' }, 'cron').catch(e => logger.error('[BACKUP_CRON] ' + e.message));
@@ -1434,38 +1473,45 @@ app.patch('/api/sites/:id/country', authMiddleware, requirePerm('config_write'),
 });
 
 app.get('/api/sites', authMiddleware, (req, res) => {
-  const rows = getDb().prepare('SELECT * FROM sites ORDER BY rowid DESC').all();
   const db = getDb();
+  const rows = db.prepare('SELECT * FROM sites ORDER BY name_enc ASC').all();
   res.json(rows.map(r => ({
     id: r.id, name: decrypt(r.name_enc), location: decrypt(r.location_enc),
     contact: decrypt(r.contact_enc), description: decrypt(r.description_enc),
     created_at: r.created_at, country_id: r.country_id || null,
+    parent_id: r.parent_id || null,
     device_count: db.prepare('SELECT COUNT(*) as c FROM devices WHERE site_id = ?').get(r.id).c
   })));
 });
 
 app.post('/api/sites', authMiddleware, requirePerm('config_write'), (req, res) => {
-  const { name, location, contact, description } = req.body;
+  const { name, location, contact, description, parent_id } = req.body;
   if (!name) return res.status(400).json({ error: 'Nom requis' });
-  const r = getDb().prepare('INSERT INTO sites (name_enc, location_enc, contact_enc, description_enc) VALUES (?,?,?,?)').run(encrypt(name), encrypt(location), encrypt(contact), encrypt(description));
-  audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'SITE_CRÉÉ', category: 'config', severity: 'info', detail: name, ip: getClientIp(req), success: 1 });
-  res.json({ id: r.lastInsertRowid, name, location, contact, description });
+  const db = getDb();
+  const r = db.prepare('INSERT INTO sites (name_enc, location_enc, contact_enc, description_enc, parent_id) VALUES (?,?,?,?,?)')
+    .run(encrypt(name), encrypt(location||''), encrypt(contact||''), encrypt(description||''), parent_id || null);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SITE_CRÉÉ',
+    category: 'config', severity: 'info', detail: name, ip: getClientIp(req), success: 1 });
+  res.json({ id: r.lastInsertRowid, name, location, contact, description, parent_id: parent_id || null });
 });
 
 app.put('/api/sites/:id', authMiddleware, requirePerm('config_write'), (req, res) => {
-  const { name, location, contact, description } = req.body;
-  getDb().prepare(`UPDATE sites SET name_enc=?, location_enc=?, contact_enc=?, description_enc=?, updated_at=? WHERE id=?`).run(encrypt(name), encrypt(location), encrypt(contact), encrypt(description), nowLocal(), req.params.id);
-  audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'SITE_MODIFIÉ', category: 'config', severity: 'info', detail: name, ip: getClientIp(req), success: 1 });
+  const { name, location, contact, description, parent_id } = req.body;
+  const db = getDb();
+  const safeParent = parent_id && parseInt(parent_id) !== parseInt(req.params.id) ? parent_id : null;
+  db.prepare("UPDATE sites SET name_enc=?, location_enc=?, contact_enc=?, description_enc=?, parent_id=?, updated_at=datetime('now','localtime') WHERE id=?")
+    .run(encrypt(name), encrypt(location||''), encrypt(contact||''), encrypt(description||''), safeParent, req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SITE_MODIFIÉ',
+    category: 'config', severity: 'info', detail: name, ip: getClientIp(req), success: 1 });
   res.json({ success: true });
 });
 
 app.delete('/api/sites/:id', authMiddleware, requirePerm('config_write'), (req, res) => {
   getDb().prepare('DELETE FROM sites WHERE id = ?').run(req.params.id);
-  audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'SITE_SUPPRIMÉ', category: 'config', severity: 'warn', detail: `ID ${req.params.id}`, ip: getClientIp(req), success: 1 });
+  audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'SITE_SUPPRIMÉ',
+    category: 'config', severity: 'warn', detail: `Site #${req.params.id}`, ip: getClientIp(req), success: 1 });
   res.json({ success: true });
 });
-
-// ── MODELS ────────────────────────────────────────────────────────────────────
 app.get('/api/models', authMiddleware, (req, res) => {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM device_models ORDER BY rowid DESC').all();
@@ -2484,51 +2530,104 @@ app.get('/api/automation/files/:id/preview', authMiddleware, async (req, res) =>
   const os = require('os'); const path = require('path');
   const { execFile } = require('child_process'); const fs = require('fs');
   const db = getDb(); const ip = getClientIp(req);
-  const row = db.prepare(`SELECT f.*, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
+
+  const row = db.prepare(`
+    SELECT f.*, d.name as doc_name
+    FROM automation_document_files f
+    LEFT JOIN automation_documents d ON d.id = f.document_id
+    WHERE f.id = ?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Introuvable' });
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_PRÉVISUALISÉ', category: 'automatisation', severity: 'info',
+
+  audit(db, { userId: req.user.id, username: req.user.username,
+    action: 'FICHIER_PRÉVISUALISÉ', category: 'automatisation', severity: 'info',
     detail: `"${row.filename}" (doc: "${row.doc_name}")`, ip, success: 1, ref_id: row.document_id });
+
   const buf = Buffer.from(row.data);
   const fn  = row.filename.toLowerCase();
   const mime = row.mimetype || '';
 
-  // PRIORITÉ 1 : Word/ODT/PPT → LibreOffice → PDF fidèle (styles, couleurs, mise en page)
-  if (fn.match(/\.(docx?|odt|odp|pptx?)$/) || mime.includes('word') || mime.includes('officedocument') || mime.includes('opendocument')) {
-    const ext    = fn.match(/\.([^.]+)$/)?.[1] || 'docx';
-    const tmpIn  = path.join(os.tmpdir(), `nv_${Date.now()}_${row.id}.${ext}`);
-    const tmpPdf = path.join(os.tmpdir(), `nv_${Date.now()}_${row.id}.pdf`);
+  // ── Office → LibreOffice → PDF (avec cache en base) ─────────────────────────
+  if (fn.match(/\.(docx?|odt|odp|pptx?|xlsx?|ods|odg)$/) ||
+      mime.includes('word') || mime.includes('officedocument') || mime.includes('opendocument')) {
+
+    // Vérifier le cache — valide tant que le fichier n'a pas été remplacé
+    if (row.pdf_cache && row.pdf_cached_at) {
+      logger.info(`[PREVIEW] Cache HIT pour fichier #${row.id} "${row.filename}"`);
+      const cached = Buffer.from(row.pdf_cache);
+      return res.json({ type: 'pdf', content: cached.toString('base64'),
+        filename: row.filename, mimetype: 'application/pdf', cached: true });
+    }
+
+    logger.info(`[PREVIEW] Conversion LibreOffice pour #${row.id} "${row.filename}"...`);
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nv_lo_'));
+    const ext    = path.extname(row.filename) || '.docx';
+    const safeBaseName = `doc_${row.id}`;
+    const tmpIn  = path.join(tmpDir, safeBaseName + ext);
+
     try {
       fs.writeFileSync(tmpIn, buf);
-      await new Promise((resolve, reject) => {
-        execFile('libreoffice', ['--headless', '--convert-to', 'pdf', '--outdir', os.tmpdir(), tmpIn],
-          { timeout: 30000 }, (err) => err ? reject(err) : resolve());
+      // Chercher l'exécutable LibreOffice (soffice sur Alpine, libreoffice sur Debian/Ubuntu)
+      const loBin = await new Promise(resolve => {
+        const { execFile: ef } = require('child_process');
+        ef('which', ['soffice'], (e, out) => {
+          if (!e && out.trim()) return resolve('soffice');
+          ef('which', ['libreoffice'], (e2, out2) => {
+            resolve(!e2 && out2.trim() ? 'libreoffice' : 'soffice');
+          });
+        });
       });
-      const baseName = path.basename(tmpIn, path.extname(tmpIn));
-      const generatedPdf = path.join(os.tmpdir(), baseName + '.pdf');
-      const pdfBuf = fs.readFileSync(generatedPdf);
-      try { fs.unlinkSync(tmpIn); fs.unlinkSync(generatedPdf); } catch {}
-      return res.json({ type: 'pdf', content: pdfBuf.toString('base64'), filename: row.filename, mimetype: 'application/pdf' });
+      logger.info(`[PREVIEW] LibreOffice binary: ${loBin}`);
+
+      await new Promise((resolve, reject) => {
+        execFile(loBin, [
+          '--headless', '--convert-to', 'pdf', '--outdir', tmpDir, tmpIn,
+        ], { timeout: 60000, env: { ...process.env, HOME: tmpDir } }, (err, stdout, stderr) => {
+          if (err) {
+            logger.warn(`[PREVIEW] LibreOffice stderr: ${stderr}`);
+            return reject(new Error(err.message + (stderr ? '\n' + stderr.slice(0, 200) : '')));
+          }
+          resolve();
+        });
+      });
+      const pdfPath = path.join(tmpDir, safeBaseName + '.pdf');
+      if (!fs.existsSync(pdfPath)) throw new Error(`LibreOffice n'a pas produit de PDF (${pdfPath})`);
+      const pdfBuf = fs.readFileSync(pdfPath);
+
+      // Sauvegarder en cache dans la base
+      db.prepare(`UPDATE automation_document_files
+        SET pdf_cache = ?, pdf_cached_at = datetime('now','localtime')
+        WHERE id = ?`).run(pdfBuf, row.id);
+      logger.info(`[PREVIEW] PDF en cache (${pdfBuf.length} o) pour #${row.id}`);
+
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      return res.json({ type: 'pdf', content: pdfBuf.toString('base64'),
+        filename: row.filename, mimetype: 'application/pdf', cached: false });
+
     } catch (err) {
-      try { fs.unlinkSync(tmpIn); } catch {}
-      logger.warn('[PREVIEW] LibreOffice: ' + err.message);
-      // Fallback: retourner base64 brut pour mammoth côté client
-      return res.json({ type: 'office', content: buf.toString('base64'), filename: row.filename, mimetype: mime });
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      logger.warn(`[PREVIEW] LibreOffice échoué pour #${row.id}: ${err.message}`);
+      return res.json({ type: 'office', content: buf.toString('base64'),
+        filename: row.filename, mimetype: row.mimetype });
     }
   }
 
-  // PRIORITÉ 2 : PDF direct
+  // ── PDF direct ───────────────────────────────────────────────────────────────
   if (fn.endsWith('.pdf') || mime === 'application/pdf') {
-    return res.json({ type: 'pdf', content: buf.toString('base64'), filename: row.filename, mimetype: mime });
+    return res.json({ type: 'pdf', content: buf.toString('base64'),
+      filename: row.filename, mimetype: 'application/pdf' });
   }
 
-  // PRIORITÉ 3 : Texte / Code
-  if (mime.startsWith('text/') || mime.includes('json') || mime.includes('yaml') || mime.includes('xml') ||
-      mime.includes('javascript') || mime.includes('python') || mime.includes('shell') ||
-      ['.txt','.md','.yaml','.yml','.json','.xml','.sh','.py','.js','.ts','.sql','.ini','.cfg','.conf','.log','.csv',
-       '.html','.htm','.css','.rb','.go','.java','.c','.cpp','.h','.rs','.php']
-        .some(ext => fn.endsWith(ext))) {
-    return res.json({ type: 'text', content: buf.toString('utf8'), filename: row.filename, mimetype: mime });
+  // ── Texte / Code ─────────────────────────────────────────────────────────────
+  if (mime.startsWith('text/') || mime.includes('json') || mime.includes('yaml') ||
+      mime.includes('xml') || mime.includes('javascript') || mime.includes('python') ||
+      mime.includes('shell') || ['.txt','.md','.yaml','.yml','.json','.xml','.sh',
+      '.py','.js','.ts','.sql','.ini','.cfg','.conf','.toml','.html','.htm',
+      '.css','.rb','.go','.java','.c','.cpp','.h','.rs','.php'].some(e => fn.endsWith(e))) {
+    return res.json({ type: 'text', content: buf.toString('utf8'),
+      filename: row.filename, mimetype: mime });
   }
+
   res.json({ type: 'unsupported', filename: row.filename });
 });
 

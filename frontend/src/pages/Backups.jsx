@@ -559,7 +559,8 @@ function DeviceSection({ device, compareMode, selected, onSelectCompare, onView,
                   <VersionRow key={b.id} backup={b}
                     onView={onView} compareMode={compareMode} selected={selected}
                     onSelectCompare={onSelectCompare}
-                    onPin={handlePinLocal} onDelete={onDelete} />
+                    onPin={handlePinLocal}
+                    onDelete={backup => onDelete({ ...backup, _onDeleted: id => setBackups(prev => prev.filter(x => x.id !== id)) })} />
                 ))}
               </tbody>
             </table>}
@@ -695,8 +696,12 @@ export default function Backups() {
   }
   async function confirmDeleteBackup() {
     if (!confirmDelete) return;
-    try { await api.deleteBackup(confirmDelete.id); setConfirmDelete(null); load(); }
-    catch (e) { alert('Error : ' + e.message); setConfirmDelete(null); }
+    try {
+      await api.deleteBackup(confirmDelete.id);
+      // Notifier DeviceSection via callback pour mise à jour locale (pas de reload global)
+      if (confirmDelete._onDeleted) confirmDelete._onDeleted(confirmDelete.id);
+      setConfirmDelete(null);
+    } catch (e) { alert('Error : ' + e.message); setConfirmDelete(null); }
   }
 
   const orphanDevices = devices.filter(d => !sites.find(s => s.id === d.site_id));

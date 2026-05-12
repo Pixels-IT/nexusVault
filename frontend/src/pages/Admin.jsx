@@ -2295,11 +2295,13 @@ function ScheduleRow({ s, state, editing, setEditing, onSave, onDelete, onRunNow
         <div style={{ padding: '8px 14px', borderTop: '1px solid var(--brd)', fontSize: 12 }}>
           {runResult.results.map(r => (
             <div key={r.deviceId} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: r.status === 'ok' ? 'var(--ok)' : 'var(--err)', flexShrink: 0, display: 'inline-block' }}/>
+              <span style={{ width: 8, height: 8, borderRadius: '50%',
+                background: r.status === 'ok' ? 'var(--ok)' : r.status === 'identical' ? 'var(--muted)' : 'var(--err)',
+                flexShrink: 0, display: 'inline-block' }}/>
               <strong>{r.deviceName}</strong>
-              {r.status === 'ok'
-                ? <span style={{ color: 'var(--ok)' }}>✓ v{r.version}</span>
-                : <span style={{ color: 'var(--err)' }}>✗ {r.errorMsg}</span>}
+              {r.status === 'ok'        && <span style={{ color: 'var(--ok)' }}>✓ v{r.version}</span>}
+              {r.status === 'identical' && <span style={{ color: 'var(--muted)' }}>≡ inchangé (v{r.version})</span>}
+              {r.status !== 'ok' && r.status !== 'identical' && <span style={{ color: 'var(--err)' }}>✗ {r.errorMsg}</span>}
             </div>
           ))}
         </div>

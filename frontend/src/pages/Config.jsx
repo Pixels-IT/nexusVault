@@ -7,9 +7,13 @@ import { usePerms } from '../hooks/usePerms.js';
 
 // ── SITES ────────────────────────────────────────────────────────────────────
 
-function SiteModal({site, onClose, onSave, countries = [] }) {
+function SiteModal({ site, onClose, onSave, countries = [], allSites = [] }) {
   const { t } = useI18n();
-  const [data, setData] = useState({ name: '', location: '', contact: '', description: '', country_id: null, ...(site||{}) });
+  const [data, setData] = useState({
+    name: '', location: '', contact: '', description: '',
+    country_id: null, parent_id: null,
+    ...(site || {})
+  });
   const [error, setError] = useState('');
   const set = k => e => setData(d => ({ ...d, [k]: e.target.value }));
 
@@ -17,21 +21,51 @@ function SiteModal({site, onClose, onSave, countries = [] }) {
     setError('');
     if (!data.name) return setError('Le nom est requis');
     try {
-      if (site) { await api.updateSite(site.id,data); await api.setSiteCountry(site.id,data.country_id||null).catch(()=>{}); }
-      else { const cr=await api.createSite(data); if(cr&&cr.id&&data.country_id) await api.setSiteCountry(cr.id,data.country_id).catch(()=>{}); }
+      if (site) {
+        await api.updateSite(site.id, data);
+        if (data.country_id) await api.setSiteCountry(site.id, data.country_id);
+        else await api.setSiteCountry(site.id, null);
+      } else {
+        const cr = await api.createSite(data);
+        if (cr && cr.id && data.country_id) await api.setSiteCountry(cr.id, data.country_id);
+      }
       onSave();
     } catch (e) { setError(e.message); }
   }
+
+  // Exclure le site lui-même et ses enfants comme parents possibles
+  const parentOptions = allSites.filter(s => s.id !== site?.id && s.parent_id !== site?.id)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
   return (
     <Modal title={site ? t('config.site_edit') : t('config.site_add')} onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>{t('config.cancel')}</button><button className="btn btn-primary" onClick={submit}>{t('config.save')}</button></>}>
       {error && <Alert type="err">{error}</Alert>}
-      <div className="form-group"><label className="form-label">{t('config.name')} du site *</label><input className="form-control" value={data.name} onChange={set('name')} placeholder="ex : Paris HQ" autoFocus /></div>
-      <div className="form-group"><label className="form-label">{t('config.location')}</label><input className="form-control" value={data.location} onChange={set('location')} placeholder="Ville, Pays" /></div>
-      <div className="form-group"><label className="form-label">{t('config.contact')} IT</label><input className="form-control" value={data.contact} onChange={set('contact')} placeholder="it@example.com" /></div>
-      <div className="form-group"><label className="form-label">Description</label><input className="form-control" value={data.description} onChange={set('description')} placeholder="Optionnel" /></div>
-      {countries.length>0&&<div className="form-group"><label className="form-label">Pays</label><select className="form-control" value={data.country_id||''} onChange={e=>setData(d=>({...d,country_id:e.target.value?parseInt(e.target.value):null}))}><option value="">— Aucun —</option>{countries.map(ct=><option key={ct.id} value={ct.id}>{ct.name}</option>)}</select></div>}
+      <div className="form-group"><label className="form-label">{t('config.name')} du site *</label>
+        <input className="form-control" value={data.name} onChange={set('name')} placeholder="Paris HQ" /></div>
+      <div className="form-group"><label className="form-label">{t('config.location')}</label>
+        <input className="form-control" value={data.location || ''} onChange={set('location')} placeholder="Paris, France" /></div>
+      <div className="form-group"><label className="form-label">{t('config.contact')} IT</label>
+        <input className="form-control" value={data.contact || ''} onChange={set('contact')} placeholder="it@company.fr" /></div>
+      <div className="form-group"><label className="form-label">Description</label>
+        <input className="form-control" value={data.description || ''} onChange={set('description')} /></div>
+      {parentOptions.length > 0 && (
+        <div className="form-group">
+          <label className="form-label">Site parent <span style={{ fontSize: 11, color: 'var(--muted)' }}>(optionnel — pour créer une hiérarchie)</span></label>
+          <select className="form-control" value={data.parent_id || ''} onChange={e => setData(d => ({ ...d, parent_id: e.target.value ? parseInt(e.target.value) : null }))}>
+            <option value="">— Aucun (site racine) —</option>
+            {parentOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
+      {countries.length > 0 && (
+        <div className="form-group"><label className="form-label">Pays</label>
+          <select className="form-control" value={data.country_id || ''} onChange={e => setData(d => ({ ...d, country_id: e.target.value ? parseInt(e.target.value) : null }))}>
+            <option value="">— Aucun —</option>
+            {countries.map(ctry => <option key={ctry.id} value={ctry.id}>{ctry.name}</option>)}
+          </select>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -72,22 +106,31 @@ function SitesTab({ countries = [] }) {
           </tr>
         </thead>
         <tbody>
-          {sites.map(s => (
-            <tr key={s.id}>
-              <td><div className="cell-name">{s.name}</div></td>
-              <td className="cell-sub">{s.location}</td>
-              <td className="cell-sub">{s.contact}</td>
-              <td><span className="badge badge-info">{s.device_count} équip.</span></td>
-              <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
-                {can('config_write') && <button className="btn btn-sm" style={{marginRight:4}} onClick={() => setModal(s)}>{t('config.edit')}</button>}
-                {can('config_write') && <button className="btn btn-sm btn-danger" onClick={() => setConfirm(s)}>Suppr.</button>}
-              </td>
-            </tr>
-          ))}
+          {sites.map(s => {
+            const parent = s.parent_id ? sites.find(p => p.id === s.parent_id) : null;
+            return (
+              <tr key={s.id}>
+                <td>
+                  <div className="cell-name" style={{ paddingLeft: parent ? 20 : 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {parent && <span style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1 }}>↳</span>}
+                    {s.name}
+                    {parent && <span style={{ fontSize: 10, color: 'var(--muted)', background: 'var(--surf2)', padding: '1px 6px', borderRadius: 8, border: '1px solid var(--brd)' }}>{parent.name}</span>}
+                  </div>
+                </td>
+                <td className="cell-sub">{s.location}</td>
+                <td className="cell-sub">{s.contact}</td>
+                <td><span className="badge badge-info">{s.device_count} équip.</span></td>
+                <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
+                  {can('config_write') && <button className="btn btn-sm" style={{marginRight:6}} onClick={() => setModal(s)}>✎</button>}
+                  {can('config_write') && <button className="btn btn-sm btn-danger" onClick={() => setConfirm(s)}>✕</button>}
+                </td>
+              </tr>
+            );
+          })}
           {sites.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>{t('config.no_sites')}</td></tr>}
         </tbody>
       </table>
-      {modal !== null && <SiteModal site={modal.id ? modal : null} countries={countries} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
+      {modal !== null && <SiteModal site={modal.id ? modal : null} countries={countries} allSites={sites} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
       {confirm && <ConfirmModal message={`Supprimer le site "${confirm.name}" ?`} onConfirm={async () => { await api.deleteSite(confirm.id); setConfirm(null); load(); }} onCancel={() => setConfirm(null)} />}
     </div>
   );

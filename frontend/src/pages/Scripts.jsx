@@ -610,9 +610,18 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
                             <>
                               {canPreview && (
                                 <button className="btn btn-sm" style={{marginRight:4, color:'var(--acc)', borderColor:'var(--acc)'}}
-                                  onClick={async()=>{
-                                    const data = await api.previewAutomationFile(f.id);
-                                    setPreviewFile({...data, id:f.id});
+                                  onClick={async (e) => {
+                                    const btn = e.currentTarget;
+                                    btn.disabled = true;
+                                    const prev = btn.textContent;
+                                    btn.textContent = 'Conversion…';
+                                    try {
+                                      const data = await api.previewAutomationFile(f.id);
+                                      setPreviewFile({...data, id: f.id});
+                                    } finally {
+                                      btn.disabled = false;
+                                      btn.textContent = prev;
+                                    }
                                   }}>
                                   Voir
                                 </button>
@@ -798,6 +807,11 @@ function FilePreviewModal({ file, catType, onClose }) {
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
         </svg>
         <span>{t('automatisation.preview_title', {name: file.filename})}</span>
+        {file.cached && (
+          <span style={{ fontSize: 10, background: 'var(--ok-s)', color: 'var(--ok)', border: '1px solid var(--ok)', borderRadius: 10, padding: '1px 7px', marginLeft: 4 }}>
+            ⚡ cache
+          </span>
+        )}
         {isScript && file.type === 'text' && (
           <span style={{ fontSize:10, background:'var(--ok-s)', color:'var(--ok)', border:'1px solid var(--ok)', borderRadius:4, padding:'1px 6px', fontWeight:700 }}>
             {lang.toUpperCase()}

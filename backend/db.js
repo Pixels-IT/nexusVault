@@ -289,6 +289,11 @@ function initSchema() {
   try { db.exec("ALTER TABLE backups ADD COLUMN pinned INTEGER DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN totp_secret TEXT"); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}
+  // Migration: sites hiérarchiques (parent/enfant)
+  try { db.exec("ALTER TABLE sites ADD COLUMN parent_id INTEGER REFERENCES sites(id) ON DELETE SET NULL"); } catch {}
+  // Cache PDF LibreOffice pour les aperçus (évite de reConvertir à chaque clic)
+  try { db.exec("ALTER TABLE automation_document_files ADD COLUMN pdf_cache BLOB"); } catch {}
+  try { db.exec("ALTER TABLE automation_document_files ADD COLUMN pdf_cached_at TEXT"); } catch {}
 
   // ── Planification des sauvegardes automatiques ───────────────────────────────
   db.exec(`
