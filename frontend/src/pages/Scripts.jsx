@@ -301,6 +301,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
   const [securedGlobalPwd, setSecuredGlobalPwd] = useState(null); // null = not loaded yet
   const [detail, setDetail]       = useState(isCreate ? null : doc);
   const [saving, setSaving]       = useState(false);
+  const [replaceTarget, setReplaceTarget] = useState(null);
   const [error, setError]         = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -626,6 +627,20 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
                                   Voir
                                 </button>
                               )}
+                              {canWrite && catType === 'procedure' && (
+                                <>
+                                  <input type="file" id={`replace-input-${f.id}`} style={{display:'none'}}
+                                    onChange={e => {
+                                      const nf = e.target.files[0];
+                                      if (nf) setReplaceTarget({ file: f, newFile: nf });
+                                      e.target.value = '';
+                                    }} />
+                                  <button className="btn btn-sm" style={{marginRight:4, borderColor:'var(--warn)', color:'var(--warn)'}}
+                                    onClick={() => document.getElementById(`replace-input-${f.id}`).click()}>
+                                    ↺ Remplacer
+                                  </button>
+                                </>
+                              )}
                               <button className="btn btn-sm" style={{marginRight: canWrite?4:0}}
                                 onClick={()=>api.downloadAutomationFile(f.id, f.filename)}>↓</button>
                               {canWrite && (
@@ -679,12 +694,35 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
       )}
 
       {confirmFile && (
-        <ConfirmModal message={`{t('automatisation.delete_file', {name: ''}).split(' {name}')[0]} "${confirmFile.filename}" ?`}
+        <ConfirmModal message={`Supprimer le fichier "${confirmFile.filename}" ?`}
           onConfirm={async()=>{ await api.deleteAutomationFile(confirmFile.id); setConfirmFile(null); refreshDetail(); onDocUpdated(); }}
           onCancel={()=>setConfirmFile(null)} />
       )}
       {previewFile && (
         <FilePreviewModal file={previewFile} catType={catType} onClose={()=>setPreviewFile(null)} />
+      )}
+      {replaceTarget && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000}}
+          onClick={e=>e.stopPropagation()}>
+          <div style={{background:'var(--surf)',borderRadius:'var(--rl)',padding:24,maxWidth:480,width:'90%',boxShadow:'0 8px 40px rgba(0,0,0,.4)'}}>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>Remplacer le fichier</div>
+            <p style={{fontSize:13,marginBottom:16}}>
+              Voulez-vous remplacer <strong>{replaceTarget.file.filename}</strong>
+              <span style={{color:'var(--muted)',fontSize:11,display:'block',marginTop:2}}>créé le {replaceTarget.file.uploaded_at?.slice(0,10)}</span>
+              par <strong>{replaceTarget.newFile.name}</strong> ?
+            </p>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button className="btn" onClick={()=>setReplaceTarget(null)}>Annuler</button>
+              <button className="btn btn-primary" onClick={async()=>{
+                try {
+                  await api.replaceAutomationFile(replaceTarget.file.id, replaceTarget.newFile);
+                  const upd = await api.automationDocument(detail.id);
+                  setDetail(upd); setReplaceTarget(null);
+                } catch(e) { alert('Erreur : '+e.message); }
+              }}>Oui, remplacer</button>
+            </div>
+          </div>
+        </div>
       )}
     </Modal>
   );

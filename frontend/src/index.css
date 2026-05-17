@@ -324,6 +324,11 @@ tr:hover td { background: var(--surf2); }
 .modal::-webkit-scrollbar-thumb { background: var(--brd); border-radius: 4px; }
 .modal::-webkit-scrollbar-thumb:hover { background: var(--acc); }
 
+.modal-device-list::-webkit-scrollbar { width: 6px; }
+.modal-device-list::-webkit-scrollbar-track { background: var(--surf2); border-radius: 4px; }
+.modal-device-list::-webkit-scrollbar-thumb { background: var(--brd); border-radius: 4px; }
+.modal-device-list::-webkit-scrollbar-thumb:hover { background: var(--acc); }
+
 textarea::-webkit-scrollbar { width: 8px; }
 textarea::-webkit-scrollbar-track { background: var(--surf2); border-radius: 4px; }
 textarea::-webkit-scrollbar-thumb { background: var(--brd); border-radius: 4px; }

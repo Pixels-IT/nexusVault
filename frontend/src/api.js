@@ -85,6 +85,15 @@ const api = {
       .then(r=>r.blob()).then(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=filename;a.click();});
   },
   deleteAutomationFile: (id) => request('DELETE', `/automation/files/${id}`),
+  replaceAutomationFile: async (oldId, file) => {
+    const data = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    return request('POST', `/automation/files/${oldId}/replace`, { filename: file.name, mimetype: file.type, data });
+  },
   automationDocumentHistory: (id) => request('GET', `/automation/documents/${id}/history`),
   automationDocAccessDenied: (id) => request('POST', `/automation/documents/${id}/access-denied`, {}),
   previewAutomationFile: (id) => request('GET', `/automation/files/${id}/preview`),
@@ -132,10 +141,15 @@ const api = {
   ldapSave:       (d) => request('PUT', '/ldap/config', d),
   slackConfig:    () => request('GET', '/slack/config'),
   slackSave:      (d) => request('PUT', '/slack/config', d),
-  slackTest:      () => request('POST', '/slack/test'),
+  slackTest:        () => request('POST', '/slack/test'),
+  slackValidate:    (code) => request('POST', '/slack/validate', { code }),
   telegramConfig: () => request('GET', '/telegram/config'),
   telegramSave:   (d) => request('PUT', '/telegram/config', d),
-  telegramTest:   () => request('POST', '/telegram/test'),
+  telegramTest:     () => request('POST', '/telegram/test'),
+  telegramValidate: (code) => request('POST', '/telegram/validate', { code }),
+  smtpTest:         () => request('POST', '/smtp/test'),
+  smtpValidate:     (code) => request('POST', '/smtp/validate', { code }),
+  channelsValidated: () => request('GET', '/channels/validated'),
   notifCatalog:    () => request('GET', '/notifications/catalog'),
   notifConfig:     () => request('GET', '/notifications/config'),
   notifSave:       (key, d) => request('PUT', `/notifications/config/${key}`, d),
@@ -146,11 +160,17 @@ const api = {
   oidcPublic: () => request('GET', '/oidc/public'),
   smtpConfig: () => request('GET', '/smtp/config'),
   smtpSave: (d) => request('PUT', '/smtp/config', d),
-  smtpTest: () => request('POST', '/smtp/test'),
   cronStatus: () => request('GET', '/cron/status'),
   cronConfig: (d) => request('PUT', '/cron/config', d),
 
-  // Backup schedules
+  // Rétention
+  systemHealth: () => request('GET', '/system/health'),
+  retentionSettings:  ()    => request('GET',    '/retention/settings'),
+  retentionSave:      (d)   => request('PUT',    '/retention/settings', d),
+  retentionBin:       ()    => request('GET',    '/retention/bin'),
+  retentionCount:     ()    => request('GET',    '/retention/count'),
+  retentionRestore:   (id)  => request('POST',   `/retention/restore/${id}`),
+  retentionDelete:    (id)  => request('DELETE', `/retention/bin/${id}`),
   backupSchedules:        ()      => request('GET',    '/backup-schedules'),
   backupScheduleCreate:   (d)     => request('POST',   '/backup-schedules', d),
   backupScheduleUpdate:   (id, d) => request('PUT',    `/backup-schedules/${id}`, d),

@@ -926,6 +926,7 @@ const PERM_DEFS = [
       { key: 'audit_access',    label: "Accès au t('audit.title')" },
       { key: 'audit_archive',   label: "Accès aux archives d'audit" },
       { key: 'security_access', label: "Accès à Sécurité" },
+      { key: 'retention_access', label: "Accès à la rétention" },
     ],
   },
 ];
@@ -1056,6 +1057,185 @@ function RolePermissionsCard() {
   );
 }
 
+// ── ONGLET SYSTÈME ─────────────────────────────────────────────────────────────
+function SecuritySystemTab() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = () => {
+    setLoading(true);
+    api.systemHealth()
+      .then(d => { setData(d); setError(''); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  if (loading) return <div style={{padding:40,textAlign:'center',color:'var(--muted)'}}>Chargement…</div>;
+  if (error)   return <div className="alert alert-err" style={{margin:16}}>{error}</div>;
+  if (!data)   return null;
+
+  const fmt = (val, suffix='') => val != null ? val + suffix : '—';
+  const pill = (label, value, color='var(--acc)') => (
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3,padding:'10px 14px',background:'var(--surf2)',borderRadius:'var(--r)',minWidth:90,border:'1px solid var(--brd)'}}>
+      <span style={{fontSize:18,fontWeight:800,color}}>{value}</span>
+      <span style={{fontSize:10,color:'var(--muted)',textAlign:'center',lineHeight:1.3}}>{label}</span>
+    </div>
+  );
+
+  const tableRows = data.database?.tables || {};
+  const TABLE_LABELS = {
+    backups: 'Sauvegardes', activity_entries: 'Notes activité', activity_files: 'Fichiers activité',
+    automation_documents: 'Documents', automation_document_files: 'Fichiers documents',
+    retention_bin: 'Rétention', audit_log: 'Journal audit', notification_log: 'Journal notifs',
+    users: 'Utilisateurs', devices: 'Équipements', sites: 'Sites',
+  };
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+
+      {/* Uptime + Mémoire */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            Processus Node.js
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontSize:11,color:'var(--muted)'}}>Mis à jour : {data.timestamp}</span>
+            <button className="btn btn-sm" onClick={load}>↺ Actualiser</button>
+          </div>
+        </div>
+        <div style={{padding:16}}>
+          <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:14,justifyContent:'center'}}>
+            {pill('Uptime', data.uptime?.formatted, 'var(--ok)')}
+            {pill('Mémoire RSS', data.memory?.rss, 'var(--acc)')}
+            {pill('Heap utilisé', data.memory?.heap_used, 'var(--acc)')}
+            {pill('Heap total', data.memory?.heap_total, 'var(--muted)')}
+            {pill('Node.js', data.runtime?.node, 'var(--muted)')}
+            {pill('Plateforme', data.runtime?.platform, 'var(--muted)')}
+          </div>
+        </div>
+      </div>
+
+      {/* Base de données */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            Base de données SQLite
+          </div>
+          <span style={{fontSize:12,fontWeight:600,color:'var(--acc)'}}>{data.database?.size}</span>
+        </div>
+        <div style={{padding:16}}>
+          {/* Blobs */}
+          <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:14,justifyContent:'center'}}>
+            {pill('Backups', data.database?.blobs?.backups, 'var(--ok)')}
+            {pill('Fichiers docs', data.database?.blobs?.doc_files, 'var(--acc)')}
+            {pill('Fichiers activité', data.database?.blobs?.activity_files, 'var(--acc)')}
+          </div>
+          {/* Table counts */}
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            <thead>
+              <tr style={{borderBottom:'1px solid var(--brd)'}}>
+                <th style={{padding:'6px 8px',textAlign:'left',color:'var(--muted)',fontWeight:600}}>Table</th>
+                <th style={{padding:'6px 8px',textAlign:'right',color:'var(--muted)',fontWeight:600}}>Lignes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(tableRows).map(([t, count]) => (
+                <tr key={t} style={{borderBottom:'1px solid var(--brd)'}}>
+                  <td style={{padding:'5px 8px',fontFamily:'var(--mono)',fontSize:11}}>{TABLE_LABELS[t] || t}</td>
+                  <td style={{padding:'5px 8px',textAlign:'right',fontWeight:600,
+                    color: t==='retention_bin' && count > 0 ? 'var(--warn)' : t==='audit_log' ? 'var(--muted)' : 'var(--txt)'}}>
+                    {count != null ? count.toLocaleString('fr-FR') : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Rétention */}
+      {data.retention && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+              Corbeille de rétention
+            </div>
+            {data.retention.total > 0 && (
+              <span style={{fontSize:12,fontWeight:700,color: data.retention.expiring_soon > 0 ? 'var(--warn)' : 'var(--ok)'}}>
+                {data.retention.total} élément{data.retention.total > 1 ? 's' : ''}
+                {data.retention.expiring_soon > 0 && ` · ${data.retention.expiring_soon} expirent dans < 3 j`}
+              </span>
+            )}
+          </div>
+          <div style={{padding:16}}>
+            {data.retention.total === 0
+              ? <div style={{color:'var(--muted)',fontSize:13}}>✅ Aucun élément en rétention</div>
+              : <div style={{display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
+                  {[['backup','Backups'],['document','Documents'],['doc_file','Fichiers docs'],['activity','Suivis']].map(([k,l]) =>
+                    data.retention.by_type[k] > 0 && pill(l, data.retention.by_type[k], k==='backup'?'var(--acc)':'var(--muted)')
+                  )}
+                </div>
+            }
+          </div>
+        </div>
+      )}
+
+      {/* Activité 24h */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Activité des dernières 24h
+          </div>
+        </div>
+        <div style={{padding:16,display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
+          {pill('Événements audit', data.activity_24h?.audit_events, 'var(--acc)')}
+          {pill('Connexions', data.activity_24h?.logins, 'var(--ok)')}
+          {pill('Tentatives échouées', data.activity_24h?.failed_logins,
+            (data.activity_24h?.failed_logins || 0) > 5 ? 'var(--err)' : 'var(--muted)')}
+        </div>
+      </div>
+
+      {/* Cron + Whitelist */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Planifications cron
+            </div>
+          </div>
+          <div style={{padding:16,display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
+            {pill('Total', data.cron?.total, 'var(--muted)')}
+            {pill('Actives', data.cron?.enabled, 'var(--ok)')}
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Whitelist IP
+            </div>
+          </div>
+          <div style={{padding:16,display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
+            {pill('Règles actives', data.whitelist?.active_rules,
+              (data.whitelist?.active_rules || 0) === 0 ? 'var(--warn)' : 'var(--ok)')}
+            {(data.whitelist?.active_rules || 0) === 0 &&
+              <span style={{fontSize:11,color:'var(--warn)',alignSelf:'center'}}>⚠ Accès ouvert à tous</span>}
+          </div>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
 // ── SÉCURITÉ (timeout + liste accès) ────────────────────────────────────────
 function SecurityTab() {
   const { t } = useI18n();
@@ -1066,6 +1246,7 @@ function SecurityTab() {
       { key: 'oidc',     label: t('security.auth_tab') || 'Authentication', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg> },
       { key: 'notifs',   label: t('security.notifs'),      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> },
       { key: 'cron',     label: t('security.cron'),      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
+      { key: 'system', label: 'Système', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> },
     ];
 
   const [activeTab, setActiveTab] = useState(defaultTab);
@@ -1096,6 +1277,7 @@ function SecurityTab() {
       {activeTab === 'oidc'     && <SecurityOidcTab />}
       {activeTab === 'notifs'   && <SecurityNotifTab />}
       {activeTab === 'rights'   && <RolePermissionsCard />}
+      {activeTab === 'system'   && <SecuritySystemTab />}
     </div>
   );
 }
@@ -1160,11 +1342,10 @@ function SecurityGeneralTab() {
   }
 
   async function addRule(e) {
-  const { t } = useI18n();
     e.preventDefault(); setWlError('');
     if (!form.value) return setWlError('Valeur requise');
     try { await api.createWhitelist(form); setForm({ value: '', label: '', type: 'ip' }); loadWl(); }
-    catch (e) { setWlError(e.message); }
+    catch (err) { setWlError(err.message); }
   }
 
   async function toggleRule(r) {
@@ -1276,6 +1457,9 @@ function SecurityGeneralTab() {
 
       </div>
 
+      {/* Rétention */}
+      <RetentionCard />
+
       {/* Liste d'accès */}
       <div className="card">
         <div className="card-header">
@@ -1337,9 +1521,221 @@ function SecurityGeneralTab() {
 
 
 
+
+// ── RETENTION CARD ──────────────────────────────────────────────────────────
+const RETENTION_DAYS = [0, 7, 15, 30, 60];
+
+function RetentionCard() {
+  const { t } = useI18n();
+  const { can } = usePerms();
+
+  // Cacher toute la card si l'utilisateur n'a pas accès à la rétention
+  if (!can('retention_access')) return null;
+  const [settings, setSettings] = useState({ backup_days: 0, document_days: 0, doc_file_days: 0, activity_days: 0 });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [retentionCount, setRetentionCount] = useState(0);
+
+  useEffect(() => {
+    api.retentionSettings().then(setSettings).catch(() => {});
+    if (can('retention_access')) {
+      api.retentionCount().then(r => setRetentionCount(r.count || 0)).catch(() => {});
+    }
+  }, []);
+
+  async function save() {
+    setSaving(true); setMsg('');
+    try { await api.retentionSave(settings); setMsg('Enregistré.'); } catch (e) { setMsg('Erreur: ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  const dayLabel = d => d === 0 ? '0 — Pas de rétention' : `${d} jours`;
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>
+          </svg>
+          Rétention des documents/fichiers supprimés
+        </div>
+        <button className="btn" onClick={() => setShowModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--ok)', color: 'var(--ok)' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+              <path d="M3 12h4l3-9 4 18 3-9h4"/>
+            </svg>
+            Rétention
+            {retentionCount > 0 && (
+              <span style={{ background: 'var(--ok)', color: '#fff', borderRadius: 10, padding: '0 6px', fontSize: 10, fontWeight: 700 }}>
+                {retentionCount}
+              </span>
+            )}
+          </button>
+      </div>
+      <div style={{ padding: 16 }}>
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+          Permettre ou non un délai de rétention afin de pouvoir récupérer des fichiers qui auraient été supprimés.
+          Si 0, la suppression est définitive immédiate.
+        </p>
+        {msg && <div className={`alert alert-${msg.startsWith('Err') ? 'err' : 'ok'}`} style={{ marginBottom: 12, fontSize: 12 }}>{msg}</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          {[
+            { key: 'backup_days',    label: 'Rétention des backups supprimés' },
+            { key: 'document_days',  label: 'Rétention des documents supprimés' },
+            { key: 'doc_file_days',  label: 'Rétention des fichiers supprimés' },
+            { key: 'activity_days',  label: 'Rétention des suivis d\'activité supprimés' },
+          ].map(({ key, label }) => (
+            <div className="form-group" key={key} style={{ margin: 0 }}>
+              <label className="form-label">{label}</label>
+              <select className="form-control" value={settings[key] || 0}
+                onChange={e => setSettings(s => ({ ...s, [key]: parseInt(e.target.value) }))}>
+                {RETENTION_DAYS.map(d => <option key={d} value={d}>{dayLabel(d)}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+        </div>
+      </div>
+      {showModal && <RetentionModal onClose={() => { setShowModal(false); api.retentionCount().then(r => setRetentionCount(r.count || 0)).catch(() => {}); }} />}
+    </div>
+  );
+}
+
+function RetentionModal({ onClose }) {
+  const { t } = useI18n();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('backup');
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const load = () => {
+    setLoading(true);
+    api.retentionBin().then(setItems).catch(() => setItems([])).finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  const filtered = items.filter(item =>
+    activeTab === 'backup'     ? item.item_type === 'backup' :
+    activeTab === 'automation' ? item.item_type === 'document' || item.item_type === 'doc_file' :
+    activeTab === 'activity'   ? item.item_type === 'activity' : false
+  );
+
+  const counts = {
+    backup:     items.filter(i => i.item_type === 'backup').length,
+    automation: items.filter(i => i.item_type === 'document' || i.item_type === 'doc_file').length,
+    activity:   items.filter(i => i.item_type === 'activity').length,
+  };
+
+  async function restore(id) {
+    await api.retentionRestore(id);
+    load();
+  }
+
+  async function deleteDef(id) {
+    await api.retentionDelete(id);
+    setConfirmDel(null);
+    load();
+  }
+
+  const TABS = [
+    { key: 'backup',     label: 'Backup',          count: counts.backup },
+    { key: 'automation', label: 'Automatisation',   count: counts.automation },
+    { key: 'activity',   label: 'Suivi d\'activité', count: counts.activity },
+  ];
+
+  const fmtDate = d => d ? d.slice(0, 16) : '—';
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}
+      onClick={onClose}>
+      <div style={{ background: 'var(--surf)', borderRadius: 'var(--rl)', width: '100%', maxWidth: 760, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,.5)' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--brd)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>Corbeille de rétention ({items.length} élément{items.length !== 1 ? 's' : ''})</div>
+          <button className="btn btn-sm" onClick={onClose}>✕</button>
+        </div>
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--brd)', padding: '0 20px' }}>
+          {TABS.map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              style={{ padding: '10px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13,
+                color: activeTab === tab.key ? 'var(--acc)' : 'var(--muted)',
+                borderBottom: activeTab === tab.key ? '2px solid var(--acc)' : '2px solid transparent',
+                fontWeight: activeTab === tab.key ? 700 : 400, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {tab.label}
+              {tab.count > 0 && <span style={{ background: 'var(--acc)', color: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: 10 }}>{tab.count}</span>}
+            </button>
+          ))}
+        </div>
+        {/* Content */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
+          {loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Chargement…</div>
+           : filtered.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)', fontSize: 13 }}>Aucun élément dans cette catégorie</div>
+           : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--brd)' }}>
+                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>Élément</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>Supprimé par</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>Supprimé le</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>Expire le</th>
+                  <th style={{ padding: '8px 6px' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(item => (
+                  <tr key={item.id} style={{ borderBottom: '1px solid var(--brd)' }}>
+                    <td style={{ padding: '8px 6px' }}>
+                      <div style={{ fontWeight: 600 }}>{item.meta?.label || item.item_data?.name || item.item_data?.filename || `#${item.item_id}`}</div>
+                      {item.meta?.doc_name && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{item.meta.doc_name}</div>}
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{item.item_type}</div>
+                    </td>
+                    <td style={{ padding: '8px 6px', color: 'var(--muted)' }}>{item.deleted_by_name}</td>
+                    <td style={{ padding: '8px 6px', color: 'var(--muted)', fontFamily: 'var(--mono)' }}>{fmtDate(item.deleted_at)}</td>
+                    <td style={{ padding: '8px 6px' }}>
+                      {item.expires_at
+                        ? <span style={{ color: new Date(item.expires_at) < new Date(Date.now() + 3*86400000) ? 'var(--warn)' : 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+                            {fmtDate(item.expires_at)}
+                          </span>
+                        : <span style={{ color: 'var(--muted)' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap', display: 'flex', gap: 6 }}>
+                      <button className="btn btn-sm" onClick={() => restore(item.id)}
+                        style={{ borderColor: 'var(--ok)', color: 'var(--ok)', fontSize: 11 }}>↩ Restaurer</button>
+                      <button className="btn btn-sm btn-danger" onClick={() => setConfirmDel(item)} style={{ fontSize: 11 }}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {confirmDel && (
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: 'var(--surf)', borderRadius: 'var(--rl)', padding: 24, maxWidth: 360, boxShadow: '0 4px 20px rgba(0,0,0,.4)' }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Suppression définitive</div>
+              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Cette action est irréversible.</p>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button className="btn" onClick={() => setConfirmDel(null)}>Annuler</button>
+                <button className="btn btn-danger" onClick={() => deleteDef(confirmDel.id)}>Supprimer définitivement</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
 // ── ONGLET NOTIFICATIONS ──────────────────────────────────────────────────────
 // Modals de configuration des canaux
-function SmtpModal({ onClose, onSaved }) {
+function SmtpModal({ onClose, onSaved, onValidated }) {
   const { t } = useI18n();
   const [s, setS] = useState({ host:'', port:'587', secure:false, user:'', pass:'', from:'' });
   const [loading, setLoading]     = useState(true);
@@ -1348,6 +1744,9 @@ function SmtpModal({ onClose, onSaved }) {
   const [msg, setMsg]             = useState('');
   const [err, setErr]             = useState('');
   const [hasExistingPass, setHasExistingPass] = useState(false);
+  const [awaitCode, setAwaitCode] = useState(false);
+  const [codeInput, setCodeInput] = useState('');
+  const [validated, setValidated] = useState(false);
   useEffect(() => {
     api.smtpConfig().then(c => {
       setS({ host:c.host||'', port:String(c.port||587), secure:!!c.secure,
@@ -1359,21 +1758,36 @@ function SmtpModal({ onClose, onSaved }) {
     e.preventDefault(); setSaving(true); setMsg(''); setErr('');
     try {
       const payload = { ...s, port:parseInt(s.port)||587 };
-      // Ne pas écraser le mot de passe existant si le champ est vide
       if (!payload.pass) delete payload.pass;
       await api.smtpSave(payload);
       if (s.pass) setHasExistingPass(true);
       onSaved('email');
-      setMsg('Enregistré.');
+      setMsg('Configuration enregistrée. Cliquez sur Tester pour valider le canal.');
     } catch(e){setErr(e.message);} finally{setSaving(false);} };
-  const test = async () => { setTesting(true); setMsg(''); setErr('');
-    try { const r=await api.smtpTest(); setMsg(`Email de test envoyé à ${r.to}`); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
+  const test = async () => { setTesting(true); setMsg(''); setErr(''); setAwaitCode(false); setCodeInput(''); setValidated(false);
+    try { const r=await api.smtpTest(); setMsg(`Code envoyé à ${r.to} — entrez-le pour valider.`); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
+  const validate = async () => { setErr('');
+    try { await api.smtpValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg('✓ Canal SMTP validé ! Vous pouvez maintenant cocher les notifications.'); onValidated?.(); } catch(e){setErr(e.message);} };
   return (
     <Modal title="Configuration SMTP" onClose={onClose}
-      footer={<><button className="btn" onClick={test} disabled={testing||!s.host}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={<>
+        {awaitCode
+          ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length < 4}>Valider le code</button>
+          : <button className="btn" onClick={test} disabled={testing||!s.host} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}
+        <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button>
+      </>}>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
+        {awaitCode && (
+          <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center'}}>
+            <input className="form-control" placeholder="Code à 6 chiffres" value={codeInput}
+              onChange={e=>setCodeInput(e.target.value.replace(/\D/g,'').slice(0,6))}
+              style={{letterSpacing:6,fontFamily:'var(--mono)',fontSize:18,textAlign:'center',maxWidth:160}}
+              autoFocus />
+            <span style={{fontSize:12,color:'var(--muted)'}}>Entrez le code reçu pour valider</span>
+          </div>
+        )}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
           <div className="form-group" style={{margin:0}}><label className="form-label">{t('security.smtp_host') || 'SMTP host'}</label><input className="form-control" value={s.host} onChange={e=>setS(x=>({...x,host:e.target.value}))} placeholder="smtp.gmail.com"/></div>
           <div className="form-group" style={{margin:0}}><label className="form-label">Port</label><input className="form-control" type="number" value={s.port} onChange={e=>setS(x=>({...x,port:e.target.value}))} placeholder="587"/></div>
@@ -1392,8 +1806,12 @@ function SmtpModal({ onClose, onSaved }) {
   );
 }
 
-function TelegramModal({ onClose, onSaved }) {
+function TelegramModal({ onClose, onSaved, onValidated }) {
   const { t } = useI18n();
+  const [awaitCode, setAwaitCode] = useState(false);
+  const [codeInput, setCodeInput] = useState('');
+  const [validated, setValidated] = useState(false);
+  const [showToken, setShowToken] = useState(false);
   const [tg, setTg] = useState({ bot_token:'', chat_id:'' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
@@ -1404,27 +1822,61 @@ function TelegramModal({ onClose, onSaved }) {
     api.telegramConfig().then(c=>setTg({bot_token:c.bot_token||'',chat_id:c.chat_id||''})).catch(()=>{}).finally(()=>setLoading(false));
   }, []);
   const save = async () => { setSaving(true); setMsg(''); setErr('');
-    try { await api.telegramSave(tg); onSaved('telegram'); setMsg('Enregistré.'); } catch(e){setErr(e.message);} finally{setSaving(false);} };
+    try { await api.telegramSave(tg); onSaved('telegram'); setMsg('Configuration enregistrée. Cliquez sur Tester pour valider le canal.'); } catch(e){setErr(e.message);} finally{setSaving(false);} };
   const test = async () => { setTesting(true); setMsg(''); setErr('');
-    try { await api.telegramTest(); setMsg('Message Telegram envoyé !'); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
+    try { const r=await api.telegramTest(); setMsg('Code envoyé sur Telegram — entrez-le pour valider.'); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message); setAwaitCode(false);} finally{setTesting(false);} };
+  const validate = async () => { setErr(''); try { await api.telegramValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg('✓ Canal Telegram validé ! Vous pouvez maintenant cocher les notifications.'); onValidated?.(); } catch(e){setErr(e.message);} };
   return (
     <Modal title="Configuration Telegram" onClose={onClose}
-      footer={<><button className="btn" onClick={test} disabled={testing||!tg.bot_token||!tg.chat_id}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={<>{awaitCode?<button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>Valider le code</button>:<button className="btn" onClick={test} disabled={testing||!tg.bot_token||!tg.chat_id} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}<button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
+        {awaitCode && (
+          <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center'}}>
+            <input className="form-control" placeholder="Code à 6 chiffres" value={codeInput}
+              onChange={e=>setCodeInput(e.target.value.replace(/\D/g,'').slice(0,6))}
+              style={{letterSpacing:6,fontFamily:'var(--mono)',fontSize:18,textAlign:'center',maxWidth:160}}
+              autoFocus />
+            <span style={{fontSize:12,color:'var(--muted)'}}>Entrez le code reçu pour valider</span>
+          </div>
+        )}
         <p style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>{t('security.slack_bot_hint') || 'Create a bot via'} <code>@BotFather</code> sur Telegram pour obtenir votre Bot Token. L'ID du chat peut être récupéré via <code>@userinfobot</code>.</p>
         <div style={{display:'flex',flexDirection:'column',gap:12}}>
-          <div className="form-group" style={{margin:0}}><label className="form-label">Bot Token</label><input className="form-control" type="password" value={tg.bot_token} onChange={e=>setTg(x=>({...x,bot_token:e.target.value}))} placeholder="1234567890:ABCDefGhIJK..."/></div>
-          <div className="form-group" style={{margin:0}}><label className="form-label">Chat ID / Canal ID</label><input className="form-control" value={tg.chat_id} onChange={e=>setTg(x=>({...x,chat_id:e.target.value}))} placeholder="-1001234567890"/></div>
+          <div className="form-group" style={{margin:0}}>
+            <label className="form-label">Bot Token</label>
+            <div style={{position:'relative',display:'flex',alignItems:'center'}}>
+              <input className="form-control" type={showToken ? 'text' : 'password'} value={tg.bot_token}
+                onChange={e=>setTg(x=>({...x, bot_token:e.target.value}))}
+                placeholder="123456789:ABCdef..." style={{paddingRight:36}} />
+              <button type="button" onClick={()=>setShowToken(v=>!v)}
+                style={{position:'absolute',right:8,background:'none',border:'none',cursor:'pointer',color:'var(--muted)',padding:0,lineHeight:1}}
+                title={showToken ? 'Masquer' : 'Afficher'}>
+                {showToken
+                  ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                }
+              </button>
+            </div>
+          </div>
+          <div className="form-group" style={{margin:0}}>
+            <label className="form-label">Chat ID / Canal ID</label>
+            <input className="form-control" value={tg.chat_id} onChange={e=>setTg(x=>({...x,chat_id:e.target.value}))} placeholder="-1001234567890"/>
+            <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>
+              💡 Votre Chat ID personnel (pas l'ID du bot). Obtenez-le via <code>@userinfobot</code> sur Telegram. Pour un canal : ajoutez le bot en admin et utilisez l'ID du canal (ex: <code>-100xxxxxxxxxx</code>).
+            </div>
+          </div>
         </div>
       </>}
     </Modal>
   );
 }
 
-function SlackModal({ onClose, onSaved }) {
+function SlackModal({ onClose, onSaved, onValidated }) {
   const { t } = useI18n();
+  const [awaitCode, setAwaitCode] = useState(false);
+  const [codeInput, setCodeInput] = useState('');
+  const [validated, setValidated] = useState(false);
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
@@ -1437,13 +1889,23 @@ function SlackModal({ onClose, onSaved }) {
   const save = async () => { setSaving(true); setMsg(''); setErr('');
     try { await api.slackSave({webhook_url:url}); onSaved('slack'); setMsg('Enregistré.'); } catch(e){setErr(e.message);} finally{setSaving(false);} };
   const test = async () => { setTesting(true); setMsg(''); setErr('');
-    try { await api.slackTest(); setMsg('Message Slack envoyé !'); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
+    try { await api.slackTest(); setMsg('Code envoyé sur Slack — entrez-le pour valider.'); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
+  const validate = async () => { setErr(''); try { await api.slackValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg('✓ Canal Slack validé ! Vous pouvez maintenant cocher les notifications.'); onValidated?.(); } catch(e){setErr(e.message);} };
   return (
     <Modal title="Configuration Slack" onClose={onClose}
-      footer={<><button className="btn" onClick={test} disabled={testing||!url||url.startsWith('••••')}>{testing?'Envoi…':'Tester'}</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={<>{awaitCode?<button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>Valider le code</button>:<button className="btn" onClick={test} disabled={testing||!url||url.startsWith('••••')} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}<button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
+        {awaitCode && (
+          <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center'}}>
+            <input className="form-control" placeholder="Code à 6 chiffres" value={codeInput}
+              onChange={e=>setCodeInput(e.target.value.replace(/\D/g,'').slice(0,6))}
+              style={{letterSpacing:6,fontFamily:'var(--mono)',fontSize:18,textAlign:'center',maxWidth:160}}
+              autoFocus />
+            <span style={{fontSize:12,color:'var(--muted)'}}>Entrez le code reçu pour valider</span>
+          </div>
+        )}
         <p style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>{t('security.slack_webhook_hint') || 'Create an Incoming Webhook in your Slack workspace:'} <br/>{t('security.slack_steps') || 'Settings → Apps → Incoming Webhooks → Add.'}</p>
         <div className="form-group" style={{margin:0}}><label className="form-label">Webhook URL</label><input className="form-control" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://hooks.slack.com/services/T.../B.../..."/></div>
       </>}
@@ -1478,9 +1940,14 @@ function SecurityNotifTab() {
   }, []);
 
   function onChannelSaved(channel) {
+    // Enregistrement seul → pas de validation, pas de fermeture
+    // La validation se fait après le test (code reçu + entré)
+    api.notifCatalog().then(d => setCatalog(d)).catch(() => {});
+  }
+
+  function onChannelValidated(channel) {
+    // Code validé → on marque le canal comme disponible
     setValidated(v => ({ ...v, [channel]: true }));
-    setModal(null);
-    // Recharger le catalog pour mettre à jour available
     api.notifCatalog().then(d => setCatalog(d)).catch(() => {});
   }
 
@@ -1488,7 +1955,9 @@ function SecurityNotifTab() {
     const channels = cfg.channels.includes(channel)
       ? cfg.channels.filter(c => c !== channel)
       : [...cfg.channels, channel];
-    await saveCfg(cfg.event_key, { channels });
+    // Auto-enable si au moins un canal, auto-disable si aucun canal
+    const enabled = channels.length > 0 ? true : cfg.enabled;
+    await saveCfg(cfg.event_key, { channels, enabled });
   }
 
   async function saveCfg(key, patch) {
@@ -1505,7 +1974,7 @@ function SecurityNotifTab() {
 
   // Icônes canaux
   const CHAN_CONFIG = {
-    email:    { label: 'SMTP',     color: '#0891b2', bgColor: 'rgba(8,145,178,0.12)' },
+    email:    { label: 'SMTP',     color: '#ca8a04', bgColor: 'rgba(202,138,4,0.12)' },
     telegram: { label: 'Telegram', color: '#2BA5E0', bgColor: 'rgba(43,165,224,0.12)' },
     slack:    { label: 'Slack',    color: '#E01E5A', bgColor: 'rgba(224,30,90,0.12)' },
   };
@@ -1525,8 +1994,7 @@ function SecurityNotifTab() {
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
             {/* SMTP */}
             <button className="btn" onClick={() => setModal('smtp')}
-              style={{ display:'flex', alignItems:'center', gap:8, borderColor:'#0891b2', color:'#0891b2', background: validated.email ? 'rgba(8,145,178,0.08)' : undefined }}>
-              {validated.email && <span style={{ color:'var(--ok)', fontSize:14 }}>●</span>}
+              style={{ display:'flex', alignItems:'center', gap:8, borderColor:'#ca8a04', color:'#ca8a04' }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
                 <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
               </svg>
@@ -1602,7 +2070,7 @@ function SecurityNotifTab() {
                 })}
                 {/* Options */}
                 <td style={{ padding: '10px 16px' }}>
-                  {(cfg.event_key === 'preview_recap' || cfg.event_key === 'preview_overdue') && (
+                  {(cfg.event_key === 'preview_recap' || cfg.event_key === 'preview_overdue' || cfg.event_key === 'retention_recap') && (
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       <select className="form-control" style={{ padding: '2px 6px', fontSize: 11, height: 26 }}
                         value={cfg.options?.frequency || 'weekly'}
@@ -2090,6 +2558,7 @@ function BackupScheduleCard() {
   const [schedules, setSchedules] = useState([]);
   const [states,    setStates]    = useState({});
   const [devices,   setDevices]   = useState([]);
+  const [sites,     setSites]     = useState([]);
   const [editing,   setEditing]   = useState(null);   // id being edited inline
   const [devModal,  setDevModal]  = useState(null);   // schedule id for device picker
   const [runResult, setRunResult] = useState(null);   // { scheduleId, results }
@@ -2102,6 +2571,7 @@ function BackupScheduleCard() {
   useEffect(() => {
     load();
     api.devices().then(d => setDevices([...d].sort((a,b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })))).catch(() => {});
+    api.sites().then(setSites).catch(() => {});
   }, []);
 
   async function createSchedule() {
@@ -2176,6 +2646,7 @@ function BackupScheduleCard() {
           scheduleId={devModal}
           schedules={schedules}
           devices={devices}
+          sites={sites}
           onClose={() => setDevModal(null)}
           onSave={async (id, deviceIds) => { await api.backupScheduleDevices(id, { device_ids: deviceIds }); setDevModal(null); load(); }}
         />
@@ -2211,8 +2682,12 @@ function ScheduleRow({ s, state, editing, setEditing, onSave, onDelete, onRunNow
           </span>
         )}
         {state && !isEditing && (
-          <span style={{ fontSize: 10, color: state.lastResult?.some(r => r.status !== 'ok') ? 'var(--err)' : 'var(--ok)', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: state.lastResult?.some(r => r.status !== 'ok') ? 'var(--err)' : 'var(--ok)', display: 'inline-block' }}/>
+          <span style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+              color: state.lastResult?.some(r => r.status !== 'ok' && r.status !== 'identical') ? 'var(--err)' :
+                     state.lastResult?.every(r => r.status === 'identical') ? 'var(--acc)' : 'var(--ok)' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', display: 'inline-block',
+              background: state.lastResult?.some(r => r.status !== 'ok' && r.status !== 'identical') ? 'var(--err)' :
+                          state.lastResult?.every(r => r.status === 'identical') ? 'var(--acc)' : 'var(--ok)' }}/>
             {state.lastRun?.slice(0, 16)}
           </span>
         )}
@@ -2284,7 +2759,7 @@ function ScheduleRow({ s, state, editing, setEditing, onSave, onDelete, onRunNow
         <div style={{ padding: '8px 14px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {s.devices.map(d => (
             <span key={d.id} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'var(--surf)', border: '1px solid var(--brd)' }}>
-              {d.name}{d.site ? ` (${d.site})` : ''}
+              {d.name}{d.site_name ? ` (${d.site_name})` : ''}
             </span>
           ))}
         </div>
@@ -2296,11 +2771,11 @@ function ScheduleRow({ s, state, editing, setEditing, onSave, onDelete, onRunNow
           {runResult.results.map(r => (
             <div key={r.deviceId} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%',
-                background: r.status === 'ok' ? 'var(--ok)' : r.status === 'identical' ? 'var(--muted)' : 'var(--err)',
+                background: r.status === 'ok' ? 'var(--ok)' : r.status === 'identical' ? 'var(--acc)' : 'var(--err)',
                 flexShrink: 0, display: 'inline-block' }}/>
               <strong>{r.deviceName}</strong>
               {r.status === 'ok'        && <span style={{ color: 'var(--ok)' }}>✓ v{r.version}</span>}
-              {r.status === 'identical' && <span style={{ color: 'var(--muted)' }}>≡ inchangé (v{r.version})</span>}
+              {r.status === 'identical' && <span style={{ color: 'var(--acc)' }}>≡ inchangé (v{r.version})</span>}
               {r.status !== 'ok' && r.status !== 'identical' && <span style={{ color: 'var(--err)' }}>✗ {r.errorMsg}</span>}
             </div>
           ))}
@@ -2310,44 +2785,137 @@ function ScheduleRow({ s, state, editing, setEditing, onSave, onDelete, onRunNow
   );
 }
 
-function DevicePickerModal({ scheduleId, schedules, devices, onClose, onSave }) {
+function DevicePickerModal({ scheduleId, schedules, devices, sites = [], onClose, onSave }) {
   const { t } = useI18n();
   const schedule = schedules.find(s => s.id === scheduleId);
   const initial = (schedule?.devices || []).map(d => d.id);
   const [selected, setSelected] = useState(initial);
+  const [query, setQuery] = useState('');
 
   const toggle = id => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
 
+  const q = query.trim().toLowerCase();
+  const filteredDevices = q
+    ? devices.filter(d => d.name?.toLowerCase().includes(q) || d.site_name?.toLowerCase().includes(q))
+    : devices;
+
+  // Build hierarchical site list (recursive)
+  const buildSiteTree = (parentId = null, depth = 0) =>
+    sites
+      .filter(s => (s.parent_id || null) === parentId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .flatMap(s => [{ ...s, depth }, ...buildSiteTree(s.id, depth + 1)]);
+
+  const orderedSiteList = buildSiteTree();
+  // Dedup in case sites array has duplicates
+  const seenSiteIds = new Set();
+  const uniqueSiteList = orderedSiteList.filter(s => { if (seenSiteIds.has(s.id)) return false; seenSiteIds.add(s.id); return true; });
+  // Devices without site
+  const noSiteDevices = filteredDevices.filter(d => !d.site_id);
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-      onClick={onClose}>
-      <div style={{ background: 'var(--surf)', borderRadius: 'var(--rl)', padding: 24, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,.4)' }}
+      onClick={e => e.stopPropagation()}>
+      <div style={{ background: 'var(--surf)', borderRadius: 'var(--rl)', padding: 24, width: '100%', maxWidth: 520, maxHeight: '82vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,.4)' }}
         onClick={e => e.stopPropagation()}>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
+
+        {/* Header */}
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>
           {t('cron.select_devices') || 'Équipements'} — {schedule?.label}
         </div>
-        <div style={{ overflowY: 'auto', flex: 1, marginBottom: 16 }}>
-          {devices.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13 }}>{t('backup.no_devices') || 'Aucun équipement.'}</div>}
-          {devices.map(d => (
-            <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', cursor: 'pointer', borderRadius: 'var(--r)', background: selected.includes(d.id) ? 'var(--acc-s)' : 'transparent', marginBottom: 2 }}>
-              <input type="checkbox" checked={selected.includes(d.id)} onChange={() => toggle(d.id)} style={{ accentColor: 'var(--acc)', width: 15, height: 15 }} />
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</div>
-                {d.site && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.site}</div>}
-              </div>
-            </label>
-          ))}
+
+        {/* Search */}
+        <div style={{ marginBottom: 12 }}>
+          <input
+            className="form-control"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Rechercher un équipement ou un site…"
+            autoComplete="off"
+          />
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn" onClick={onClose}>{t('common.cancel') || 'Annuler'}</button>
-          <button className="btn btn-primary" onClick={() => onSave(scheduleId, selected)}>
-            {t('auto_cat.save') || 'Enregistrer'} ({selected.length})
-          </button>
+
+        {/* Site → Device tree */}
+        <div className="modal-device-list" style={{
+          overflowY: 'auto', flex: 1, marginBottom: 16,
+          scrollbarWidth: 'thin', scrollbarColor: 'var(--brd) var(--surf2)'
+        }}>
+          {filteredDevices.length === 0 && (
+            <div style={{ color: 'var(--muted)', fontSize: 13, padding: '12px 0' }}>
+              {t('backup.no_devices') || 'Aucun équipement.'}
+            </div>
+          )}
+          {/* Sites in hierarchical order */}
+          {uniqueSiteList.map(site => {
+            const siteDevices = filteredDevices.filter(d => d.site_id === site.id);
+            if (siteDevices.length === 0) return null;
+            return (
+            <div key={site.id} style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1,
+                color: 'var(--acc)', padding: '4px 8px', marginBottom: 2,
+                paddingLeft: site.depth > 0 ? 8 + site.depth * 16 : 8,
+                borderBottom: '1px solid var(--brd)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                {site.depth > 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)' }}>{'└' + '─'.repeat(site.depth)}</span>}
+                {site.name}
+              </div>
+              {siteDevices.sort((a,b) => (a.name||'').localeCompare(b.name||'')).map(d => (
+                <label key={d.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                  padding: `3px 8px 3px ${site.depth > 0 ? 8 + site.depth * 16 + 8 : 8}px`,
+                  borderRadius: 'var(--r)', marginBottom: 1,
+                  background: selected.includes(d.id) ? 'var(--acc-s)' : 'transparent',
+                  borderLeft: `2px solid ${selected.includes(d.id) ? 'var(--acc)' : 'transparent'}`,
+                }}>
+                  <input type="checkbox" checked={selected.includes(d.id)}
+                    onChange={() => toggle(d.id)}
+                    style={{ accentColor: 'var(--acc)', width: 14, height: 14, flexShrink: 0 }} />
+                  <span style={{ fontWeight: 500, fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                  {d.ip && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)', flexShrink: 0 }}>{d.ip}</span>}
+                </label>
+              ))}
+            </div>
+            );
+          })}
+        </div>
+
+          {/* Devices without site */}
+          {noSiteDevices.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1,
+                color: 'var(--muted)', padding: '4px 8px', marginBottom: 2, borderBottom: '1px solid var(--brd)' }}>
+                Sans site
+              </div>
+              {noSiteDevices.map(d => (
+                <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                  padding: '3px 8px 3px 22px', borderRadius: 'var(--r)', marginBottom: 1,
+                  background: selected.includes(d.id) ? 'var(--acc-s)' : 'transparent',
+                  borderLeft: `2px solid ${selected.includes(d.id) ? 'var(--acc)' : 'transparent'}` }}>
+                  <input type="checkbox" checked={selected.includes(d.id)}
+                    onChange={() => toggle(d.id)}
+                    style={{ accentColor: 'var(--acc)', width: 14, height: 14, flexShrink: 0 }} />
+                  <span style={{ fontWeight: 500, fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                  {d.ip && <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)', flexShrink: 0 }}>{d.ip}</span>}
+                </label>
+              ))}
+            </div>
+          )}
+        {/* Footer */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+            {selected.length} sélectionné{selected.length > 1 ? 's' : ''}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onClose}>{t('common.cancel') || 'Annuler'}</button>
+            <button className="btn btn-primary" onClick={() => onSave(scheduleId, selected)}>
+              {t('auto_cat.save') || 'Enregistrer'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
 const MONTHS_AUDIT = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
 function ArchiveListModal({ onClose }) {

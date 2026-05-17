@@ -34,8 +34,23 @@ function SiteModal({ site, onClose, onSave, countries = [], allSites = [] }) {
   }
 
   // Exclure le site lui-même et ses enfants comme parents possibles
-  const parentOptions = allSites.filter(s => s.id !== site?.id && s.parent_id !== site?.id)
+  // Build parent options with depth indentation
+  const getOptionDepth = (s, visited = new Set()) => {
+    if (!s.parent_id || visited.has(s.id)) return 0;
+    visited.add(s.id);
+    const par = allSites.find(p => p.id === s.parent_id);
+    return par ? 1 + getOptionDepth(par, visited) : 0;
+  };
+  const parentOptions = allSites
+    .filter(s => s.id !== site?.id)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+  // Build ordered parent option list (tree order)
+  const buildParentList = (parentId = null, depth = 0) =>
+    allSites
+      .filter(s => (s.parent_id || null) === parentId && s.id !== site?.id)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .flatMap(s => [{ ...s, depth }, ...buildParentList(s.id, depth + 1)]);
 
   return (
     <Modal title={site ? t('config.site_edit') : t('config.site_add')} onClose={onClose}
@@ -54,7 +69,11 @@ function SiteModal({ site, onClose, onSave, countries = [], allSites = [] }) {
           <label className="form-label">Site parent <span style={{ fontSize: 11, color: 'var(--muted)' }}>(optionnel — pour créer une hiérarchie)</span></label>
           <select className="form-control" value={data.parent_id || ''} onChange={e => setData(d => ({ ...d, parent_id: e.target.value ? parseInt(e.target.value) : null }))}>
             <option value="">— Aucun (site racine) —</option>
-            {parentOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {buildParentList().map(s => (
+              <option key={s.id} value={s.id}>
+                {'　'.repeat(s.depth)}{s.depth > 0 ? '└ ' : ''}{s.name}
+              </option>
+            ))}
           </select>
         </div>
       )}
@@ -106,27 +125,39 @@ function SitesTab({ countries = [] }) {
           </tr>
         </thead>
         <tbody>
-          {sites.map(s => {
-            const parent = s.parent_id ? sites.find(p => p.id === s.parent_id) : null;
-            return (
-              <tr key={s.id}>
-                <td>
-                  <div className="cell-name" style={{ paddingLeft: parent ? 20 : 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {parent && <span style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1 }}>↳</span>}
-                    {s.name}
-                    {parent && <span style={{ fontSize: 10, color: 'var(--muted)', background: 'var(--surf2)', padding: '1px 6px', borderRadius: 8, border: '1px solid var(--brd)' }}>{parent.name}</span>}
-                  </div>
-                </td>
-                <td className="cell-sub">{s.location}</td>
-                <td className="cell-sub">{s.contact}</td>
-                <td><span className="badge badge-info">{s.device_count} équip.</span></td>
-                <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
-                  {can('config_write') && <button className="btn btn-sm" style={{marginRight:6}} onClick={() => setModal(s)}>✎</button>}
-                  {can('config_write') && <button className="btn btn-sm btn-danger" onClick={() => setConfirm(s)}>✕</button>}
-                </td>
-              </tr>
-            );
-          })}
+          {(() => {
+            // Build ordered flat list: roots first, then children by depth
+            const getDepth = (site, visited = new Set()) => {
+              if (!site.parent_id || visited.has(site.id)) return 0;
+              visited.add(site.id);
+              const par = sites.find(p => p.id === site.parent_id);
+              return par ? 1 + getDepth(par, visited) : 0;
+            };
+            const renderSites = (parentId, depth) => {
+              return sites
+                .filter(s => (s.parent_id || null) === parentId)
+                .sort((a,b) => a.name.localeCompare(b.name))
+                .flatMap(s => [
+                  <tr key={s.id}>
+                    <td>
+                      <div className="cell-name" style={{ paddingLeft: depth * 18, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {depth > 0 && <span style={{ color: 'var(--acc)', fontSize: 11, flexShrink: 0, fontFamily: 'var(--mono)' }}>{"└" + "─".repeat(depth)}</span>}
+                        {s.name}
+                      </div>
+                    </td>
+                    <td className="cell-sub">{s.location}</td>
+                    <td className="cell-sub">{s.contact}</td>
+                    <td><span className="badge badge-info">{s.device_count} équip.</span></td>
+                    <td style={{ textAlign:'right', whiteSpace:'nowrap', padding:'9px 8px' }}>
+                      {can('config_write') && <button className="btn btn-sm" style={{ marginRight:4 }} onClick={() => setModal(s)}>✎</button>}
+                      {can('config_write') && <button className="btn btn-sm btn-danger" onClick={() => setConfirm(s)}>✕</button>}
+                    </td>
+                  </tr>,
+                  ...renderSites(s.id, depth + 1)
+                ]);
+            };
+            return renderSites(null, 0);
+          })()}
           {sites.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>{t('config.no_sites')}</td></tr>}
         </tbody>
       </table>
@@ -287,7 +318,17 @@ function DeviceModal({device, sites, models, onClose, onSave }) {
       <div className="form-row">
         <div className="form-group"><label className="form-label">Site *</label>
           <select className="form-control" value={data.site_id} onChange={set('site_id')}>
-            {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {(() => {
+              const buildTree = (parentId = null, depth = 0) =>
+                sites.filter(s => (s.parent_id || null) === parentId)
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .flatMap(s => [{ ...s, depth }, ...buildTree(s.id, depth + 1)]);
+              return buildTree().map(s => (
+                <option key={s.id} value={s.id}>
+                  {'　'.repeat(s.depth)}{s.depth > 0 ? '└ ' : ''}{s.name}
+                </option>
+              ));
+            })()}
           </select>
         </div>
         <div className="form-group"><label className="form-label">{t('config.model')} + ' *'</label>

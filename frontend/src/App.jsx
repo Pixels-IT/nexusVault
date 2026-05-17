@@ -93,17 +93,8 @@ function ProtectedRoutes() {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
 
-  // Force password change before anything else
-  if (user.must_change_password) {
-    return (
-      <AppInner>
-        <Routes>
-          <Route path="/admin" element={<Admin forcePasswordChange />} />
-          <Route path="*"     element={<Navigate to="/admin?tab=account&force=1" replace />} />
-        </Routes>
-      </AppInner>
-    );
-  }
+  // Force password change — géré dans Login.jsx via modal
+  // Ne pas bloquer les routes ici pour permettre au modal de rester sur /login
 
   return (
     <AppInner>

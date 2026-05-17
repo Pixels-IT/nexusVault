@@ -291,7 +291,20 @@ function initSchema() {
   try { db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}
   // Migration: sites hiérarchiques (parent/enfant)
   try { db.exec("ALTER TABLE sites ADD COLUMN parent_id INTEGER REFERENCES sites(id) ON DELETE SET NULL"); } catch {}
-  // Cache PDF LibreOffice pour les aperçus (évite de reConvertir à chaque clic)
+  // Rétention — corbeille pour backups, documents, fichiers, suivi
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS retention_bin (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_type    TEXT NOT NULL,  -- 'backup' | 'document' | 'doc_file' | 'activity'
+      item_id      INTEGER NOT NULL,
+      item_data    TEXT NOT NULL,  -- JSON serialisé de la ligne supprimée
+      deleted_by   INTEGER,        -- user_id
+      deleted_by_name TEXT,
+      deleted_at   TEXT DEFAULT (datetime('now','localtime')),
+      expires_at   TEXT,           -- null = pas de rétention (suppression définitive différée)
+      meta         TEXT DEFAULT '{}'  -- JSON: device_name, doc_name, etc.
+    );
+  `);
   try { db.exec("ALTER TABLE automation_document_files ADD COLUMN pdf_cache BLOB"); } catch {}
   try { db.exec("ALTER TABLE automation_document_files ADD COLUMN pdf_cached_at TEXT"); } catch {}
 
@@ -397,19 +410,24 @@ function seedDemoData() {
   db.prepare('INSERT INTO backups (device_id, version, content_enc, size_bytes, status, note_enc) VALUES (?,?,?,?,?,?)').run(d1.lastInsertRowid, 2, encrypt(cfg2), cfg2.length, 'ok', encrypt('Ajout VLAN 40 IOT + spanning-tree'));
 
   // Entrées de suivi d'activité pour N-1 et N-2 — évite la boucle dashboard sur années vides
-  const now = new Date();
-  const yearN1 = now.getFullYear() - 1;
-  const yearN2 = now.getFullYear() - 2;
-  const adminUser = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
-  const userId = adminUser ? adminUser.id : 1;
+  const now2 = new Date();
+  const yearN1 = now2.getFullYear() - 1;
+  const yearN2 = now2.getFullYear() - 2;
+  const adminUser2 = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
+  const userId2 = adminUser2 ? adminUser2.id : 1;
   // Créer un tag NET par défaut si nécessaire
-  let netTagId = db.prepare("SELECT id FROM activity_tags WHERE id = 1").get();
-  if (!netTagId) {
+  const netTag = db.prepare("SELECT id FROM activity_tags WHERE id = 1").get();
+  if (!netTag) {
     db.prepare('INSERT INTO activity_tags (code_enc, label_enc, color) VALUES (?,?,?)').run(encrypt('NET'), encrypt('Réseau'), '#066fd1');
   }
-  const entryStmt = db.prepare('INSERT INTO activity_entries (user_id, tag_code_enc, note_enc, display_date, created_at, updated_at) VALUES (?,?,?,?,?,?)');
-  [`${yearN2}-06-15`, `${yearN1}-03-20`, `${yearN1}-09-10`].forEach(date => {
-    entryStmt.run(userId, encrypt('NET'), encrypt('Entrée de démonstration'), date, `${date}T10:00:00.000Z`, `${date}T10:00:00.000Z`);
+  // activity_entries utilise: user_id, year, month, tag_code, content
+  const entryStmt2 = db.prepare('INSERT INTO activity_entries (user_id, year, month, tag_code, content) VALUES (?,?,?,?,?)');
+  [
+    { year: yearN2, month: 6 },
+    { year: yearN1, month: 3 },
+    { year: yearN1, month: 9 },
+  ].forEach(({ year, month }) => {
+    entryStmt2.run(userId2, year, month, 'NET', 'Entrée de démonstration');
   });
   console.log('[DB] Données de démonstration insérées');
 }

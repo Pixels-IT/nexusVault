@@ -1,4 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { useTheme } from '../contexts/ThemeContext.jsx';
 import { usePerms } from '../hooks/usePerms.js';
 import { useI18n } from '../contexts/I18nContext.jsx';
 import AccessDenied from '../components/AccessDenied.jsx';
@@ -571,7 +574,7 @@ function DeviceSection({ device, compareMode, selected, onSelectCompare, onView,
 }
 
 // ── SITE SECTION (draggable) ──────────────────────────────────────────────────
-function SiteSection({ site, devices, compareMode, selected, onSelectCompare, onView, onDelete, dragHandleProps, forceOpen }) {
+function SiteSection({ site, devices, childSites = [], allSites = [], compareMode, selected, onSelectCompare, onView, onDelete, dragHandleProps, forceOpen }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
 
@@ -582,7 +585,31 @@ function SiteSection({ site, devices, compareMode, selected, onSelectCompare, on
   }, [forceOpen]);
   const siteDevices = [...devices.filter(d => d.site_id === site.id)]
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  const withBackup = siteDevices.filter(d => d.last_backup).length;
+  const hasChildren = childSites.length > 0;
+
+  // Recursive count of all descendant sites and devices
+  const countDescendants = (parentId) => {
+    const children = allSites.filter(s => s.parent_id === parentId);
+    let siteCount = children.length;
+    let devCount = 0;
+    children.forEach(ch => {
+      const desc = countDescendants(ch.id);
+      siteCount += desc.siteCount;
+      devCount += devices.filter(d => d.site_id === ch.id).length + desc.devCount;
+    });
+    return { siteCount, devCount };
+  };
+  const desc = hasChildren ? countDescendants(site.id) : { siteCount: 0, devCount: 0 };
+  const totalDevices = siteDevices.length + desc.devCount;
+  const totalSites = desc.siteCount;
+  const withBackup = [...devices.filter(d => {
+    // All devices in this site + descendants
+    const allDescSiteIds = [site.id, ...((function getIds(id) {
+      const ch = allSites.filter(s => s.parent_id === id);
+      return [...ch.map(c => c.id), ...ch.flatMap(c => getIds(c.id))];
+    })(site.id))];
+    return allDescSiteIds.includes(d.site_id);
+  })].filter(d => d.last_backup).length;
 
   return (
     <div style={{ marginBottom:12, border:'1px solid var(--brd)', borderRadius:'var(--rl)', overflow:'hidden' }}>
@@ -601,21 +628,38 @@ function SiteSection({ site, devices, compareMode, selected, onSelectCompare, on
             {site.location && <span style={{ fontSize:12, color:'var(--muted)', marginLeft:10 }}>{site.location}</span>}
           </div>
           <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
-            <span className="badge badge-info">{siteDevices.length} équipement{siteDevices.length>1?'s':''}</span>
+            <span className="badge badge-info">
+                  {totalSites > 0 && <>{totalSites} site{totalSites > 1 ? 's' : ''} / </>}
+                  {totalDevices} équipement{totalDevices > 1 ? 's' : ''}</span>
             <span className="badge badge-ok">{withBackup} avec backup</span>
           </div>
         </div>
       </div>
       {open && (
         <div>
-          {siteDevices.length === 0
-            ? <div style={{ padding:16, textAlign:'center', color:'var(--muted)', fontSize:12 }}>{t('backup.no_devices')}</div>
-            : siteDevices.map(d => (
-                <DeviceSection key={d.id} device={d}
-                  compareMode={compareMode} selected={selected}
-                  onSelectCompare={onSelectCompare} onView={onView} onDelete={onDelete} />
-              ))
-          }
+          {hasChildren && childSites.map(child => {
+            const grandChildren = allSites.filter(s => s.parent_id === child.id);
+            return (
+            <div key={child.id} style={{ marginLeft:12, borderLeft:'2px solid var(--acc)', paddingLeft:8, marginBottom:4 }}>
+              <SiteSection site={child} devices={devices}
+                childSites={grandChildren} allSites={allSites}
+                compareMode={compareMode} selected={selected}
+                onSelectCompare={onSelectCompare} onView={onView} onDelete={onDelete}
+                forceOpen={forceOpen} dragHandleProps={{}} />
+            </div>
+            );
+          })}
+          {!hasChildren ? (
+            siteDevices.length === 0
+              ? <div style={{padding:16,textAlign:'center',color:'var(--muted)',fontSize:12}}>{t('backup.no_devices')||'Aucun équipement'}</div>
+              : siteDevices.map(d => (
+                  <DeviceSection key={d.id} device={d} compareMode={compareMode} selected={selected}
+                    onSelectCompare={onSelectCompare} onView={onView} onDelete={onDelete} />
+                ))
+          ) : siteDevices.map(d => (
+            <DeviceSection key={d.id} device={d} compareMode={compareMode} selected={selected}
+              onSelectCompare={onSelectCompare} onView={onView} onDelete={onDelete} />
+          ))}
         </div>
       )}
     </div>
@@ -830,18 +874,20 @@ export default function Backups() {
                     </div>
                     {!collapsed && (
                       <div style={{paddingLeft:6}}>
-                        {cSites.map(site => {
+                        {cSites.filter(s => !s.parent_id).map(site => {
                           const gi = orderedSites.indexOf(site);
+                          const children = orderedSites.filter(ch => ch.parent_id === site.id);
                           return (
                             <div key={site.id} draggable
                               onDragStart={() => onDragStart(gi)} onDragEnter={() => onDragEnter(gi)}
                               onDragEnd={onDragEnd} onDragOver={e=>e.preventDefault()}
-                              style={{opacity: dragItemRef.current===gi && dragOverRef.current!==null ? 0.4 : 1}}>
-                              <SiteSection site={site} devices={devices.filter(d=>d.site_id===site.id)}
+                              style={{opacity: dragItemRef.current===gi && dragOverRef.current!==null&&dragItemRef.current!==dragOverRef.current?0.4:1}}>
+                              <SiteSection site={site} devices={devices}
+                                childSites={children} allSites={orderedSites}
                                 compareMode={compareMode} selected={selected}
                                 onSelectCompare={toggleSelect} onView={setViewBackup} onDelete={handleDelete}
                                 forceOpen={!!filterType}
-                                dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}}/>
+                                dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}} />
                             </div>
                           );
                         })}
@@ -850,34 +896,44 @@ export default function Backups() {
                   </div>
                 );
               })}
-              {orderedSites.filter(s=>!s.country_id).map((site,index) => (
+              {orderedSites.filter(s=>!s.country_id && !s.parent_id).map((site,index) => {
+                const gi = orderedSites.indexOf(site);
+                const children = orderedSites.filter(ch => ch.parent_id === site.id);
+                return (
                 <div key={site.id} draggable
-                  onDragStart={() => onDragStart(orderedSites.indexOf(site))}
-                  onDragEnter={() => onDragEnter(orderedSites.indexOf(site))}
+                  onDragStart={() => onDragStart(gi)}
+                  onDragEnter={() => onDragEnter(gi)}
                   onDragEnd={onDragEnd} onDragOver={e=>e.preventDefault()}
-                  style={{opacity: dragItemRef.current===orderedSites.indexOf(site)&&dragOverRef.current!==null?0.4:1}}>
-                  <SiteSection site={site} devices={devices.filter(d=>d.site_id===site.id)}
+                  style={{opacity: dragItemRef.current===gi&&dragOverRef.current!==null&&dragItemRef.current!==dragOverRef.current?0.4:1}}>
+                  <SiteSection site={site} devices={devices}
+                    childSites={children} allSites={orderedSites}
                     compareMode={compareMode} selected={selected}
                     onSelectCompare={toggleSelect} onView={setViewBackup} onDelete={handleDelete}
                     forceOpen={!!filterType}
-                    dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}}/>
+                    dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}} />
                 </div>
-              ))}
+                );
+              })}
             </>
           ) : (
             <>
-              {orderedSites.map((site, index) => (
+              {orderedSites.filter(s => !s.parent_id).map((site, index) => {
+                const gi = orderedSites.indexOf(site);
+                const children = orderedSites.filter(ch => ch.parent_id === site.id);
+                return (
                 <div key={site.id} draggable
-                  onDragStart={() => onDragStart(index)} onDragEnter={() => onDragEnter(index)}
+                  onDragStart={() => onDragStart(gi)} onDragEnter={() => onDragEnter(gi)}
                   onDragEnd={onDragEnd} onDragOver={e=>e.preventDefault()}
-                  style={{opacity: dragItemRef.current===index&&dragOverRef.current!==null?0.4:1}}>
-                  <SiteSection site={site} devices={devices.filter(d=>d.site_id===site.id)}
+                  style={{opacity: dragItemRef.current===gi&&dragOverRef.current!==null&&dragItemRef.current!==dragOverRef.current?0.4:1}}>
+                  <SiteSection site={site} devices={devices}
+                    childSites={children} allSites={orderedSites}
                     compareMode={compareMode} selected={selected}
                     onSelectCompare={toggleSelect} onView={setViewBackup} onDelete={handleDelete}
                     forceOpen={!!filterType}
-                    dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}}/>
+                    dragHandleProps={{onMouseDown:e=>e.stopPropagation(),draggable:false}} />
                 </div>
-              ))}
+                );
+              })}
             </>
           )}
           {orphanDevices.length > 0 && (

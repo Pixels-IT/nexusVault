@@ -27,8 +27,14 @@ const EVENT_CATALOG = {
   preview_recap: {
     key:         'preview_recap',
     label:       'Récapitulatif des notes en preview',
-    description: 'Résumé périodique de toutes les notes marquées preview.',
-    options:     { frequency: 'weekly', day_of_week: 1, day_of_month: 1 }, // weekly|monthly|daily
+    description: 'Résumé périodique de toutes les notes marquées preview (00h05).',
+    options:     { frequency: 'weekly', day_of_week: 1, day_of_month: 1 },
+  },
+  retention_recap: {
+    key:         'retention_recap',
+    label:       'Récapitulatif des fichiers en rétention',
+    description: 'Résumé périodique des fichiers en rétention qui arrivent à expiration (00h05).',
+    options:     { frequency: 'weekly', day_of_week: 1, day_of_month: 1 },
   },
   preview_overdue: {
     key:         'preview_overdue',
@@ -48,18 +54,66 @@ const EVENT_CATALOG = {
     description: 'Envoie un rapport après chaque exécution de planification : statut (succès/échec) pour chaque équipement.',
     options:     { notify_on_success: true, notify_on_failure: true },
   },
+  document_deleted: {
+    key:         'document_deleted',
+    label:       'Suppression d\'un document',
+    description: 'Alerte quand un utilisateur supprime un document de la partie Automatisation.',
+    options:     {},
+  },
+  file_deleted: {
+    key:         'file_deleted',
+    label:       'Suppression d\'un fichier dans un document',
+    description: 'Alerte quand un utilisateur supprime un fichier intégré à un document.',
+    options:     {},
+  },
+  backup_deleted: {
+    key:         'backup_deleted',
+    label:       'Suppression d\'une sauvegarde',
+    description: 'Alerte quand un utilisateur supprime une sauvegarde de la partie Backup.',
+    options:     {},
+  },
+  activity_deleted: {
+    key:         'activity_deleted',
+    label:       'Suppression d\'un suivi d\'activité',
+    description: 'Alerte quand un utilisateur supprime un suivi d\'activité.',
+    options:     {},
+  },
+  activity_file_deleted: {
+    key:         'activity_file_deleted',
+    label:       'Suppression d\'un fichier d\'un suivi d\'activité',
+    description: 'Alerte quand un utilisateur supprime un fichier dans un suivi d\'activité.',
+    options:     {},
+  },
 };
 
 module.exports.EVENT_CATALOG = EVENT_CATALOG;
 
 // ── Canaux de notification disponibles ───────────────────────────────────────
 // Ajouter un nouveau canal ici pour l'exposer dans l'interface
+function getChannelAvailability() {
+  try {
+    const { getDb } = require('./db.js');
+    const db = getDb();
+    const smtpRow = db.prepare("SELECT value FROM settings WHERE key='smtp_config'").get();
+    const tgRow   = db.prepare("SELECT value FROM settings WHERE key='telegram_config'").get();
+    const slRow   = db.prepare("SELECT value FROM settings WHERE key='slack_config'").get();
+    const smtp    = smtpRow   ? JSON.parse(smtpRow.value)   : {};
+    const tg      = tgRow     ? JSON.parse(tgRow.value)     : {};
+    const sl      = slRow     ? JSON.parse(slRow.value)     : {};
+    return {
+      email:    !!(smtp.host || process.env.SMTP_HOST),
+      telegram: !!(tg.bot_token || process.env.TELEGRAM_BOT_TOKEN),
+      slack:    !!(sl.webhook_url || process.env.SLACK_WEBHOOK_URL),
+    };
+  } catch { return { email: !!process.env.SMTP_HOST, telegram: !!(process.env.TELEGRAM_BOT_TOKEN), slack: !!process.env.SLACK_WEBHOOK_URL }; }
+}
+
 const CHANNEL_CATALOG = {
   email: {
     key:   'email',
     label: 'Email (SMTP)',
     icon:  'mail',
-    available: () => !!process.env.SMTP_HOST,
+    available: () => getChannelAvailability().email,
   },
   log: {
     key:   'log',
@@ -71,13 +125,13 @@ const CHANNEL_CATALOG = {
     key:   'telegram',
     label: 'Telegram',
     icon:  'telegram',
-    available: () => !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),
+    available: () => getChannelAvailability().telegram,
   },
   slack: {
     key:   'slack',
     label: 'Slack',
     icon:  'slack',
-    available: () => !!process.env.SLACK_WEBHOOK_URL,
+    available: () => getChannelAvailability().slack,
   },
   // Futurs canaux
   // webhook: { key:'webhook', label:'Webhook HTTP', icon:'link', available:()=>false },
@@ -87,21 +141,28 @@ const CHANNEL_CATALOG = {
 module.exports.CHANNEL_CATALOG = CHANNEL_CATALOG;
 
 // ── Envoi effectif via un canal ───────────────────────────────────────────────
-async function sendViaChannel(channel, { subject, body, bodyText }) {
+async function sendViaChannel(channel, { subject, body, bodyText }, getDb) {
   switch (channel) {
     case 'email': {
-      if (!process.env.SMTP_HOST) throw new Error('SMTP non configuré');
+      const _sdb = getDb();
+      const _smtpRow = _sdb.prepare("SELECT value FROM settings WHERE key='smtp_config'").get();
+      const _smtp = _smtpRow ? JSON.parse(_smtpRow.value) : {};
+      const smtpHost = _smtp.host || process.env.SMTP_HOST;
+      const smtpPort = parseInt(_smtp.port || process.env.SMTP_PORT || '587');
+      const smtpSecure = (_smtp.secure !== undefined ? _smtp.secure : process.env.SMTP_SECURE === 'true');
+      const smtpUser = _smtp.user || process.env.SMTP_USER;
+      const smtpPass = _smtp.pass || process.env.SMTP_PASS || '';
+      const smtpFrom = _smtp.from || process.env.SMTP_FROM || 'NexusVault <no-reply@nexusvault.local>';
+      if (!smtpHost) throw new Error('SMTP non configuré');
       const transport = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587'),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' } : undefined,
+        host: smtpHost, port: smtpPort, secure: smtpSecure,
+        connectionTimeout: 10000, greetingTimeout: 8000, socketTimeout: 15000,
+        auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
       });
-      const from = process.env.SMTP_FROM || 'NexusVault <no-reply@nexusvault.local>';
+      const from = smtpFrom;
       // Récupérer les emails des admins
-      const { getDb } = require('./db.js');
-      const db = getDb();
-      const admins = db.prepare("SELECT email FROM users WHERE role='admin' AND enabled=1 AND email IS NOT NULL AND email != ''").all();
+      const _emailDb = getDb();
+      const admins = _emailDb.prepare("SELECT email FROM users WHERE role='admin' AND enabled=1 AND email IS NOT NULL AND email != ''").all();
       if (!admins.length) throw new Error('Aucun admin avec email configuré');
       const to = admins.map(a => a.email).join(', ');
       await transport.sendMail({
@@ -113,27 +174,34 @@ async function sendViaChannel(channel, { subject, body, bodyText }) {
       return { to };
     }
     case 'log': {
-      const { logger } = require('./server.js');
-      (logger || console).warn(`[NOTIF] ${subject} — ${bodyText || body}`);
+      process.stdout.write(`[NOTIF] ${subject} — ${bodyText || body}\n`);
       return {};
     }
     case 'telegram': {
-      const token  = process.env.TELEGRAM_BOT_TOKEN;
-      const chatId = process.env.TELEGRAM_CHAT_ID;
-      if (!token || !chatId) throw new Error('TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID non configuré');
-      const text = `🔔 *NexusVault*\n*${subject}*\n\n${(bodyText || body).replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&')}`;
+      const _tgsdb = getDb();
+      const _tgRow = _tgsdb.prepare("SELECT value FROM settings WHERE key='telegram_config'").get();
+      const _tgCfg = _tgRow ? JSON.parse(_tgRow.value) : {};
+      const token  = _tgCfg.bot_token || process.env.TELEGRAM_BOT_TOKEN;
+      const chatId = _tgCfg.chat_id   || process.env.TELEGRAM_CHAT_ID;
+      if (!token || !chatId) throw new Error('Telegram non configuré');
+      // Utiliser HTML plutôt que MarkdownV2 — beaucoup plus permissif (seuls <, >, & à échapper)
+      const escHtml = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const text = `🔔 <b>NexusVault</b>\n<b>${escHtml(subject)}</b>\n\n${escHtml(bodyText || body)}`;
       const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'MarkdownV2' }),
+        body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
       });
       const data = await resp.json();
       if (!data.ok) throw new Error(data.description || 'Erreur Telegram');
       return { chat_id: chatId };
     }
     case 'slack': {
-      const webhookUrl = process.env.SLACK_WEBHOOK_URL;
-      if (!webhookUrl) throw new Error('SLACK_WEBHOOK_URL non configuré');
+      const _slsdb = getDb();
+      const _slRow = _slsdb.prepare("SELECT value FROM settings WHERE key='slack_config'").get();
+      const _slCfg = _slRow ? JSON.parse(_slRow.value) : {};
+      const webhookUrl = _slCfg.webhook_url || process.env.SLACK_WEBHOOK_URL;
+      if (!webhookUrl) throw new Error('Slack non configuré');
       const resp = await fetch(webhookUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: `*${subject}*\n${bodyText || body}` }),
@@ -148,33 +216,41 @@ async function sendViaChannel(channel, { subject, body, bodyText }) {
 
 // ── Dispatcher principal ──────────────────────────────────────────────────────
 async function dispatch(eventKey, payload, getDb) {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM notification_config WHERE event_key=? AND enabled=1").get(eventKey);
-  if (!row) return; // non configuré ou désactivé
+  try {
+    const db = getDb();
+    const row = db.prepare("SELECT * FROM notification_config WHERE event_key=? AND enabled=1").get(eventKey);
+    if (!row) return; // non configuré ou désactivé
 
-  let channels = [];
-  try { channels = JSON.parse(row.channels); } catch {}
-  if (!channels.length) return;
+    let channels = [];
+    try { channels = JSON.parse(row.channels); } catch {}
+    if (!channels.length) return;
 
-  const { subject, body, bodyText } = buildMessage(eventKey, payload);
+    const { subject, body, bodyText } = buildMessage(eventKey, payload);
 
-  for (const channel of channels) {
-    let success = 1, error = null;
-    try {
-      await sendViaChannel(channel, { subject, body, bodyText });
-    } catch (e) {
-      success = 0;
-      error = e.message;
-      // Fallback vers logs si email échoue
-      if (channel === 'email') {
-        try { process.stdout.write(`[NOTIF][FALLBACK] ${subject} — ${bodyText || body}\n`); } catch {}
+    for (const channel of channels) {
+      let success = 1, error = null;
+      try {
+        await sendViaChannel(channel, { subject, body, bodyText }, getDb);
+      } catch (e) {
+        success = 0;
+        error = e.message;
+        process.stdout.write(`[NOTIF][ERROR] ${eventKey}/${channel}: ${e.message}\n`);
+        if (channel === 'email') {
+          try { process.stdout.write(`[NOTIF][FALLBACK] ${subject} — ${bodyText || body}\n`); } catch {}
+        }
+      }
+      const pad = n => String(n).padStart(2,'0');
+      const now = new Date();
+      const nowStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      try {
+        db.prepare("INSERT INTO notification_log (event_key, channel, subject, body, sent_at, success, error) VALUES (?,?,?,?,?,?,?)")
+          .run(eventKey, channel, subject, bodyText || body, nowStr, success, error);
+      } catch (logErr) {
+        process.stdout.write(`[NOTIF][LOG_ERROR] ${logErr.message}\n`);
       }
     }
-    const pad = n => String(n).padStart(2,'0');
-    const now = new Date();
-    const nowStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-    db.prepare("INSERT INTO notification_log (event_key, channel, subject, body, sent_at, success, error) VALUES (?,?,?,?,?,?,?)")
-      .run(eventKey, channel, subject, bodyText || body, nowStr, success, error);
+  } catch (e) {
+    process.stdout.write(`[NOTIF][DISPATCH_ERROR] ${eventKey}: ${e.message}\n`);
   }
 }
 
@@ -224,6 +300,13 @@ function buildMessage(eventKey, p) {
         bodyText: `Compte "${p.username}" verrouillé depuis ${p.ip} — ${p.attempts} tentatives en 10 min`,
       };
 
+    case 'retention_recap':
+      return {
+        subject: `Récapitulatif rétention — ${p.count || 0} élément${(p.count||0) > 1 ? 's' : ''}`,
+        body: p.html || '<p>Aucun élément en rétention.</p>',
+        bodyText: p.text || 'Aucun élément en rétention.',
+      };
+
     case 'preview_recap':
       return {
         subject: 'Récapitulatif des notes en preview',
@@ -236,6 +319,55 @@ function buildMessage(eventKey, p) {
         subject: 'Notes preview sur des périodes passées',
         body: `<p><strong>Attention</strong> : des notes sont marquées "preview" sur des mois ou années déjà écoulés.</p>${p.html || ''}`,
         bodyText: p.text || '',
+      };
+
+    case 'backup_schedule_result':
+      return {
+        subject: `Sauvegardes automatiques "${p.subject?.replace('[NexusVault] ','') || eventKey}"`,
+        body: `<p><strong>${p.ok || 0}</strong> succès / <strong>${p.fail || 0}</strong> erreur(s)</p><pre style="font-family:monospace;background:#f8fafc;padding:12px;border-radius:4px;font-size:12px">${p.text || ''}</pre>`,
+        bodyText: p.text || '',
+      };
+
+    case 'expiration_document':
+      return {
+        subject: `Document expirant bientôt — ${p.name || '?'}`,
+        body: `<p>Un document va expirer prochainement.</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b;width:140px">Document</td><td style="padding:6px 10px"><strong>${p.name || '?'}</strong></td></tr><tr style="background:#f8fafc"><td style="padding:6px 10px;color:#64748b">Expiration</td><td style="padding:6px 10px">${p.valid_until || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Catégorie</td><td style="padding:6px 10px">${p.category || '?'}</td></tr></table>`,
+        bodyText: `Document "${p.name}" expire le ${p.valid_until} (catégorie: ${p.category})`,
+      };
+
+    case 'file_deleted':
+      return {
+        subject: `Fichier supprimé — ${p.filename || '?'} (${p.doc_name || '?'})`,
+        body: `<p>Un fichier a été supprimé d'un document dans Automatisation.</p><table style="border-collapse:collapse;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b">Fichier</td><td style="padding:6px 10px"><strong>${p.filename || '?'}</strong></td></tr><tr><td style="padding:6px 10px;color:#64748b">Document</td><td style="padding:6px 10px">${p.doc_name || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Supprimé par</td><td style="padding:6px 10px">${p.username || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Date</td><td style="padding:6px 10px">${p.datetime || '?'}</td></tr></table>`,
+        bodyText: `Fichier "${p.filename}" du document "${p.doc_name}" supprimé par ${p.username} le ${p.datetime}`,
+      };
+
+    case 'document_deleted':
+      return {
+        subject: `Document supprimé — ${p.name || '?'}`,
+        body: `<p>Un document a été supprimé dans Automatisation.</p><table style="border-collapse:collapse;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b">Document</td><td style="padding:6px 10px"><strong>${p.name || '?'}</strong></td></tr><tr><td style="padding:6px 10px;color:#64748b">Catégorie</td><td style="padding:6px 10px">${p.category || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Supprimé par</td><td style="padding:6px 10px">${p.username || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Date</td><td style="padding:6px 10px">${p.datetime || '?'}</td></tr></table>`,
+        bodyText: `Document "${p.name}" supprimé par ${p.username} le ${p.datetime} (catégorie: ${p.category})`,
+      };
+
+    case 'activity_file_deleted':
+      return {
+        subject: `Fichier de suivi supprimé — ${p.filename || '?'}`,
+        body: `<p>Un fichier a été supprimé d'un suivi d'activité.</p><table style="border-collapse:collapse;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b">Fichier</td><td style="padding:6px 10px"><strong>${p.filename || '?'}</strong></td></tr><tr><td style="padding:6px 10px;color:#64748b">Suivi</td><td style="padding:6px 10px">[${p.tag_code||'?'}] ${p.year||''}/${String(p.month||'').padStart(2,'0')}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Supprimé par</td><td style="padding:6px 10px">${p.username || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Date</td><td style="padding:6px 10px">${p.datetime || '?'}</td></tr></table>`,
+        bodyText: `Fichier "${p.filename}" du suivi [${p.tag_code}] ${p.year}/${String(p.month||'').padStart(2,'0')} supprimé par ${p.username}`,
+      };
+
+    case 'activity_deleted':
+      return {
+        subject: `Suivi d'activité supprimé — [${p.tag_code || '?'}] ${p.year || ''}/${String(p.month || '').padStart(2,'0')}`,
+        body: `<p>Un suivi d'activité a été supprimé.</p><table style="border-collapse:collapse;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b">Tag</td><td style="padding:6px 10px"><strong>${p.tag_code || '?'}</strong></td></tr><tr><td style="padding:6px 10px;color:#64748b">Période</td><td style="padding:6px 10px">${p.year}/${String(p.month||'').padStart(2,'0')}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Extrait</td><td style="padding:6px 10px">${p.content_preview || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Supprimé par</td><td style="padding:6px 10px">${p.username || '?'}</td></tr></table>`,
+        bodyText: `Suivi [${p.tag_code}] ${p.year}/${String(p.month||'').padStart(2,'0')} supprimé par ${p.username}`,
+      };
+
+    case 'backup_deleted':
+      return {
+        subject: `Sauvegarde supprimée — ${p.device || '?'} ${p.version || ''}`,
+        body: `<p>Une sauvegarde a été supprimée dans Backup.</p><table style="border-collapse:collapse;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b">Équipement</td><td style="padding:6px 10px"><strong>${p.device || '?'}</strong></td></tr><tr><td style="padding:6px 10px;color:#64748b">Version</td><td style="padding:6px 10px">${p.version || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Supprimée par</td><td style="padding:6px 10px">${p.username || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Date</td><td style="padding:6px 10px">${p.datetime || '?'}</td></tr></table>`,
+        bodyText: `Sauvegarde ${p.version} de "${p.device}" supprimée par ${p.username} le ${p.datetime}`,
       };
 
     default:

@@ -1351,8 +1351,12 @@ export default function Activity() {
   // Charger le nombre de notes par année
   useEffect(() => {
     if (!years.length) return;
+    // Initialiser à 0 immédiatement pour éviter le spinner infini
+    const initCounts = {};
+    years.forEach(y => { initCounts[y] = 0; });
+    setYearCounts(initCounts);
     const params = targetUserId ? { user_id: targetUserId } : {};
-    const counts = {};
+    const counts = { ...initCounts };
     Promise.all(years.map(y =>
       api.activityEntries({ ...params, year: y })
         .then(entries => { counts[y] = Array.isArray(entries) ? entries.length : 0; })

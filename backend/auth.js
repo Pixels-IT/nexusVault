@@ -4,21 +4,41 @@ const { getDb, audit } = require('./db');
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-me';
 
 function getClientIp(req) {
-  return req.headers['x-forwarded-for']?.split(',')[0] || req.socket?.remoteAddress || '';
+  return req.headers['x-real-ip']
+    || req.headers['x-forwarded-for']?.split(',')[0].trim()
+    || req.socket?.remoteAddress
+    || '';
 }
 
 function checkWhitelist(req) {
   const db = getDb();
   const rows = db.prepare("SELECT value_enc, type FROM whitelist WHERE enabled = 1").all();
-  if (rows.length === 0) return true; // whitelist vide = tout autorisé
+  if (rows.length === 0) return true;
   const { decrypt } = require('./db');
-  const ip = getClientIp(req);
+  const rawIp = getClientIp(req);
+  const clientIp = rawIp.replace(/^::ffff:/, '').trim();
   const origin = req.headers.origin || req.headers.referer || '';
+
   for (const row of rows) {
-    const val = decrypt(row.value_enc);
-    if (row.type === 'ip' && ip.includes(val)) return true;
+    const val = decrypt(row.value_enc).trim();
+    if (row.type === 'ip') {
+      if (val.includes('/')) {
+        try {
+          const [network, bits] = val.split('/');
+          const n = parseInt(bits);
+          if (n < 0 || n > 32) continue;
+          const toInt = ip => ip.split('.').reduce((a, o) => ((a << 8) >>> 0) + parseInt(o), 0) >>> 0;
+          const mask   = n === 0 ? 0 : (~0 << (32 - n)) >>> 0;
+          const match  = ((toInt(clientIp) & mask) >>> 0) === ((toInt(network) & mask) >>> 0);
+          if (match) return true;
+        } catch (e) { process.stdout.write(`[WHITELIST] CIDR err: ${e.message}\n`); }
+      } else {
+        if (clientIp === val || (val.endsWith('.') && clientIp.startsWith(val))) return true;
+      }
+    }
     if (row.type === 'url' && origin.includes(val)) return true;
   }
+  process.stdout.write(`[WHITELIST] BLOCKED: ${clientIp} → ${req.path}\n`);
   return false;
 }
 

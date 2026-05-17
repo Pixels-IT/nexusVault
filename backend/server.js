@@ -73,18 +73,17 @@ function nowLocal() {
 // ── HEALTH ────────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// ── WHITELIST MIDDLEWARE (sauf health + login) ────────────────────────────────
+// ── WHITELIST MIDDLEWARE (sauf health) ─────────────────────────────────────────
 app.use((req, res, next) => {
-  if (req.path === '/api/health' || req.path === '/api/auth/login') return next();
+  if (req.path === '/api/health') return next();
   if (!checkWhitelist(req)) {
     const ip = getClientIp(req);
     const db = getDb();
-    audit(db, { action: 'ACCÈS_REFUSÉ', category: 'sécurité', severity: 'warn', detail: `IP non autorisée: ${ip}`, ip, success: 0 });
-    return res.status(403).json({ error: 'Accès refusé : IP/URL non autorisée' });
+    audit(db, { action: 'ACCÈS_REFUSÉ', category: 'sécurité', severity: 'warn', detail: `IP non autorisée: ${ip} → ${req.path}` });
+    return res.status(403).json({ error: 'Accès refusé : IP/URL non autorisée', ip });
   }
   next();
 });
-
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 // Brute force : 5 tentatives en 10 minutes → compte verrouillé
 function getBruteConfig(db) {
@@ -207,7 +206,30 @@ app.post('/api/auth/change-password', authMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
-// ── ADMINISTRATION : MON COMPTE ────────────────────────────────────────────────
+// ── CHANGEMENT OBLIGATOIRE (1ère connexion) — ne vérifie pas l'ancien mot de passe ──
+app.post('/api/auth/force-change-password', authMiddleware, (req, res) => {
+  const { new_password } = req.body;
+  const ip = getClientIp(req);
+  const db = getDb();
+  // Vérifier que l'utilisateur a bien must_change_password=1
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
+  if (!user.must_change_password)
+    return res.status(403).json({ error: 'Changement de mot de passe non requis' });
+  if (!new_password || new_password.length < 14)
+    return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 14 caractères' });
+  if (bcrypt.compareSync(new_password, user.password_hash))
+    return res.status(400).json({ error: 'Le nouveau mot de passe ne peut pas être identique à l\'ancien' });
+  const hash = bcrypt.hashSync(new_password, 12);
+  db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
+    .run(hash, nowLocal(), user.id);
+  audit(db, { userId: user.id, username: user.username,
+    action: 'CHANGEMENT_MDP_FORCÉ', category: 'auth', severity: 'info',
+    detail: 'Changement de mot de passe obligatoire à la 1ère connexion', ip, success: 1 });
+  res.json({ success: true });
+});
+
+
 app.get('/api/account', authMiddleware, (req, res) => {
   const user = getDb().prepare('SELECT id, username, display_name, email, role, created_at FROM users WHERE id = ?').get(req.user.id);
   res.json(user);
@@ -467,6 +489,7 @@ app.post('/api/notifications/test/:eventKey', authMiddleware, requirePerm('secur
     account_locked:         { datetime: nowLocal(), username: 'testuser', ip: getClientIp(req), attempts: 5, locked_until: nowLocal() },
     preview_recap:          { html: '<p><em>Ceci est un test de notification.</em></p>', text: 'Test de notification preview_recap' },
     preview_overdue:        { html: '<p><em>Test : 2 notes en preview sur des périodes passées.</em></p>', text: 'Test preview_overdue' },
+    retention_recap:        { html: '<p><em>Test : 3 éléments en rétention.</em></p>', text: 'Test retention_recap', count: 3 },
   };
   dispatch(req.params.eventKey, testPayloads[req.params.eventKey] || {}, getDb)
     .then(() => res.json({ success: true }))
@@ -598,12 +621,22 @@ app.put('/api/slack/config', authMiddleware, requirePerm('security_access'), (re
 });
 
 app.post('/api/slack/test', authMiddleware, requirePerm('security_access'), (req, res) => {
-  const url = process.env.SLACK_WEBHOOK_URL;
-  if (!url) return res.status(400).json({ error: 'SLACK_WEBHOOK_URL non configuré' });
-  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: '🔔 *NexusVault* — Test de notification Slack réussi !' }) })
-    .then(r => r.ok ? res.json({ success: true }) : res.status(500).json({ error: `HTTP ${r.status}` }))
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM settings WHERE key='slack_config'").get();
+  let webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  if (row) { try { const cfg = JSON.parse(row.value); webhookUrl = cfg.webhook_url || webhookUrl; } catch {} }
+  if (!webhookUrl) return res.status(400).json({ error: 'Slack non configuré — enregistrez la configuration avant de tester.' });
+  const code = genValidationCode('slack');
+  fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: `🔔 *NexusVault* — Code de validation Slack : *${code}*\n_Ce code expire dans 10 minutes._` }) })
+    .then(r => r.ok ? res.json({ success: true, awaitCode: true }) : res.status(500).json({ error: `HTTP ${r.status}` }))
     .catch(e => res.status(500).json({ error: e.message }));
+});
+
+app.post('/api/slack/validate', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const { code } = req.body;
+  if (checkValidationCode('slack', code)) { validatedChannels.add('slack'); return res.json({ success: true }); }
+  res.status(400).json({ error: 'Code incorrect ou expiré' });
 });
 
 // ── TELEGRAM CONFIGURATION ─────────────────────────────────────────────────────
@@ -635,18 +668,29 @@ app.put('/api/telegram/config', authMiddleware, requirePerm('security_access'), 
 });
 
 app.post('/api/telegram/test', authMiddleware, requirePerm('security_access'), (req, res) => {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID)
-    return res.status(400).json({ error: 'Telegram non configuré' });
-  const { dispatch } = require('./notifications.js');
-  dispatch('telegram_test_direct', null, getDb).catch(() => {});
-  // Envoi direct du test
-  fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+  const db = getDb();
+  // Lire depuis la DB (plus fiable que process.env qui peut ne pas être rechargé)
+  const row = db.prepare("SELECT value FROM settings WHERE key='telegram_config'").get();
+  let botToken = process.env.TELEGRAM_BOT_TOKEN;
+  let chatId   = process.env.TELEGRAM_CHAT_ID;
+  if (row) { try { const cfg = JSON.parse(row.value); botToken = cfg.bot_token || botToken; chatId = cfg.chat_id || chatId; } catch {} }
+  if (!botToken || !chatId)
+    return res.status(400).json({ error: 'Telegram non configuré — enregistrez la configuration avant de tester.' });
+  const code = genValidationCode('telegram');
+  fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: process.env.TELEGRAM_CHAT_ID, text: '🔔 *NexusVault* — Test de notification Telegram réussi !', parse_mode: 'Markdown' }),
+    body: JSON.stringify({ chat_id: chatId, parse_mode: 'HTML',
+      text: `🔔 <b>NexusVault</b> — Code de validation Telegram : <code>${code}</code>\n<i>Ce code expire dans 10 minutes.</i>` })
   }).then(r => r.json()).then(d => {
-    if (d.ok) res.json({ success: true });
+    if (d.ok) res.json({ success: true, awaitCode: true });
     else res.status(500).json({ error: d.description });
   }).catch(e => res.status(500).json({ error: e.message }));
+});
+
+app.post('/api/telegram/validate', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const { code } = req.body;
+  if (checkValidationCode('telegram', code)) { validatedChannels.add('telegram'); return res.json({ success: true }); }
+  res.status(400).json({ error: 'Code incorrect ou expiré' });
 });
 
 // ── SMTP CONFIGURATION ────────────────────────────────────────────────────────
@@ -706,19 +750,62 @@ app.put('/api/smtp/config', authMiddleware, requirePerm('security_access'), (req
   res.json({ success: true });
 });
 
-app.post('/api/smtp/test', authMiddleware, requirePerm('security_access'), (req, res) => {
+// Codes de validation des canaux (en mémoire, TTL 10 min)
+const channelValidationCodes = {};
+function genValidationCode(channel) {
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  channelValidationCodes[channel] = { code, expiresAt: Date.now() + 10 * 60 * 1000 };
+  return code;
+}
+function checkValidationCode(channel, code) {
+  const entry = channelValidationCodes[channel];
+  if (!entry) return false;
+  if (Date.now() > entry.expiresAt) { delete channelValidationCodes[channel]; return false; }
+  if (entry.code !== code) return false;
+  delete channelValidationCodes[channel];
+  return true;
+}
+
+// Vérifier si un canal est validé (pour l'UI)
+const validatedChannels = new Set(); // persiste en mémoire jusqu'au redémarrage
+
+app.post('/api/smtp/test', authMiddleware, requirePerm('security_access'), async (req, res) => {
+  res.setTimeout(25000, () => res.status(504).json({ error: 'Timeout : le serveur SMTP ne répond pas dans les délais. Vérifiez host/port/firewall.' }));
   const transport = getMailTransport();
   if (!transport) return res.status(400).json({ error: 'SMTP non configuré' });
   const db = getDb();
   const user = db.prepare('SELECT email FROM users WHERE id=?').get(req.user.id);
   if (!user?.email) return res.status(400).json({ error: 'Aucun email sur votre compte pour le test' });
+  const code = genValidationCode('smtp');
   const from = process.env.SMTP_FROM || 'NexusVault <no-reply@nexusvault.local>';
-  transport.sendMail({
-    from, to: user.email,
-    subject: 'NexusVault — Test SMTP',
-    html: '<p>Test de configuration SMTP réussi !</p>',
-  }).then(() => res.json({ success: true, to: user.email }))
-    .catch(err => res.status(500).json({ error: err.message }));
+  try {
+    await transport.sendMail({
+      from, to: user.email,
+      subject: 'NexusVault — Code de validation SMTP',
+      html: `<p>Votre code de validation : <strong style="font-size:24px;letter-spacing:4px">${code}</strong></p><p>Ce code expire dans 10 minutes.</p>`,
+    });
+    res.json({ success: true, to: user.email, awaitCode: true });
+  } catch (err) {
+    res.status(500).json({ error: `SMTP : ${err.message}` });
+  }
+});
+
+app.post('/api/smtp/validate', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const { code } = req.body;
+  if (checkValidationCode('smtp', code)) {
+    validatedChannels.add('smtp');
+    return res.json({ success: true });
+  }
+  res.status(400).json({ error: 'Code incorrect ou expiré' });
+});
+
+app.get('/api/channels/validated', authMiddleware, (req, res) => {
+  res.json({ validated: [...validatedChannels] });
+});
+
+app.delete('/api/channels/validated/:channel', authMiddleware, requirePerm('security_access'), (req, res) => {
+  validatedChannels.delete(req.params.channel);
+  res.json({ success: true });
 });
 
 // ── RESET MOT DE PASSE PAR EMAIL ──────────────────────────────────────────────
@@ -731,8 +818,11 @@ function getMailTransport() {
   if (!host) return null;
   return nodemailer.createTransport({
     host,
-    port:   parseInt(process.env.SMTP_PORT   || '587'),
-    secure: process.env.SMTP_SECURE === 'true',
+    port:              parseInt(process.env.SMTP_PORT   || '587'),
+    secure:            process.env.SMTP_SECURE === 'true',
+    connectionTimeout: 10000,   // 10s pour établir la connexion TCP
+    greetingTimeout:   8000,    // 8s pour le EHLO initial
+    socketTimeout:     15000,   // 15s sans activité
     auth: process.env.SMTP_USER ? {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS || '',
@@ -859,6 +949,124 @@ app.post('/api/auth/logout', authMiddleware, (req, res) => {
 // ── CONFIG BRUTE-FORCE ────────────────────────────────────────────────────────
 
 // FEATURE FLAGS
+// ══════════════════════════════════════════════════════════════════════════════
+// ── RÉTENTION ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Helper : ajouter un élément dans la corbeille de rétention
+function addToRetention(db, { item_type, item_id, item_data, deleted_by, deleted_by_name, meta = {} }) {
+  const settings = getRetentionSettings(db);
+  const days = settings[item_type + '_days'] || 0;
+  if (!days) return;
+  // Calculer la date d'expiration en heure locale (pas UTC)
+  const exp = new Date(Date.now() + days * 86400000);
+  const pad = n => String(n).padStart(2,'0');
+  const expiresAt = `${exp.getFullYear()}-${pad(exp.getMonth()+1)}-${pad(exp.getDate())} ${pad(exp.getHours())}:${pad(exp.getMinutes())}:${pad(exp.getSeconds())}`;
+  db.prepare(`INSERT INTO retention_bin (item_type, item_id, item_data, deleted_by, deleted_by_name, deleted_at, expires_at, meta)
+    VALUES (?, ?, ?, ?, ?, datetime('now','localtime'), ?, ?)`
+  ).run(item_type, item_id, JSON.stringify(item_data), deleted_by || null, deleted_by_name || 'system', expiresAt, JSON.stringify(meta));
+}
+
+function getRetentionSettings(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='retention_settings'").get();
+  if (!row) return { backup_days: 0, document_days: 0, doc_file_days: 0, activity_days: 0 };
+  try { return JSON.parse(row.value); } catch { return { backup_days: 0, document_days: 0, doc_file_days: 0, activity_days: 0 }; }
+}
+
+// GET /api/retention/settings
+app.get('/api/retention/settings', authMiddleware, requirePerm('security_access'), (req, res) => {
+  res.json(getRetentionSettings(getDb()));
+});
+
+// PUT /api/retention/settings
+app.put('/api/retention/settings', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const { backup_days = 0, document_days = 0, doc_file_days = 0, activity_days = 0 } = req.body;
+  const s = { backup_days: parseInt(backup_days), document_days: parseInt(document_days), doc_file_days: parseInt(doc_file_days), activity_days: parseInt(activity_days) };
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('retention_settings', ?)").run(JSON.stringify(s));
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'RÉTENTION_MODIFIÉE', category: 'sécurité', severity: 'info',
+    detail: `backup=${s.backup_days}j document=${s.document_days}j fichier=${s.doc_file_days}j suivi=${s.activity_days}j`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+// GET /api/retention/bin — liste des éléments en rétention
+app.get('/api/retention/bin', authMiddleware, requirePerm('retention_access'), (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  // Nettoyer les éléments expirés d'abord
+  db.prepare("DELETE FROM retention_bin WHERE expires_at IS NOT NULL AND expires_at < datetime('now','localtime')").run();
+  const rows = db.prepare("SELECT * FROM retention_bin ORDER BY deleted_at DESC").all();
+  const result = rows.map(r => ({ ...r, item_data: JSON.parse(r.item_data || '{}'), meta: JSON.parse(r.meta || '{}') }));
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'RÉTENTION_CONSULTÉE', category: 'sécurité', severity: 'info',
+    detail: `${result.length} éléments`, ip, success: 1 });
+  res.json(result);
+});
+
+// GET /api/retention/count — compte sans audit (pour le badge)
+app.get('/api/retention/count', authMiddleware, requirePerm('retention_access'), (req, res) => {
+  const db = getDb();
+  db.prepare("DELETE FROM retention_bin WHERE expires_at IS NOT NULL AND expires_at < datetime('now','localtime')").run();
+  const count = db.prepare("SELECT COUNT(*) as c FROM retention_bin").get().c;
+  res.json({ count });
+});
+
+// POST /api/retention/restore/:id — restaurer un élément
+app.post('/api/retention/restore/:id', authMiddleware, requirePerm('retention_access'), (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const row = db.prepare("SELECT * FROM retention_bin WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Élément introuvable dans la corbeille' });
+  const data = JSON.parse(row.item_data || '{}');
+  const meta = JSON.parse(row.meta || '{}');
+  try {
+    if (row.item_type === 'backup') {
+      db.prepare(`INSERT INTO backups (id, device_id, version, content_enc, size_bytes, status, note_enc, triggered_by, created_at, pinned)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(data.id, data.device_id, data.version, data.content_enc, data.size_bytes, data.status, data.note_enc, data.triggered_by, data.created_at, data.pinned || 0);
+    } else if (row.item_type === 'document') {
+      db.prepare(`INSERT INTO automation_documents (id, category_id, name, description, note, valid_until, doc_password, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(data.id, data.category_id, data.name, data.description, data.note, data.valid_until, data.doc_password, data.created_at, data.updated_at);
+      // Restaurer aussi les fichiers liés au document s'ils sont dans la corbeille
+      const docFiles = db.prepare("SELECT * FROM retention_bin WHERE item_type='doc_file' AND json_extract(item_data,'$.document_id')=?").all(data.id);
+      docFiles.forEach(ff => {
+        const fd = JSON.parse(ff.item_data || '{}');
+        try { db.prepare('INSERT INTO automation_document_files (id,document_id,filename,mimetype,size_bytes,data,uploaded_by,uploaded_at) VALUES (?,?,?,?,?,?,?,?)').run(fd.id,fd.document_id,fd.filename,fd.mimetype,fd.size_bytes,fd.data?Buffer.from(fd.data,'base64'):null,fd.uploaded_by,fd.uploaded_at); db.prepare('DELETE FROM retention_bin WHERE id=?').run(ff.id); } catch {}
+      });
+    } else if (row.item_type === 'doc_file') {
+      db.prepare(`INSERT INTO automation_document_files (id, document_id, filename, mimetype, size_bytes, data, uploaded_by, uploaded_at, pdf_cache, pdf_cached_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(data.id, data.document_id, data.filename, data.mimetype, data.size_bytes, data.data ? Buffer.from(data.data, 'base64') : null, data.uploaded_by, data.uploaded_at, null, null);
+    } else if (row.item_type === 'activity') {
+      db.prepare(`INSERT INTO activity_entries (id, user_id, year, month, tag_code, content, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(data.id, data.user_id, data.year, data.month, data.tag_code, data.content, data.created_at, data.updated_at);
+      // Restaurer les fichiers liés
+      if (Array.isArray(data.files)) {
+        data.files.forEach(f => {
+          try { db.prepare('INSERT INTO activity_files (entry_id,filename,mimetype,size_bytes,data,uploaded_at) VALUES (?,?,?,?,?,?)').run(data.id,f.filename,f.mimetype,f.size_bytes,f.data?Buffer.from(f.data,'base64'):null,f.uploaded_at); } catch {}
+        });
+      }
+    }
+    db.prepare("DELETE FROM retention_bin WHERE id=?").run(req.params.id);
+    audit(db, { userId: req.user.id, username: req.user.username, action: 'RÉTENTION_RESTAURÉE', category: 'sécurité', severity: 'info',
+      detail: `${row.item_type} #${row.item_id} — ${meta.label || '?'} (supprimé par ${row.deleted_by_name})`, ip, success: 1 });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/retention/bin/:id — suppression définitive
+app.delete('/api/retention/bin/:id', authMiddleware, requirePerm('retention_access'), (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const row = db.prepare("SELECT * FROM retention_bin WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Introuvable' });
+  db.prepare("DELETE FROM retention_bin WHERE id=?").run(req.params.id);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'RÉTENTION_SUPPRESSION_DÉFINITIVE', category: 'sécurité', severity: 'warn',
+    detail: `${row.item_type} #${row.item_id} — suppression définitive`, ip, success: 1 });
+  res.json({ success: true });
+});
+
+
 app.get('/api/settings/feature-flags', authMiddleware, (req, res) => {
   const db = getDb(); const row = db.prepare("SELECT value FROM settings WHERE key='feature_flags'").get();
   res.json(row ? JSON.parse(row.value) : {});
@@ -931,6 +1139,8 @@ function checkPreviewCrons() {
   const now = nowLocal();
   const nowDate = new Date();
   const curYear = nowDate.getFullYear(), curMonth = nowDate.getMonth() + 1;
+  const hh = nowDate.getHours(), mm = nowDate.getMinutes();
+  const isAt0005 = (hh === 0 && mm === 5);
 
   // preview_overdue : notes preview sur mois/années passés
   const overdueRow = db.prepare("SELECT * FROM notification_config WHERE event_key='preview_overdue' AND enabled=1").get();
@@ -962,9 +1172,9 @@ function checkPreviewCrons() {
     }
   }
 
-  // preview_recap : récapitulatif périodique
+  // preview_recap : récapitulatif périodique (00h05 seulement)
   const recapRow = db.prepare("SELECT * FROM notification_config WHERE event_key='preview_recap' AND enabled=1").get();
-  if (recapRow) {
+  if (recapRow && isAt0005) {
     let opts = {};
     try { opts = JSON.parse(recapRow.options || '{}'); } catch {}
     const freq = opts.frequency || 'weekly';
@@ -979,22 +1189,81 @@ function checkPreviewCrons() {
       ).all();
       const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
       let html = previews.length === 0 ? '<p>✅ Aucune note en preview actuellement.</p>'
-        : `<p>${previews.length} note(s) en preview :</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f0f9ff"><th style="padding:8px;text-align:left">Période</th><th style="padding:8px;text-align:left">Utilisateur</th><th style="padding:8px;text-align:left">Tag</th><th style="padding:8px;text-align:left">Statut</th><th style="padding:8px;text-align:left">Extrait</th></tr>` +
+        : `<p>${previews.length} note(s) en preview :</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Période</th><th style="padding:6px 8px;text-align:left">Utilisateur</th><th style="padding:6px 8px;text-align:left">Statut</th></tr>` +
           previews.map(e => {
             const isFuture = e.year > curYear || (e.year === curYear && e.month > curMonth);
             const status = isFuture ? '🔮 Futur' : '⚠️ Passé';
-            return `<tr><td style="padding:6px 8px">${MONTHS_FR[e.month-1]} ${e.year}</td><td style="padding:6px 8px">${e.username}</td><td style="padding:6px 8px">${e.tag_code}</td><td style="padding:6px 8px">${status}</td><td style="padding:6px 8px;color:#64748b">${(e.content||'').slice(0,60)}…</td></tr>`;
+            return `<tr><td style="padding:6px 8px">${MONTHS_FR[e.month-1]} ${e.year}</td><td style="padding:6px 8px">${e.username}</td><td style="padding:6px 8px">${status}</td></tr>`;
           }).join('') + '</table>';
       const text = previews.length === 0 ? 'Aucune note en preview.' : `${previews.length} note(s) en preview.`;
       dispatch('preview_recap', { html, text }, getDb).catch(() => {});
     }
   }
+
+  // retention_recap : récapitulatif des éléments en rétention (00h05 seulement)
+  const retRecapRow = db.prepare("SELECT * FROM notification_config WHERE event_key='retention_recap' AND enabled=1").get();
+  if (retRecapRow && isAt0005) {
+    let opts = {}; try { opts = JSON.parse(retRecapRow.options || '{}'); } catch {}
+    const freq = opts.frequency || 'weekly';
+    const shouldSend = (
+      (freq === 'daily') ||
+      (freq === 'weekly' && nowDate.getDay() === (parseInt(opts.day_of_week) || 1)) ||
+      (freq === 'monthly' && nowDate.getDate() === (parseInt(opts.day_of_month) || 1))
+    );
+    if (shouldSend) {
+      // Purger les expirés d'abord
+      db.prepare("DELETE FROM retention_bin WHERE expires_at IS NOT NULL AND expires_at < datetime('now','localtime')").run();
+      const items = db.prepare("SELECT * FROM retention_bin ORDER BY expires_at ASC").all();
+      const TYPE_LABELS = { backup: 'Backup', document: 'Document', doc_file: 'Fichier', activity: 'Suivi' };
+      const count = items.length;
+      let html, text;
+      if (count === 0) {
+        html = '<p>✅ Aucun élément en rétention actuellement.</p>';
+        text = 'Aucun élément en rétention.';
+      } else {
+        const rows = items.map(item => {
+          const meta = JSON.parse(item.meta || '{}');
+          const label = meta.label || `#${item.item_id}`;
+          const expiresAt = item.expires_at || '—';
+          const daysLeft = item.expires_at ? Math.ceil((new Date(item.expires_at) - nowDate) / 86400000) : null;
+          const urgentStyle = daysLeft !== null && daysLeft <= 3 ? ' style="color:#dc2626;font-weight:600"' : '';
+          return `<tr><td style="padding:6px 8px">${TYPE_LABELS[item.item_type]||item.item_type}: ${label}</td>`
+            + `<td style="padding:6px 8px">${item.deleted_by_name || '?'}</td>`
+            + `<td style="padding:6px 8px">${(item.deleted_at||'').slice(0,16)}</td>`
+            + `<td style="padding:6px 8px"${urgentStyle}>${expiresAt.slice(0,16)}${daysLeft!==null?' ('+daysLeft+'j)':''}</td></tr>`;
+        }).join('');
+        html = `<p>${count} élément${count>1?'s':''} en rétention :</p>`
+          + `<table style="border-collapse:collapse;width:100%;font-size:13px">`
+          + `<tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Élément</th><th style="padding:6px 8px;text-align:left">Supprimé par</th><th style="padding:6px 8px;text-align:left">Supprimé le</th><th style="padding:6px 8px;text-align:left">Expire le</th></tr>`
+          + rows + `</table>`;
+        text = `${count} élément${count>1?'s':''} en rétention. Connectez-vous pour les restaurer ou les supprimer.`;
+      }
+      dispatch('retention_recap', { html, text, count }, getDb).catch(() => {});
+    }
+  }
+  // expiration_document : catégories temporaires arrivant à expiration
+  const expiRow = db.prepare("SELECT * FROM notification_config WHERE event_key='expiration_document' AND enabled=1").get();
+  if (expiRow) {
+    let opts = {}; try { opts = JSON.parse(expiRow.options || '{}'); } catch {}
+    const daysBefore = parseInt(opts.days_before) || 30;
+    const limitDate = new Date(nowDate.getTime() + daysBefore * 86400000).toISOString().slice(0,10);
+    const expiringCats = db.prepare(
+      "SELECT * FROM automation_categories WHERE type='temporary' AND valid_until IS NOT NULL AND valid_until <= ? AND valid_until >= ?"
+    ).all(limitDate, nowDate.toISOString().slice(0,10));
+    for (const cat of expiringCats) {
+      const catName = decrypt(cat.label_enc || cat.name_enc || '');
+      dispatch('expiration_document', {
+        name: catName, valid_until: cat.valid_until,
+        category: catName, datetime: nowLocal(),
+      }, getDb).catch(() => {});
+    }
+  }
 }
 
-// Vérification toutes les heures (preview_overdue et preview_recap)
-setInterval(checkPreviewCrons, 60 * 60 * 1000);
-// Aussi au démarrage après 1 min pour détecter immédiatement
-setTimeout(checkPreviewCrons, 60 * 1000);
+// Vérification toutes les minutes (preview_overdue, preview_recap, retention_recap)
+setInterval(checkPreviewCrons, 60 * 1000);
+// Aussi au démarrage après 30s
+setTimeout(checkPreviewCrons, 30 * 1000);
 
 // ── AUDIT : ARCHIVAGE AUTOMATIQUE (fonction partagée) ─────────────────────────
 function archiveMonth(db, year, month, archivedBy) {
@@ -1255,6 +1524,7 @@ async function runBackupSchedule(scheduleId, triggerUser, ip = 'system') {
     }
 
     // ── Déduplication : ne pas créer si identique à la dernière version ────────
+    // Ignore les lignes contenant des timestamps (date/heure du dernier login, uptime, etc.)
     let isDuplicate = false;
     if (status === 'ok') {
       const lastBackup = db.prepare(
@@ -1263,8 +1533,31 @@ async function runBackupSchedule(scheduleId, triggerUser, ip = 'system') {
       if (lastBackup) {
         try {
           const lastContent = decrypt(lastBackup.content_enc);
-          // Comparaison normalisée (ignore espaces en fin de ligne et lignes vides finales)
-          const normalize = s => s.replace(/[ \t]+$/mg, '').trim();
+          // Normalisation : ignore trailing spaces, lignes vides, et lignes dynamiques
+          // (timestamps, uptimes, last login, ntp clock, etc.)
+          const dynamicPatterns = [
+            /^\s*!?\s*(last\s+login|last\s+input|last\s+output|output\s+hang)/i,
+            /^\s*!?\s*(clock|ntp|timestamp|uptime|system\s+uptime)/i,
+            /^\s*!?\s*#\s*(generated|last\s+modified|built\s+by)/i,
+            /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\b/i,
+            /\b\d{4}[-\/]\d{2}[-\/]\d{2}[\sT]\d{2}:\d{2}(:\d{2})?\b/,  // ISO dates
+            /\b\d{2}:\d{2}:\d{2}\s+(utc|cet|cest|gmt)/i,  // time with timezone
+            /^\s*!\s*Last\s+configuration\s+change/i,
+            /^\s*!\s*NVRAM\s+config\s+last\s+updated/i,
+            /^\s*version\s+\d+\.\d+.*\(uptime\s+is/i,  // IOS uptime
+          ];
+          const normalize = s => s
+            .split('\n')
+            .filter(line => {
+              const t = line.trim();
+              if (!t) return false;  // empty lines
+              if (t.startsWith('!') && dynamicPatterns.some(p => p.test(t))) return false;
+              if (dynamicPatterns.some(p => p.test(t))) return false;
+              return true;
+            })
+            .map(l => l.replace(/[ \t]+$/g, ''))  // trailing spaces
+            .join('\n')
+            .trim();
           if (normalize(lastContent) === normalize(content)) {
             isDuplicate = true;
           }
@@ -1617,8 +1910,10 @@ app.get('/api/backups/:id/content', authMiddleware, (req, res) => {
   const row = getDb().prepare('SELECT content_enc FROM backups WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Non trouvé' });
   const _db_lu = getDb();
-  const _bk_lu = _db_lu.prepare('SELECT b.version, d.name_enc FROM backups b LEFT JOIN devices d ON d.id=b.device_id WHERE b.id=?').get(req.params.id);
-  audit(_db_lu, { userId: req.user.id, username: req.user.username, action: 'BACKUP_LU', category: 'backup', severity: 'info', detail: _bk_lu ? `${decrypt(_bk_lu.name_enc||'')} v${_bk_lu.version}` : `Backup ID ${req.params.id}`, ip: getClientIp(req), success: 1 });
+  const _bk_lu = _db_lu.prepare('SELECT b.version, d.name_enc FROM backups b LEFT JOIN devices d ON b.device_id=d.id WHERE b.id=?').get(req.params.id);
+  const _devName = _bk_lu ? decrypt(_bk_lu.name_enc) : '?';
+  audit(_db_lu, { userId: req.user.id, username: req.user.username, action: 'BACKUP_LU', category: 'backup', severity: 'info', detail: `${_devName} v${_bk_lu?.version}`, ip: getClientIp(req), success: 1 });
+  dispatch('backup_download', { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), device: _devName, version: `v${_bk_lu?.version || '?'}` }, getDb).catch(() => {});
   res.json({ content: decrypt(row.content_enc) });
 });
 
@@ -1755,20 +2050,23 @@ app.delete('/api/backups/:id', authMiddleware, requirePerm('backup_write'), (req
       WHERE b.id = ?`).get(req.params.id);
     if (!backup) return res.status(404).json({ error: 'Backup introuvable' });
     if (backup.pinned) return res.status(403).json({ error: 'Ce backup est épinglé. Désépinglez-le avant de le supprimer.' });
-    db.prepare('DELETE FROM backups WHERE id = ?').run(req.params.id);
     let siteName = '?', deviceName = '?';
     try { siteName   = backup.site_name_enc   ? decrypt(backup.site_name_enc)   : '?'; } catch {}
     try { deviceName = backup.device_name_enc ? decrypt(backup.device_name_enc) : '?'; } catch {}
     const dateStr = (backup.created_at || '').slice(0, 10);
+    // Rétention avant suppression
+    const _bkFull = db.prepare('SELECT * FROM backups WHERE id=?').get(req.params.id);
+    addToRetention(db, { item_type:'backup', item_id:parseInt(req.params.id), item_data:_bkFull, deleted_by:req.user.id, deleted_by_name:req.user.username, meta:{ label:`${deviceName} v${backup.version}` } });
+    db.prepare('DELETE FROM backups WHERE id = ?').run(req.params.id);
     audit(db, { userId: req.user.id, username: req.user.username, action: 'BACKUP_SUPPRIMÉ', category: 'backup', severity: 'warn',
       detail: `${siteName} / ${deviceName} — v${backup.version} du ${dateStr}`, ip: getClientIp(req), success: 1 });
+    dispatch('backup_deleted', { device: deviceName, version: `v${backup.version}`, username: req.user.username, ip: getClientIp(req), datetime: nowLocal() }, getDb).catch(() => {});
     res.json({ success: true });
   } catch (e) {
     console.error('DELETE /api/backups/:id error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
-
 app.get('/api/backups/diff', authMiddleware, (req, res) => {
   const { id_a, id_b } = req.query;
   if (!id_a || !id_b) return res.status(400).json({ error: 'id_a et id_b requis' });
@@ -2074,6 +2372,11 @@ app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
   if (!entry) return res.status(404).json({ error: 'Introuvable' });
   if (entry.user_id !== req.user.id)
     return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres notes' });
+  // Récupérer les fichiers liés avant suppression
+  const _actFiles = db.prepare('SELECT * FROM activity_files WHERE entry_id=?').all(entry.id);
+  const _actMeta = { label: `[${entry.tag_code}] ${entry.year}-${String(entry.month).padStart(2,'0')}`, files_count: _actFiles.length };
+  const _actData = { ...entry, files: _actFiles.map(f => ({ ...f, data: f.data ? Buffer.from(f.data).toString('base64') : null })) };
+  addToRetention(db, { item_type:'activity', item_id:entry.id, item_data:_actData, deleted_by:req.user.id, deleted_by_name:req.user.username, meta:_actMeta });
   db.prepare('DELETE FROM activity_entries WHERE id=?').run(req.params.id);
   // Audit avec année, date, tag et extrait (secrets masqués)
   const pad = n => String(n).padStart(2,'0');
@@ -2081,6 +2384,7 @@ app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
   const excerpt = (entry.content||'').replace(/\[secret\][\s\S]*?\[\/secret\]/gi,'[secret]').slice(0,60);
   audit(db, { userId: req.user.id, username: req.user.username, action: 'SUIVI_SUPPRIMÉ', category: 'suivi', severity: 'warn',
     detail: `[${entry.tag_code}] ${dateStr} — ${excerpt}${excerpt.length===60?'…':''}`, ip, success: 1 });
+  dispatch('activity_deleted', { tag_code: entry.tag_code, year: entry.year, month: entry.month, content_preview: (entry.content||'').slice(0,60), username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(() => {});
   res.json({ success: true });
 });
 
@@ -2166,6 +2470,8 @@ app.delete('/api/activity/files/:id', authMiddleware, (req, res) => {
   db.prepare('INSERT INTO activity_entry_history (entry_id,event_type,detail,changed_by,changed_at) VALUES (?,?,?,?,?)').run(row.entry_id,'file_deleted',`Fichier supprimé : ${fname} (par ${req.user.username})`,req.user.id,nowLocal());
   // Audit global
   audit(db,{userId:req.user.id,username:req.user.username,action:'FICHIER_SUPPRIME',category:'activity',severity:'warn',detail:`Note #${row.entry_id} — ${fname}`,ip,success:1});
+  const _actEntry = db.prepare('SELECT year,month,tag_code FROM activity_entries WHERE id=?').get(row.entry_id);
+  dispatch('activity_file_deleted', { filename: fname, tag_code: _actEntry?.tag_code||'?', year: _actEntry?.year, month: _actEntry?.month, username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(()=>{});
   res.json({success:true});
 });
 app.get('/api/activity/files/:id/download', authMiddleware, (req, res) => {
@@ -2278,6 +2584,99 @@ app.post('/api/activity/export-audit', authMiddleware, (req, res) => {
 });
 
 // ── STATS ─────────────────────────────────────────────────────────────────────
+// ── SYSTÈME : SANTÉ DU BACKEND ────────────────────────────────────────────────
+app.get('/api/system/health', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const db = getDb();
+  const fs = require('fs');
+  const path = require('path');
+
+  // ── Uptime process ──────────────────────────────────────────────────────────
+  const uptimeSec = process.uptime();
+  const uptimeFmt = (() => {
+    const d = Math.floor(uptimeSec / 86400);
+    const h = Math.floor((uptimeSec % 86400) / 3600);
+    const m = Math.floor((uptimeSec % 3600) / 60);
+    const s = Math.floor(uptimeSec % 60);
+    return d > 0 ? `${d}j ${h}h ${m}m` : h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
+  })();
+
+  // ── Mémoire process ─────────────────────────────────────────────────────────
+  const mem = process.memoryUsage();
+  const fmtMb = b => (b / 1024 / 1024).toFixed(1) + ' Mo';
+
+  // ── SQLite DB size ──────────────────────────────────────────────────────────
+  const dbPath = process.env.DB_PATH || '/data/nexusvault.db';
+  let dbSize = 0;
+  try { dbSize = fs.statSync(dbPath).size; } catch {}
+  const fmtSize = b => b >= 1048576 ? (b/1048576).toFixed(1)+' Mo' : b >= 1024 ? (b/1024).toFixed(0)+' Ko' : b+' o';
+
+  // ── Tailles des tables clés ─────────────────────────────────────────────────
+  const tableStats = {};
+  const tables = ['backups', 'activity_entries', 'activity_files', 'automation_documents', 'automation_document_files', 'retention_bin', 'audit_log', 'notification_log', 'users', 'devices', 'sites'];
+  tables.forEach(t => {
+    try { tableStats[t] = db.prepare(`SELECT COUNT(*) as c FROM ${t}`).get().c; } catch { tableStats[t] = null; }
+  });
+
+  // ── Taille approx des gros blobs (backups + fichiers) ──────────────────────
+  let backupsSize = 0, docFilesSize = 0, actFilesSize = 0;
+  try { backupsSize = db.prepare('SELECT COALESCE(SUM(size_bytes),0) as s FROM backups').get().s; } catch {}
+  try { docFilesSize = db.prepare('SELECT COALESCE(SUM(size_bytes),0) as s FROM automation_document_files').get().s; } catch {}
+  try { actFilesSize = db.prepare('SELECT COALESCE(SUM(size_bytes),0) as s FROM activity_files').get().s; } catch {}
+
+  // ── Rétention ──────────────────────────────────────────────────────────────
+  let retentionByType = {};
+  try {
+    const retRows = db.prepare("SELECT item_type, COUNT(*) as c FROM retention_bin GROUP BY item_type").all();
+    retRows.forEach(r => { retentionByType[r.item_type] = r.c; });
+  } catch {}
+  let retentionExpiringSoon = 0;
+  try {
+    const soon = new Date(Date.now() + 3*86400000).toISOString().slice(0,19).replace('T',' ');
+    retentionExpiringSoon = db.prepare("SELECT COUNT(*) as c FROM retention_bin WHERE expires_at IS NOT NULL AND expires_at <= ?").get(soon).c;
+  } catch {}
+
+  // ── Activité récente (24h) ──────────────────────────────────────────────────
+  let recentAudit = 0, recentLogins = 0, failedLogins = 0;
+  try {
+    const since24h = new Date(Date.now() - 86400000).toISOString().slice(0,19).replace('T',' ');
+    recentAudit = db.prepare("SELECT COUNT(*) as c FROM audit_log WHERE created_at >= ?").get(since24h).c;
+    recentLogins = db.prepare("SELECT COUNT(*) as c FROM audit_log WHERE action='CONNEXION_RÉUSSIE' AND created_at >= ?").get(since24h).c;
+    failedLogins = db.prepare("SELECT COUNT(*) as c FROM audit_log WHERE action IN ('CONNEXION_ÉCHEC','CONNEXION_BLOQUÉE') AND created_at >= ?").get(since24h).c;
+  } catch {}
+
+  // ── Planifications cron ─────────────────────────────────────────────────────
+  let cronStats = { total: 0, enabled: 0 };
+  try {
+    cronStats.total   = db.prepare('SELECT COUNT(*) as c FROM backup_schedules').get().c;
+    cronStats.enabled = db.prepare("SELECT COUNT(*) as c FROM backup_schedules WHERE enabled=1").get().c;
+  } catch {}
+
+  // ── Node.js ─────────────────────────────────────────────────────────────────
+  const nodeVersion = process.version;
+  const platform = process.platform;
+
+  // ── Whitelist ───────────────────────────────────────────────────────────────
+  let whitelistCount = 0;
+  try { whitelistCount = db.prepare("SELECT COUNT(*) as c FROM whitelist WHERE enabled=1").get().c; } catch {}
+
+  res.json({
+    timestamp: nowLocal(),
+    uptime: { seconds: Math.floor(uptimeSec), formatted: uptimeFmt },
+    memory: { rss: fmtMb(mem.rss), heap_used: fmtMb(mem.heapUsed), heap_total: fmtMb(mem.heapTotal) },
+    database: {
+      size: fmtSize(dbSize), size_bytes: dbSize,
+      tables: tableStats,
+      blobs: { backups: fmtSize(backupsSize), doc_files: fmtSize(docFilesSize), activity_files: fmtSize(actFilesSize) },
+    },
+    retention: { by_type: retentionByType, expiring_soon: retentionExpiringSoon, total: Object.values(retentionByType).reduce((a,b)=>a+b,0) },
+    activity_24h: { audit_events: recentAudit, logins: recentLogins, failed_logins: failedLogins },
+    cron: cronStats,
+    whitelist: { active_rules: whitelistCount },
+    runtime: { node: nodeVersion, platform },
+  });
+});
+
+
 app.get('/api/stats', authMiddleware, (req, res) => {
   const db = getDb();
   const now = new Date();
@@ -2462,13 +2861,16 @@ app.delete('/api/automation/documents/:id', authMiddleware, requirePerm('automat
   const db = getDb(); const ip = getClientIp(req);
   const doc = db.prepare('SELECT * FROM automation_documents WHERE id=?').get(req.params.id);
   if (!doc) return res.status(404).json({ error: 'Introuvable' });
+    const _docFull = db.prepare('SELECT * FROM automation_documents WHERE id=?').get(req.params.id);
+    addToRetention(db, { item_type:'document', item_id:parseInt(req.params.id), item_data:_docFull, deleted_by:req.user.id, deleted_by_name:req.user.username, meta:{ label:_docFull?.name } });
   db.prepare('DELETE FROM automation_documents WHERE id=?').run(req.params.id);
   audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_SUPPRIMÉ', category: 'automatisation', severity: 'warn',
     detail: `Document "${doc.name}"`, ip, success: 1 });
+  let _catLabel = '?'; try { const _cr = db.prepare('SELECT name FROM automation_categories WHERE id=?').get(doc.category_id); if (_cr) _catLabel = _cr.name; } catch {}
+  dispatch('document_deleted', { name: doc.name, category: _catLabel, username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(() => {});
   res.json({ success: true });
 });
 
-// Ajouter un fichier joint à un document
 app.post('/api/automation/documents/:id/files', authMiddleware, requirePerm('automatisation_write'), (req, res) => {
   const { filename, mimetype, data } = req.body;
   if (!filename || !data) return res.status(400).json({ error: 'Fichier requis' });
@@ -2500,13 +2902,48 @@ app.delete('/api/automation/files/:id', authMiddleware, requirePerm('automatisat
   const db = getDb(); const ip = getClientIp(req);
   const f = db.prepare(`SELECT f.*, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
   if (!f) return res.status(404).json({ error: 'Introuvable' });
+  const _fileFull = db.prepare('SELECT * FROM automation_document_files WHERE id=?').get(req.params.id);
+  const _fileDoc = _fileFull ? db.prepare('SELECT name FROM automation_documents WHERE id=?').get(_fileFull.document_id) : null;
+  addToRetention(db, { item_type:'doc_file', item_id:parseInt(req.params.id), item_data:{..._fileFull, data:_fileFull?.data ? Buffer.from(_fileFull.data).toString('base64') : null}, deleted_by:req.user.id, deleted_by_name:req.user.username, meta:{ label:_fileFull?.filename, doc_name:_fileDoc?.name } });
   db.prepare('DELETE FROM automation_document_files WHERE id=?').run(req.params.id);
   audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_SUPPRIMÉ', category: 'automatisation', severity: 'warn',
     detail: `"${f.filename}" du document "${f.doc_name}"`, ip, success: 1, ref_id: f.document_id });
+  dispatch('file_deleted', { filename: _fileFull?.filename || '?', doc_name: _fileDoc?.name || '?', username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(() => {});
   res.json({ success: true });
 });
 
-// Audit tentative accès document sécurisé échouée
+// Remplacer un fichier — upload + suppression ancien + audit de remplacement
+app.post('/api/automation/files/:id/replace', authMiddleware, requirePerm('automatisation_write'), async (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  const oldFile = db.prepare(`SELECT f.*, d.name as doc_name, d.id as doc_id
+    FROM automation_document_files f LEFT JOIN automation_documents d ON d.id = f.document_id
+    WHERE f.id = ?`).get(req.params.id);
+  if (!oldFile) return res.status(404).json({ error: 'Fichier introuvable' });
+
+  const { filename, mimetype, data: dataB64 } = req.body;
+  if (!filename || !dataB64) return res.status(400).json({ error: 'filename et data requis' });
+
+  const dataBuf = Buffer.from(dataB64, 'base64');
+
+  // Transaction : insérer nouveau, supprimer ancien
+  const doReplace = db.transaction(() => {
+    const newRow = db.prepare(
+      'INSERT INTO automation_document_files (document_id, filename, mimetype, size_bytes, data, uploaded_by) VALUES (?,?,?,?,?,?)'
+    ).run(oldFile.doc_id, filename, mimetype || 'application/octet-stream', dataBuf.length, dataBuf, req.user.id);
+    db.prepare('DELETE FROM automation_document_files WHERE id=?').run(req.params.id);
+    return newRow.lastInsertRowid;
+  });
+  const newFileId = doReplace();
+
+  const detail = `Fichier "${oldFile.filename}" remplacé par "${filename}" dans "${oldFile.doc_name}"`;
+  audit(db, { userId: req.user.id, username: req.user.username,
+    action: 'FICHIER_REMPLACÉ', category: 'automatisation', severity: 'info',
+    detail, ip, success: 1, ref_id: oldFile.doc_id });
+
+  res.json({ success: true, newFileId });
+});
+
+
 app.post('/api/automation/documents/:id/access-denied', authMiddleware, (req, res) => {
   const db = getDb(); const ip = getClientIp(req);
   const doc = db.prepare('SELECT name FROM automation_documents WHERE id=?').get(req.params.id);

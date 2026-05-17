@@ -99,6 +99,13 @@ export default function Login() {
   // OIDC public config
   const [oidc, setOidc] = useState(null);
 
+  const [mustChangePwd, setMustChangePwd] = useState(false);
+  const [changePwdToken, setChangePwdToken] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [newPwd2, setNewPwd2] = useState('');
+  const [changePwdErr, setChangePwdErr] = useState('');
+  const [changePwdLoading, setChangePwdLoading] = useState(false);
+
   const passwordChanged = searchParams.get('changed') === '1';
 
   useEffect(() => {
@@ -144,9 +151,16 @@ export default function Login() {
         }
         return;
       }
-      const user = login(res.token);
-      if (user.must_change_password) navigate('/admin?tab=account&force=1');
-      else navigate('/');
+      // Décoder le token sans l'enregistrer pour vérifier mustChangePassword
+      const payload = JSON.parse(atob(res.token.split('.')[1]));
+      if (payload.mustChangePassword) {
+        // Ne pas connecter l'utilisateur — afficher le modal de changement obligatoire
+        setChangePwdToken(res.token);
+        setMustChangePwd(true);
+      } else {
+        login(res.token);
+        navigate('/');
+      }
     } catch (err) {
       setError(err.message || 'Identifiants incorrects');
     } finally {
@@ -161,9 +175,16 @@ export default function Login() {
     try {
       // Appeler login avec le code TOTP
       const res = await api.login(username.trim(), password, totpCode);
-      const user = login(res.token);
-      if (user.must_change_password) navigate('/admin?tab=account&force=1');
-      else navigate('/');
+      // Décoder le token sans l'enregistrer pour vérifier mustChangePassword
+      const payload = JSON.parse(atob(res.token.split('.')[1]));
+      if (payload.mustChangePassword) {
+        // Ne pas connecter l'utilisateur — afficher le modal de changement obligatoire
+        setChangePwdToken(res.token);
+        setMustChangePwd(true);
+      } else {
+        login(res.token);
+        navigate('/');
+      }
     } catch (err) {
       setTotpError(err.message || 'Code invalide');
     } finally {
@@ -177,9 +198,16 @@ export default function Login() {
     setTotpLoading(true); setTotpError('');
     try {
       const res = await api.totpSetupVerify(setupToken, totpCode);
-      const user = login(res.token);
-      if (user.must_change_password) navigate('/admin?tab=account&force=1');
-      else navigate('/');
+      // Décoder le token sans l'enregistrer pour vérifier mustChangePassword
+      const payload = JSON.parse(atob(res.token.split('.')[1]));
+      if (payload.mustChangePassword) {
+        // Ne pas connecter l'utilisateur — afficher le modal de changement obligatoire
+        setChangePwdToken(res.token);
+        setMustChangePwd(true);
+      } else {
+        login(res.token);
+        navigate('/');
+      }
     } catch (err) {
       setTotpError(err.message || 'Code invalide');
     } finally {
@@ -239,7 +267,7 @@ export default function Login() {
                   </span>
                   <div style={{flex:1, height:1, background:'var(--brd)'}}/>
                 </div>
-                <button type="button" className="btn" onClick={() => redirectToOidc(oidc)}
+                <button type="button" className="btn btn-primary" onClick={() => redirectToOidc(oidc)}
                   style={{width:'100%', justifyContent:'center', gap:8, display:'flex', alignItems:'center'}}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}>
                     <circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
@@ -338,6 +366,50 @@ export default function Login() {
       </div>
 
       {showForgot && <ForgotPasswordModal onClose={() => setShowForgot(false)} />}
+
+      {/* Modal changement de mot de passe obligatoire */}
+      {mustChangePwd && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>
+          <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', padding:32, width:'100%', maxWidth:400, boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}>
+            <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>Changement de mot de passe requis</div>
+            <div style={{ fontSize:13, color:'var(--muted)', marginBottom:20 }}>
+              Pour des raisons de sécurité, vous devez choisir un nouveau mot de passe avant de continuer.
+            </div>
+            {changePwdErr && <div className="alert alert-err" style={{ marginBottom:12, fontSize:12 }}>{changePwdErr}</div>}
+            <div className="form-group">
+              <label className="form-label">Nouveau mot de passe <span style={{ color:'var(--muted)', fontSize:11 }}>(14 caractères minimum)</span></label>
+              <input className="form-control" type="password" value={newPwd}
+                onChange={e => setNewPwd(e.target.value)} placeholder="••••••••••••••" autoFocus />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Confirmer le mot de passe</label>
+              <input className="form-control" type="password" value={newPwd2}
+                onChange={e => setNewPwd2(e.target.value)} placeholder="••••••••••••••" />
+            </div>
+            <button className="btn btn-primary" style={{ width:'100%', marginTop:8 }}
+              disabled={changePwdLoading || newPwd.length < 14 || newPwd !== newPwd2}
+              onClick={async () => {
+                setChangePwdErr('');
+                if (newPwd.length < 14) return setChangePwdErr('14 caractères minimum');
+                if (newPwd !== newPwd2) return setChangePwdErr('Les mots de passe ne correspondent pas');
+                setChangePwdLoading(true);
+                try {
+                  const r = await fetch('/api/auth/force-change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${changePwdToken}` },
+                    body: JSON.stringify({ new_password: newPwd }),
+                  });
+                  if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Erreur'); }
+                  login(changePwdToken);
+                  setMustChangePwd(false);
+                  navigate('/');
+                } catch (e2) { setChangePwdErr(e2.message); } finally { setChangePwdLoading(false); }
+              }}>
+              {changePwdLoading ? 'Enregistrement…' : 'Définir le mot de passe'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
