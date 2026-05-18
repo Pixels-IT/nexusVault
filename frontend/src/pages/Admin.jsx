@@ -2424,6 +2424,8 @@ function SecurityOidcTab() {
         </div>
       </div>
 
+      <div className="card">
+        <div style={{ padding: 20 }}>
           <form onSubmit={save}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
               {field('provider_name', t('security.oidc_provider') || 'Nom du fournisseur', 'text', 'Keycloak, Authentik, Azure…')}
@@ -2483,6 +2485,8 @@ function SecurityOidcTab() {
               </button>
             </div>
           </form>
+        </div>
+      </div>
 
       {/* Bouton de connexion OIDC (aperçu) */}
       {cfg.enabled && cfg.provider_name && (

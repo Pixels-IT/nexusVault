@@ -570,7 +570,123 @@ app.get('/api/oidc/public', (req, res) => {
 
 
 
-// ── LDAP CONFIGURATION ───────────────────────────────────────────────────────
+// ── OIDC CALLBACK : échange du code contre un token JWT ──────────────────────
+app.post('/api/oidc/exchange', (req, res) => {
+  const { code, redirect_uri } = req.body;
+  if (!code) return res.status(400).json({ error: 'Code manquant' });
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM settings WHERE key='oidc_config'").get();
+  if (!row) return res.status(500).json({ error: 'OIDC non configuré' });
+  const cfg = JSON.parse(row.value);
+  if (!cfg.enabled) return res.status(403).json({ error: 'OIDC désactivé' });
+
+  const https = require('https');
+  const http  = require('http');
+  const url   = require('url');
+
+  function fetchPost(endpoint, body) {
+    return new Promise((resolve, reject) => {
+      const u = new url.URL(endpoint);
+      const postData = new URLSearchParams(body).toString();
+      const opts = {
+        hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: u.pathname + u.search, method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData) },
+        rejectUnauthorized: false,
+      };
+      const mod = u.protocol === 'https:' ? https : http;
+      const req2 = mod.request(opts, r => {
+        let data = '';
+        r.on('data', d => data += d);
+        r.on('end', () => { try { resolve(JSON.parse(data)); } catch { reject(new Error('Invalid JSON: ' + data.slice(0,200))); } });
+      });
+      req2.on('error', reject);
+      req2.write(postData);
+      req2.end();
+    });
+  }
+
+  function fetchGet(endpoint, accessToken) {
+    return new Promise((resolve, reject) => {
+      const u = new url.URL(endpoint);
+      const opts = {
+        hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: u.pathname + u.search, method: 'GET',
+        headers: { Authorization: 'Bearer ' + accessToken },
+        rejectUnauthorized: false,
+      };
+      const mod = u.protocol === 'https:' ? https : http;
+      const req2 = mod.request(opts, r => {
+        let data = '';
+        r.on('data', d => data += d);
+        r.on('end', () => { try { resolve(JSON.parse(data)); } catch { reject(new Error('Invalid JSON')); } });
+      });
+      req2.on('error', reject);
+      req2.end();
+    });
+  }
+
+  (async () => {
+    try {
+      // 1. Exchange code for tokens
+      const tokenEndpoint = cfg.token_endpoint || (() => {
+        const base = (cfg.issuer_url || '').replace(/\/$/, '');
+        return base + '/api/oidc/token';
+      })();
+      const tokenRes = await fetchPost(tokenEndpoint, {
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirect_uri || cfg.redirect_uri,
+        client_id: cfg.client_id,
+        client_secret: cfg.client_secret || '',
+      });
+      if (tokenRes.error) return res.status(401).json({ error: tokenRes.error_description || tokenRes.error });
+      const accessToken = tokenRes.access_token;
+      if (!accessToken) return res.status(401).json({ error: 'Pas de access_token' });
+
+      // 2. Get userinfo
+      const userInfoEndpoint = cfg.userinfo_endpoint || (() => {
+        const base = (cfg.issuer_url || '').replace(/\/$/, '');
+        return base + '/api/oidc/userinfo';
+      })();
+      const userInfo = await fetchGet(userInfoEndpoint, accessToken);
+      const email = userInfo.email || userInfo.preferred_username || userInfo.sub;
+      const name  = userInfo.preferred_username || userInfo.name || email;
+      if (!name) return res.status(401).json({ error: 'Impossible de déterminer le nom utilisateur' });
+
+      // 3. Find or create local user
+      let user = db.prepare("SELECT * FROM users WHERE username=? OR email=?").get(name, email);
+      if (!user && cfg.auto_create_users) {
+        const role = cfg.default_role || 'viewer';
+        const ip = getClientIp(req);
+        db.prepare("INSERT INTO users (username, password_hash, role, permissions, display_name, email, created_at) VALUES (?,?,?,?,?,?,?)")
+          .run(name, '', role, '{}', userInfo.name || name, email || '', nowLocal());
+        user = db.prepare("SELECT * FROM users WHERE username=?").get(name);
+        audit(db, { userId: user.id, username: name, action: 'COMPTE_CRÉÉ_OIDC', category: 'auth', severity: 'info', detail: `Via OIDC (${email})`, ip, success: 1 });
+      }
+      if (!user) return res.status(403).json({ error: `Aucun compte local trouvé pour "${name}". Activez la création automatique ou créez le compte manuellement.` });
+      if (user.locked) return res.status(403).json({ error: 'Compte verrouillé' });
+
+      // 4. Issue JWT
+      const jwt = require('jsonwebtoken');
+      const perms = JSON.parse(user.permissions || '{}');
+      const token = jwt.sign({
+        id: user.id, username: user.username, role: user.role,
+        display_name: user.display_name || user.username,
+        permissions: user.permissions || '{}',
+      }, JWT_SECRET, { expiresIn: '8h' });
+
+      const ip = getClientIp(req);
+      audit(db, { userId: user.id, username: user.username, action: 'CONNEXION_RÉUSSIE', category: 'auth', severity: 'info', detail: `Via OIDC (${cfg.provider_name || 'SSO'})`, ip, success: 1 });
+      res.json({ token });
+    } catch (e) {
+      logger.error('[OIDC] Exchange error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  })();
+});
+
+
 app.get('/api/ldap/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key='ldap_config'").get();

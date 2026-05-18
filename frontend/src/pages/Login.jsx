@@ -115,11 +115,43 @@ export default function Login() {
     }).catch(() => setOidc({ enabled: false, allow_local_login: true }));
   }, []);
 
+  // Gérer le retour OIDC avec ?code=
+  useEffect(() => {
+    const code  = searchParams.get('code');
+    const state = searchParams.get('state');
+    if (!code) return;
+    // Vérifier le state anti-CSRF
+    const savedState = sessionStorage.getItem('oidc_state');
+    if (state && savedState && state !== savedState) {
+      setError('Erreur de sécurité OIDC (state mismatch). Réessayez.');
+      setSearchParams({});
+      return;
+    }
+    sessionStorage.removeItem('oidc_state');
+    setLoading(true); setError('');
+    const redirectUri = window.location.origin + '/login';
+    api.oidcExchange({ code, redirect_uri: redirectUri })
+      .then(res => {
+        const payload = JSON.parse(atob(res.token.split('.')[1]));
+        if (payload.mustChangePassword) {
+          setChangePwdToken(res.token);
+          setMustChangePwd(true);
+        } else {
+          login(res.token);
+          navigate('/');
+        }
+      })
+      .catch(err => {
+        setError(err.message || 'Authentification OIDC échouée');
+        setSearchParams({});
+      })
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line
+
   function redirectToOidc(cfg) {
-    const base = cfg.issuer_url ? cfg.issuer_url.replace(/\/$/, '') : '';
-    const authEndpoint = cfg.authorization_endpoint || (base ? base + '/protocol/openid-connect/auth' : '');
+    const authEndpoint = cfg.authorization_endpoint || '';
     if (!authEndpoint || !cfg.client_id) return;
-    const redirectUri = cfg.redirect_uri || (window.location.origin + '/oidc-callback');
+    const redirectUri = window.location.origin + '/login';
     const state = btoa(Math.random().toString(36).slice(2));
     sessionStorage.setItem('oidc_state', state);
     const params = new URLSearchParams({
@@ -131,7 +163,6 @@ export default function Login() {
     });
     window.location.href = authEndpoint + '?' + params.toString();
   }
-
 
   async function handleSubmit(e) {
     e.preventDefault();
