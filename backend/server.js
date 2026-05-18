@@ -2450,6 +2450,11 @@ app.get('/api/activity/entries', authMiddleware, (req, res) => {
   if (month) { q += ' AND e.month=?'; p.push(parseInt(month)); }
   q += ' ORDER BY e.year DESC, e.month ASC, e.created_at ASC';
   res.json(db.prepare(q).all(...p));
+});
+
+// Historique d'une note
+app.get('/api/activity/entries/:id/history', authMiddleware, (req, res) => {
+  const db = getDb();
   const entry = db.prepare('SELECT user_id FROM activity_entries WHERE id=?').get(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Introuvable' });
   if (entry.user_id !== req.user.id && req.user.role !== 'admin')

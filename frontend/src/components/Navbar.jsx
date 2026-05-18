@@ -20,7 +20,7 @@ function UserMenu({ user, logout }) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const displayName = user?.displayName || user?.username || '?';
+  const displayName = user?.display_name || user?.displayName || user?.username || '?';
   const initial = displayName[0].toUpperCase();
 
   return (
