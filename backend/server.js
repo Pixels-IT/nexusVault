@@ -78,6 +78,8 @@ app.use((req, res, next) => {
   if (req.path === '/api/health') return next();
   // Les routes de gestion de la whitelist sont exemptées (protégées par auth+admin)
   if (req.path.startsWith('/api/whitelist')) return next();
+  // L'échange OIDC doit être accessible même si la whitelist est active
+  if (req.path === '/api/oidc/exchange' || req.path === '/api/oidc/public') return next();
   if (!checkWhitelist(req)) {
     const ip = getClientIp(req);
     const db = getDb();
@@ -633,6 +635,7 @@ app.post('/api/oidc/exchange', (req, res) => {
         const base = (cfg.issuer_url || '').replace(/\/$/, '');
         return base + '/api/oidc/token';
       })();
+      logger.info(`[OIDC] Exchange: tokenEndpoint=${tokenEndpoint} redirect_uri=${redirect_uri || cfg.redirect_uri}`);
       const tokenRes = await fetchPost(tokenEndpoint, {
         grant_type: 'authorization_code',
         code,
@@ -640,9 +643,14 @@ app.post('/api/oidc/exchange', (req, res) => {
         client_id: cfg.client_id,
         client_secret: cfg.client_secret || '',
       });
-      if (tokenRes.error) return res.status(401).json({ error: tokenRes.error_description || tokenRes.error });
+      if (tokenRes.error) {
+        logger.error(`[OIDC] Token error: ${tokenRes.error} — ${tokenRes.error_description || ''}`);
+        return res.status(401).json({ error: tokenRes.error_description || tokenRes.error });
+      }
       const accessToken = tokenRes.access_token;
       if (!accessToken) return res.status(401).json({ error: 'Pas de access_token' });
+      logger.info(`[OIDC] Token OK, fetching userinfo`);
+
 
       // 2. Get userinfo
       const userInfoEndpoint = cfg.userinfo_endpoint || (() => {

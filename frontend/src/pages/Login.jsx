@@ -129,6 +129,8 @@ export default function Login() {
     }
     sessionStorage.removeItem('oidc_state');
     setLoading(true); setError('');
+    // Nettoyer l'URL immédiatement
+    window.history.replaceState({}, '', window.location.pathname);
     const redirectUri = window.location.origin + '/login';
     api.oidcExchange({ code, redirect_uri: redirectUri })
       .then(res => {
@@ -142,11 +144,11 @@ export default function Login() {
         }
       })
       .catch(err => {
+        console.error('[OIDC] Exchange error:', err);
         setError(err.message || 'Authentification OIDC échouée');
-        setSearchParams({});
-      })
-      .finally(() => setLoading(false));
-  }, []); // eslint-disable-line
+        setLoading(false);
+      });
+  }, [searchParams]); // eslint-disable-line
 
   function redirectToOidc(cfg) {
     const authEndpoint = cfg.authorization_endpoint || '';
