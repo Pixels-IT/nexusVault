@@ -115,22 +115,22 @@ export default function Login() {
     }).catch(() => setOidc({ enabled: false, allow_local_login: true }));
   }, []);
 
-  // Gérer le retour OIDC avec ?code=
+  // Gérer le retour OIDC avec ?code= — lire directement window.location.search (plus fiable)
   useEffect(() => {
-    const code  = searchParams.get('code');
-    const state = searchParams.get('state');
+    const params = new URLSearchParams(window.location.search);
+    const code  = params.get('code');
+    const state = params.get('state');
     if (!code) return;
+    // Nettoyer l'URL immédiatement pour éviter re-soumission sur refresh
+    window.history.replaceState({}, '', window.location.pathname);
     // Vérifier le state anti-CSRF
     const savedState = sessionStorage.getItem('oidc_state');
     if (state && savedState && state !== savedState) {
       setError('Erreur de sécurité OIDC (state mismatch). Réessayez.');
-      setSearchParams({});
       return;
     }
     sessionStorage.removeItem('oidc_state');
     setLoading(true); setError('');
-    // Nettoyer l'URL immédiatement
-    window.history.replaceState({}, '', window.location.pathname);
     const redirectUri = window.location.origin + '/login';
     api.oidcExchange({ code, redirect_uri: redirectUri })
       .then(res => {
@@ -148,7 +148,7 @@ export default function Login() {
         setError(err.message || 'Authentification OIDC échouée');
         setLoading(false);
       });
-  }, [searchParams]); // eslint-disable-line
+  }, []); // s'exécute une seule fois au montage — window.location.search est lu synchroniquement
 
   function redirectToOidc(cfg) {
     const authEndpoint = cfg.authorization_endpoint || '';
