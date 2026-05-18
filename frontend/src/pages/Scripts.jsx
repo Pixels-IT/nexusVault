@@ -694,7 +694,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
       )}
 
       {confirmFile && (
-        <ConfirmModal message={`Supprimer le fichier "${confirmFile.filename}" ?`}
+        <ConfirmModal message={`${t('scripts.confirm_delete_file') || 'Supprimer'} "${confirmFile.filename}" ?`}
           onConfirm={async()=>{ await api.deleteAutomationFile(confirmFile.id); setConfirmFile(null); refreshDetail(); onDocUpdated(); }}
           onCancel={()=>setConfirmFile(null)} />
       )}
@@ -705,7 +705,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000}}
           onClick={e=>e.stopPropagation()}>
           <div style={{background:'var(--surf)',borderRadius:'var(--rl)',padding:24,maxWidth:480,width:'90%',boxShadow:'0 8px 40px rgba(0,0,0,.4)'}}>
-            <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>Remplacer le fichier</div>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>{t('scripts.replace_title')}</div>
             <p style={{fontSize:13,marginBottom:16}}>
               Voulez-vous remplacer <strong>{replaceTarget.file.filename}</strong>
               <span style={{color:'var(--muted)',fontSize:11,display:'block',marginTop:2}}>créé le {replaceTarget.file.uploaded_at?.slice(0,10)}</span>
@@ -719,7 +719,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
                   const upd = await api.automationDocument(detail.id);
                   setDetail(upd); setReplaceTarget(null);
                 } catch(e) { alert('Erreur : '+e.message); }
-              }}>Oui, remplacer</button>
+              }}>{t('scripts.replace_confirm')}</button>
             </div>
           </div>
         </div>
@@ -762,7 +762,7 @@ function FilePreviewModal({ file, catType, onClose }) {
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
         window.mammoth.convertToHtml({ arrayBuffer: bytes.buffer })
-          .then(result => setWordHtml(result.value || '<p>Document vide.</p>'))
+          .then(result => setWordHtml(result.value || `<p>${t('scripts.empty_doc')}</p>`))
           .catch(() => setWordHtml('__error__'));
       } catch { setWordHtml('__error__'); }
     }

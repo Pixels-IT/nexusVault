@@ -33,12 +33,19 @@ function checkWhitelist(req) {
           if (match) return true;
         } catch (e) { process.stdout.write(`[WHITELIST] CIDR err: ${e.message}\n`); }
       } else {
+        process.stdout.write(`[WHITELIST] compare: clientIp="${clientIp}" (len=${clientIp.length}) vs stored="${val}" (len=${val.length}) match=${clientIp === val}\n`);
         if (clientIp === val || (val.endsWith('.') && clientIp.startsWith(val))) return true;
       }
     }
     if (row.type === 'url' && origin.includes(val)) return true;
   }
-  process.stdout.write(`[WHITELIST] BLOCKED: ${clientIp} → ${req.path}\n`);
+  // Log détaillé : toutes les sources d'IP disponibles
+  const allHeaders = {
+    'x-real-ip': req.headers['x-real-ip'],
+    'x-forwarded-for': req.headers['x-forwarded-for'],
+    'remoteAddress': req.socket?.remoteAddress,
+  };
+  process.stdout.write(`[WHITELIST] BLOCKED: clientIp="${clientIp}" raw="${rawIp}" headers=${JSON.stringify(allHeaders)} path="${req.path}"\n`);
   return false;
 }
 

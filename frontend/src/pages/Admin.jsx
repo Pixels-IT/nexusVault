@@ -923,7 +923,7 @@ const PERM_DEFS = [
     section: 'Administration',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
     perms: [
-      { key: 'audit_access',    label: "Accès au t('audit.title')" },
+      { key: 'audit_access',    label: "Accès au journal d'audit" },
       { key: 'audit_archive',   label: "Accès aux archives d'audit" },
       { key: 'security_access', label: "Accès à Sécurité" },
       { key: 'retention_access', label: "Accès à la rétention" },
@@ -951,9 +951,11 @@ function RolePermissionsCard() {
   const [perms, setPerms] = useState(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [mergeActivity, setMergeActivity] = useState(false);
 
   useEffect(() => {
     api.getRolePerms().then(data => setPerms(data)).catch(() => {});
+    api.getFeatureFlags().then(f => setMergeActivity(!!f.merge_activity)).catch(() => {});
   }, []);
 
   function toggle(role, perm) {
@@ -1030,16 +1032,19 @@ function RolePermissionsCard() {
                     <td style={{ padding: '9px 18px 9px 32px', fontSize: 12, color: 'var(--txt)' }}>{perm.label}</td>
                     {ROLES.map(r => {
                       const isAdmin = r.key === 'admin';
-                      const checked = isAdmin ? true : !!(perms[r.key]?.[perm.key]);
+                      const isMergeForced = mergeActivity && (perm.key === 'activity_write' || perm.key === 'activity_read');
+                      const checked = isAdmin || isMergeForced ? true : !!(perms[r.key]?.[perm.key]);
+                      const isDisabled = isAdmin || isMergeForced;
                       return (
                         <td key={r.key} style={{ textAlign: 'center', padding: '9px 16px' }}>
-                          <label style={{ cursor: isAdmin ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <label style={{ cursor: isDisabled ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                            title={isMergeForced ? 'Requis par la fusion des suivis' : undefined}>
                             <input
                               type="checkbox"
                               checked={checked}
-                              disabled={isAdmin}
+                              disabled={isDisabled}
                               onChange={() => toggle(r.key, perm.key)}
-                              style={{ width: 16, height: 16, cursor: isAdmin ? 'not-allowed' : 'pointer' }}
+                              style={{ width: 16, height: 16, cursor: isDisabled ? 'not-allowed' : 'pointer', accentColor: isMergeForced ? 'var(--ok)' : 'var(--acc)' }}
                             />
                           </label>
                         </td>
@@ -1059,6 +1064,7 @@ function RolePermissionsCard() {
 
 // ── ONGLET SYSTÈME ─────────────────────────────────────────────────────────────
 function SecuritySystemTab() {
+  const { t } = useI18n();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1086,10 +1092,10 @@ function SecuritySystemTab() {
 
   const tableRows = data.database?.tables || {};
   const TABLE_LABELS = {
-    backups: 'Sauvegardes', activity_entries: 'Notes activité', activity_files: 'Fichiers activité',
-    automation_documents: 'Documents', automation_document_files: 'Fichiers documents',
-    retention_bin: 'Rétention', audit_log: 'Journal audit', notification_log: 'Journal notifs',
-    users: 'Utilisateurs', devices: 'Équipements', sites: 'Sites',
+    backups: t('sys.tbl_backups'), activity_entries: t('sys.tbl_activity'), activity_files: t('sys.tbl_act_files'),
+    automation_documents: t('sys.tbl_docs'), automation_document_files: t('sys.tbl_doc_files'),
+    retention_bin: t('sys.tbl_retention'), audit_log: t('sys.tbl_audit'), notification_log: t('sys.tbl_notifs'),
+    users: t('sys.tbl_users'), devices: t('sys.tbl_devices'), sites: t('sys.tbl_sites'),
   };
 
   return (
@@ -1103,16 +1109,16 @@ function SecuritySystemTab() {
             Processus Node.js
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <span style={{fontSize:11,color:'var(--muted)'}}>Mis à jour : {data.timestamp}</span>
-            <button className="btn btn-sm" onClick={load}>↺ Actualiser</button>
+            <span style={{fontSize:11,color:'var(--muted)'}}>{t('sys.updated_at')} {data.timestamp}</span>
+            <button className="btn btn-sm" onClick={load}>{t('sys.refresh')}</button>
           </div>
         </div>
         <div style={{padding:16}}>
           <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:14,justifyContent:'center'}}>
-            {pill('Uptime', data.uptime?.formatted, 'var(--ok)')}
-            {pill('Mémoire RSS', data.memory?.rss, 'var(--acc)')}
-            {pill('Heap utilisé', data.memory?.heap_used, 'var(--acc)')}
-            {pill('Heap total', data.memory?.heap_total, 'var(--muted)')}
+            {pill(t('sys.uptime'), data.uptime?.formatted, 'var(--ok)')}
+            {pill(t('sys.mem_rss'), data.memory?.rss, 'var(--acc)')}
+            {pill(t('sys.heap_used'), data.memory?.heap_used, 'var(--acc)')}
+            {pill(t('sys.heap_total'), data.memory?.heap_total, 'var(--muted)')}
             {pill('Node.js', data.runtime?.node, 'var(--muted)')}
             {pill('Plateforme', data.runtime?.platform, 'var(--muted)')}
           </div>
@@ -1131,16 +1137,16 @@ function SecuritySystemTab() {
         <div style={{padding:16}}>
           {/* Blobs */}
           <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:14,justifyContent:'center'}}>
-            {pill('Backups', data.database?.blobs?.backups, 'var(--ok)')}
-            {pill('Fichiers docs', data.database?.blobs?.doc_files, 'var(--acc)')}
-            {pill('Fichiers activité', data.database?.blobs?.activity_files, 'var(--acc)')}
+            {pill(t('sys.blobs_backup'), data.database?.blobs?.backups, 'var(--ok)')}
+            {pill(t('sys.blobs_doc_files'), data.database?.blobs?.doc_files, 'var(--acc)')}
+            {pill(t('sys.blobs_act_files'), data.database?.blobs?.activity_files, 'var(--acc)')}
           </div>
           {/* Table counts */}
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
             <thead>
               <tr style={{borderBottom:'1px solid var(--brd)'}}>
-                <th style={{padding:'6px 8px',textAlign:'left',color:'var(--muted)',fontWeight:600}}>Table</th>
-                <th style={{padding:'6px 8px',textAlign:'right',color:'var(--muted)',fontWeight:600}}>Lignes</th>
+                <th style={{padding:'6px 8px',textAlign:'left',color:'var(--muted)',fontWeight:600}}>{t('sys.table_col')}</th>
+                <th style={{padding:'6px 8px',textAlign:'right',color:'var(--muted)',fontWeight:600}}>{t('sys.rows_col')}</th>
               </tr>
             </thead>
             <tbody>
@@ -1175,9 +1181,9 @@ function SecuritySystemTab() {
           </div>
           <div style={{padding:16}}>
             {data.retention.total === 0
-              ? <div style={{color:'var(--muted)',fontSize:13}}>✅ Aucun élément en rétention</div>
+              ? <div style={{color:'var(--muted)',fontSize:13}}>{t('ret.no_retention')}</div>
               : <div style={{display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
-                  {[['backup','Backups'],['document','Documents'],['doc_file','Fichiers docs'],['activity','Suivis']].map(([k,l]) =>
+                  {[['backup', t('sys.ret_backup')],['document', t('sys.ret_document')],['doc_file', t('sys.ret_doc_file')],['activity', t('sys.ret_activity')]].map(([k,l]) =>
                     data.retention.by_type[k] > 0 && pill(l, data.retention.by_type[k], k==='backup'?'var(--acc)':'var(--muted)')
                   )}
                 </div>
@@ -1195,9 +1201,9 @@ function SecuritySystemTab() {
           </div>
         </div>
         <div style={{padding:16,display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
-          {pill('Événements audit', data.activity_24h?.audit_events, 'var(--acc)')}
-          {pill('Connexions', data.activity_24h?.logins, 'var(--ok)')}
-          {pill('Tentatives échouées', data.activity_24h?.failed_logins,
+          {pill(t('sys.audit_events'), data.activity_24h?.audit_events, 'var(--acc)')}
+          {pill(t('sys.logins'), data.activity_24h?.logins, 'var(--ok)')}
+          {pill(t('sys.failed_logins'), data.activity_24h?.failed_logins,
             (data.activity_24h?.failed_logins || 0) > 5 ? 'var(--err)' : 'var(--muted)')}
         </div>
       </div>
@@ -1212,8 +1218,8 @@ function SecuritySystemTab() {
             </div>
           </div>
           <div style={{padding:16,display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
-            {pill('Total', data.cron?.total, 'var(--muted)')}
-            {pill('Actives', data.cron?.enabled, 'var(--ok)')}
+            {pill(t('sys.cron_total'), data.cron?.total, 'var(--muted)')}
+            {pill(t('sys.cron_enabled'), data.cron?.enabled, 'var(--ok)')}
           </div>
         </div>
         <div className="card">
@@ -1224,10 +1230,10 @@ function SecuritySystemTab() {
             </div>
           </div>
           <div style={{padding:16,display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
-            {pill('Règles actives', data.whitelist?.active_rules,
+            {pill(t('sys.whitelist_rules'), data.whitelist?.active_rules,
               (data.whitelist?.active_rules || 0) === 0 ? 'var(--warn)' : 'var(--ok)')}
             {(data.whitelist?.active_rules || 0) === 0 &&
-              <span style={{fontSize:11,color:'var(--warn)',alignSelf:'center'}}>⚠ Accès ouvert à tous</span>}
+              <span style={{fontSize:11,color:'var(--warn)',alignSelf:'center'}}>{t('sys.whitelist_open')}</span>}
           </div>
         </div>
       </div>
@@ -1550,7 +1556,7 @@ function RetentionCard() {
     finally { setSaving(false); }
   }
 
-  const dayLabel = d => d === 0 ? '0 — Pas de rétention' : `${d} jours`;
+  const dayLabel = d => d === 0 ? t('ret.day_label_none') : `${d} jours`;
 
   return (
     <div className="card">
@@ -1559,33 +1565,32 @@ function RetentionCard() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
             <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>
           </svg>
-          Rétention des documents/fichiers supprimés
+          {t('ret.title')}
         </div>
         <button className="btn" onClick={() => setShowModal(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--ok)', color: 'var(--ok)' }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
-              <path d="M3 12h4l3-9 4 18 3-9h4"/>
-            </svg>
-            Rétention
-            {retentionCount > 0 && (
-              <span style={{ background: 'var(--ok)', color: '#fff', borderRadius: 10, padding: '0 6px', fontSize: 10, fontWeight: 700 }}>
-                {retentionCount}
-              </span>
-            )}
-          </button>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--ok)', color: 'var(--ok)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+            <path d="M3 12h4l3-9 4 18 3-9h4"/>
+          </svg>
+          {t('ret.btn')}
+          {retentionCount > 0 && (
+            <span style={{ background: 'var(--ok)', color: '#fff', borderRadius: 10, padding: '0 6px', fontSize: 10, fontWeight: 700 }}>
+              {retentionCount}
+            </span>
+          )}
+        </button>
       </div>
       <div style={{ padding: 16 }}>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-          Permettre ou non un délai de rétention afin de pouvoir récupérer des fichiers qui auraient été supprimés.
-          Si 0, la suppression est définitive immédiate.
+          {t('ret.desc')}
         </p>
         {msg && <div className={`alert alert-${msg.startsWith('Err') ? 'err' : 'ok'}`} style={{ marginBottom: 12, fontSize: 12 }}>{msg}</div>}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           {[
-            { key: 'backup_days',    label: 'Rétention des backups supprimés' },
-            { key: 'document_days',  label: 'Rétention des documents supprimés' },
-            { key: 'doc_file_days',  label: 'Rétention des fichiers supprimés' },
-            { key: 'activity_days',  label: 'Rétention des suivis d\'activité supprimés' },
+            { key: 'backup_days',   label: t('ret.backup_days') },
+            { key: 'document_days', label: t('ret.document_days') },
+            { key: 'doc_file_days', label: t('ret.doc_file_days') },
+            { key: 'activity_days', label: t('ret.activity_days') },
           ].map(({ key, label }) => (
             <div className="form-group" key={key} style={{ margin: 0 }}>
               <label className="form-label">{label}</label>
@@ -1597,7 +1602,7 @@ function RetentionCard() {
           ))}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? t('common.saving') : t('common.save') || 'Enregistrer'}</button>
         </div>
       </div>
       {showModal && <RetentionModal onClose={() => { setShowModal(false); api.retentionCount().then(r => setRetentionCount(r.count || 0)).catch(() => {}); }} />}
@@ -1642,9 +1647,9 @@ function RetentionModal({ onClose }) {
   }
 
   const TABS = [
-    { key: 'backup',     label: 'Backup',          count: counts.backup },
-    { key: 'automation', label: 'Automatisation',   count: counts.automation },
-    { key: 'activity',   label: 'Suivi d\'activité', count: counts.activity },
+    { key: 'backup',     label: t('ret.tab_backup'),      count: counts.backup },
+    { key: 'automation', label: t('ret.tab_automation'),  count: counts.automation },
+    { key: 'activity',   label: t('ret.tab_activity'),   count: counts.activity },
   ];
 
   const fmtDate = d => d ? d.slice(0, 16) : '—';
@@ -1652,10 +1657,10 @@ function RetentionModal({ onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}
       onClick={onClose}>
-      <div style={{ background: 'var(--surf)', borderRadius: 'var(--rl)', width: '100%', maxWidth: 760, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,.5)' }}
+      <div style={{ background: 'var(--surf)', borderRadius: 'var(--rl)', width: '100%', maxWidth: 'calc(76vw - 400px)', height: 600, display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,.5)' }}
         onClick={e => e.stopPropagation()}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--brd)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>Corbeille de rétention ({items.length} élément{items.length !== 1 ? 's' : ''})</div>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{t('ret.modal_title')} ({items.length} élément{items.length !== 1 ? 's' : ''})</div>
           <button className="btn btn-sm" onClick={onClose}>✕</button>
         </div>
         {/* Tabs */}
@@ -1672,18 +1677,19 @@ function RetentionModal({ onClose }) {
           ))}
         </div>
         {/* Content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
+        <div className="modal-device-list" style={{ flex: 1, overflowY: 'auto', padding: '12px 20px',
+          scrollbarWidth: 'thin', scrollbarColor: 'var(--brd) var(--surf2)' }}>
           {loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Chargement…</div>
-           : filtered.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)', fontSize: 13 }}>Aucun élément dans cette catégorie</div>
+           : filtered.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)', fontSize: 13 }}>{t('ret.empty')}</div>
            : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--brd)' }}>
-                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>Élément</th>
-                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>Supprimé par</th>
-                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>Supprimé le</th>
-                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>Expire le</th>
-                  <th style={{ padding: '8px 6px' }}></th>
+                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600, width: '40%' }}>{t('ret.col_item')}</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600, width: '15%' }}>{t('ret.col_deleted_by')}</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600, width: '18%' }}>{t('ret.col_deleted_at')}</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600, width: '18%' }}>{t('ret.col_expires_at')}</th>
+                  <th style={{ padding: '8px 6px', width: '9%' }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -1705,7 +1711,7 @@ function RetentionModal({ onClose }) {
                     </td>
                     <td style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap', display: 'flex', gap: 6 }}>
                       <button className="btn btn-sm" onClick={() => restore(item.id)}
-                        style={{ borderColor: 'var(--ok)', color: 'var(--ok)', fontSize: 11 }}>↩ Restaurer</button>
+                        style={{ borderColor: 'var(--ok)', color: 'var(--ok)', fontSize: 11 }}>{t('ret.restore')}</button>
                       <button className="btn btn-sm btn-danger" onClick={() => setConfirmDel(item)} style={{ fontSize: 11 }}>✕</button>
                     </td>
                   </tr>
@@ -1717,11 +1723,11 @@ function RetentionModal({ onClose }) {
         {confirmDel && (
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ background: 'var(--surf)', borderRadius: 'var(--rl)', padding: 24, maxWidth: 360, boxShadow: '0 4px 20px rgba(0,0,0,.4)' }}>
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>Suppression définitive</div>
-              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Cette action est irréversible.</p>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>{t('ret.confirm_del_title')}</div>
+              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>{t('ret.confirm_del_msg')}</p>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn" onClick={() => setConfirmDel(null)}>Annuler</button>
-                <button className="btn btn-danger" onClick={() => deleteDef(confirmDel.id)}>Supprimer définitivement</button>
+                <button className="btn btn-danger" onClick={() => deleteDef(confirmDel.id)}>{t('ret.delete_def')}</button>
               </div>
             </div>
           </div>
@@ -1744,6 +1750,7 @@ function SmtpModal({ onClose, onSaved, onValidated }) {
   const [msg, setMsg]             = useState('');
   const [err, setErr]             = useState('');
   const [hasExistingPass, setHasExistingPass] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [awaitCode, setAwaitCode] = useState(false);
   const [codeInput, setCodeInput] = useState('');
   const [validated, setValidated] = useState(false);
@@ -1762,30 +1769,49 @@ function SmtpModal({ onClose, onSaved, onValidated }) {
       await api.smtpSave(payload);
       if (s.pass) setHasExistingPass(true);
       onSaved('email');
-      setMsg('Configuration enregistrée. Cliquez sur Tester pour valider le canal.');
+      setMsg(t('notif.saved_msg'));
     } catch(e){setErr(e.message);} finally{setSaving(false);} };
+  const reset = async () => { setConfirmReset(false); try { await api.smtpSave({ host:'', port:587, secure:false, user:'', pass:'', from:'', app_url:'' }); setS({ host:'', port:'587', secure:false, user:'', pass:'', from:'' }); setValidated(false); setAwaitCode(false); setMsg(''); setHasExistingPass(false); } catch(e){setErr(e.message);} };
   const test = async () => { setTesting(true); setMsg(''); setErr(''); setAwaitCode(false); setCodeInput(''); setValidated(false);
     try { const r=await api.smtpTest(); setMsg(`Code envoyé à ${r.to} — entrez-le pour valider.`); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
   const validate = async () => { setErr('');
-    try { await api.smtpValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg('✓ Canal SMTP validé ! Vous pouvez maintenant cocher les notifications.'); onValidated?.(); } catch(e){setErr(e.message);} };
+    try { await api.smtpValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg(t('notif.validated_smtp')); onValidated?.(); } catch(e){setErr(e.message);} };
   return (
     <Modal title="Configuration SMTP" onClose={onClose}
-      footer={<>
-        {awaitCode
-          ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length < 4}>Valider le code</button>
-          : <button className="btn" onClick={test} disabled={testing||!s.host} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}
-        <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button>
-      </>}>
+      footer={
+        <div style={{display:'flex',justifyContent:'space-between',width:'100%',alignItems:'center'}}>
+          <button className="btn" onClick={() => setConfirmReset(true)}
+            style={{color:'var(--err)',borderColor:'var(--err)',fontSize:12}}>⊘ Reset</button>
+          <div style={{display:'flex',gap:8}}>
+            {awaitCode
+              ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length < 4}>Valider le code</button>
+              : <button className="btn" onClick={test} disabled={testing||!s.host} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}
+            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button>
+          </div>
+        </div>
+      }>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
-        {awaitCode && (
+        {confirmReset && (
+        <div style={{background:'rgba(0,0,0,.5)',position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'var(--rl)',zIndex:10}}>
+          <div style={{background:'var(--surf)',padding:24,borderRadius:'var(--r)',maxWidth:320,boxShadow:'0 4px 20px rgba(0,0,0,.4)'}}>
+            <div style={{fontWeight:700,marginBottom:8}}>Réinitialiser la configuration SMTP ?</div>
+            <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>La configuration sera effacée et la validation annulée.</p>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button className="btn" onClick={()=>setConfirmReset(false)}>Annuler</button>
+              <button className="btn" style={{color:'var(--err)',borderColor:'var(--err)'}} onClick={reset}>Réinitialiser</button>
+            </div>
+          </div>
+        </div>
+      )}
+            {awaitCode && (
           <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center'}}>
-            <input className="form-control" placeholder="Code à 6 chiffres" value={codeInput}
+            <input className="form-control" placeholder={t('notif.code_placeholder')} value={codeInput}
               onChange={e=>setCodeInput(e.target.value.replace(/\D/g,'').slice(0,6))}
               style={{letterSpacing:6,fontFamily:'var(--mono)',fontSize:18,textAlign:'center',maxWidth:160}}
               autoFocus />
-            <span style={{fontSize:12,color:'var(--muted)'}}>Entrez le code reçu pour valider</span>
+            <span style={{fontSize:12,color:'var(--muted)'}}>{t('notif.code_hint')}</span>
           </div>
         )}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
@@ -1811,6 +1837,7 @@ function TelegramModal({ onClose, onSaved, onValidated }) {
   const [awaitCode, setAwaitCode] = useState(false);
   const [codeInput, setCodeInput] = useState('');
   const [validated, setValidated] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [tg, setTg] = useState({ bot_token:'', chat_id:'' });
   const [loading, setLoading] = useState(true);
@@ -1822,23 +1849,46 @@ function TelegramModal({ onClose, onSaved, onValidated }) {
     api.telegramConfig().then(c=>setTg({bot_token:c.bot_token||'',chat_id:c.chat_id||''})).catch(()=>{}).finally(()=>setLoading(false));
   }, []);
   const save = async () => { setSaving(true); setMsg(''); setErr('');
-    try { await api.telegramSave(tg); onSaved('telegram'); setMsg('Configuration enregistrée. Cliquez sur Tester pour valider le canal.'); } catch(e){setErr(e.message);} finally{setSaving(false);} };
+    try { await api.telegramSave(tg); onSaved('telegram'); setMsg(t('notif.saved_msg')); } catch(e){setErr(e.message);} finally{setSaving(false);} };
   const test = async () => { setTesting(true); setMsg(''); setErr('');
-    try { const r=await api.telegramTest(); setMsg('Code envoyé sur Telegram — entrez-le pour valider.'); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message); setAwaitCode(false);} finally{setTesting(false);} };
-  const validate = async () => { setErr(''); try { await api.telegramValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg('✓ Canal Telegram validé ! Vous pouvez maintenant cocher les notifications.'); onValidated?.(); } catch(e){setErr(e.message);} };
+    try { const r=await api.telegramTest(); setMsg(t('notif.code_sent') || 'Code envoyé — entrez-le pour valider.'); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message); setAwaitCode(false);} finally{setTesting(false);} };
+  const validate = async () => { setErr(''); try { await api.telegramValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg(t('notif.validated_tg')); onValidated?.(); } catch(e){setErr(e.message);} };
   return (
     <Modal title="Configuration Telegram" onClose={onClose}
-      footer={<>{awaitCode?<button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>Valider le code</button>:<button className="btn" onClick={test} disabled={testing||!tg.bot_token||!tg.chat_id} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}<button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={
+        <div style={{display:'flex',justifyContent:'space-between',width:'100%',alignItems:'center'}}>
+          <button className="btn" onClick={() => setConfirmReset(true)}
+            style={{color:'var(--err)',borderColor:'var(--err)',fontSize:12}}>⊘ Reset</button>
+          <div style={{display:'flex',gap:8}}>
+            {awaitCode
+              ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>Valider le code</button>
+              : <button className="btn" onClick={test} disabled={testing||!tg.bot_token||!tg.chat_id} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}
+            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button>
+          </div>
+        </div>
+      }>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
-        {awaitCode && (
+        {confirmReset && (
+        <div style={{background:'rgba(0,0,0,.5)',position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'var(--rl)',zIndex:10}}>
+          <div style={{background:'var(--surf)',padding:24,borderRadius:'var(--r)',maxWidth:320,boxShadow:'0 4px 20px rgba(0,0,0,.4)'}}>
+            <div style={{fontWeight:700,marginBottom:8}}>Réinitialiser la configuration SMTP ?</div>
+            <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>La configuration sera effacée et la validation annulée.</p>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button className="btn" onClick={()=>setConfirmReset(false)}>Annuler</button>
+              <button className="btn" style={{color:'var(--err)',borderColor:'var(--err)'}} onClick={reset}>Réinitialiser</button>
+            </div>
+          </div>
+        </div>
+      )}
+            {awaitCode && (
           <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center'}}>
-            <input className="form-control" placeholder="Code à 6 chiffres" value={codeInput}
+            <input className="form-control" placeholder={t('notif.code_placeholder')} value={codeInput}
               onChange={e=>setCodeInput(e.target.value.replace(/\D/g,'').slice(0,6))}
               style={{letterSpacing:6,fontFamily:'var(--mono)',fontSize:18,textAlign:'center',maxWidth:160}}
               autoFocus />
-            <span style={{fontSize:12,color:'var(--muted)'}}>Entrez le code reçu pour valider</span>
+            <span style={{fontSize:12,color:'var(--muted)'}}>{t('notif.code_hint')}</span>
           </div>
         )}
         <p style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>{t('security.slack_bot_hint') || 'Create a bot via'} <code>@BotFather</code> sur Telegram pour obtenir votre Bot Token. L'ID du chat peut être récupéré via <code>@userinfobot</code>.</p>
@@ -1877,6 +1927,7 @@ function SlackModal({ onClose, onSaved, onValidated }) {
   const [awaitCode, setAwaitCode] = useState(false);
   const [codeInput, setCodeInput] = useState('');
   const [validated, setValidated] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
@@ -1889,21 +1940,44 @@ function SlackModal({ onClose, onSaved, onValidated }) {
   const save = async () => { setSaving(true); setMsg(''); setErr('');
     try { await api.slackSave({webhook_url:url}); onSaved('slack'); setMsg('Enregistré.'); } catch(e){setErr(e.message);} finally{setSaving(false);} };
   const test = async () => { setTesting(true); setMsg(''); setErr('');
-    try { await api.slackTest(); setMsg('Code envoyé sur Slack — entrez-le pour valider.'); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
-  const validate = async () => { setErr(''); try { await api.slackValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg('✓ Canal Slack validé ! Vous pouvez maintenant cocher les notifications.'); onValidated?.(); } catch(e){setErr(e.message);} };
+    try { await api.slackTest(); setMsg(t('notif.code_sent') || 'Code envoyé — entrez-le pour valider.'); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
+  const validate = async () => { setErr(''); try { await api.slackValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg(t('notif.validated_slack')); onValidated?.(); } catch(e){setErr(e.message);} };
   return (
     <Modal title="Configuration Slack" onClose={onClose}
-      footer={<>{awaitCode?<button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>Valider le code</button>:<button className="btn" onClick={test} disabled={testing||!url||url.startsWith('••••')} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}<button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button></>}>
+      footer={
+        <div style={{display:'flex',justifyContent:'space-between',width:'100%',alignItems:'center'}}>
+          <button className="btn" onClick={() => setConfirmReset(true)}
+            style={{color:'var(--err)',borderColor:'var(--err)',fontSize:12}}>⊘ Reset</button>
+          <div style={{display:'flex',gap:8}}>
+            {awaitCode
+              ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>Valider le code</button>
+              : <button className="btn" onClick={test} disabled={testing||!url||url.startsWith('••••')} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}
+            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button>
+          </div>
+        </div>
+      }>
       {loading?<div style={{textAlign:'center',padding:20}}><Spinner/></div>:<>
         {msg&&<div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
         {err&&<div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
-        {awaitCode && (
+        {confirmReset && (
+        <div style={{background:'rgba(0,0,0,.5)',position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'var(--rl)',zIndex:10}}>
+          <div style={{background:'var(--surf)',padding:24,borderRadius:'var(--r)',maxWidth:320,boxShadow:'0 4px 20px rgba(0,0,0,.4)'}}>
+            <div style={{fontWeight:700,marginBottom:8}}>Réinitialiser la configuration SMTP ?</div>
+            <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>La configuration sera effacée et la validation annulée.</p>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button className="btn" onClick={()=>setConfirmReset(false)}>Annuler</button>
+              <button className="btn" style={{color:'var(--err)',borderColor:'var(--err)'}} onClick={reset}>Réinitialiser</button>
+            </div>
+          </div>
+        </div>
+      )}
+            {awaitCode && (
           <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center'}}>
-            <input className="form-control" placeholder="Code à 6 chiffres" value={codeInput}
+            <input className="form-control" placeholder={t('notif.code_placeholder')} value={codeInput}
               onChange={e=>setCodeInput(e.target.value.replace(/\D/g,'').slice(0,6))}
               style={{letterSpacing:6,fontFamily:'var(--mono)',fontSize:18,textAlign:'center',maxWidth:160}}
               autoFocus />
-            <span style={{fontSize:12,color:'var(--muted)'}}>Entrez le code reçu pour valider</span>
+            <span style={{fontSize:12,color:'var(--muted)'}}>{t('notif.code_hint')}</span>
           </div>
         )}
         <p style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>{t('security.slack_webhook_hint') || 'Create an Incoming Webhook in your Slack workspace:'} <br/>{t('security.slack_steps') || 'Settings → Apps → Incoming Webhooks → Add.'}</p>
@@ -3074,6 +3148,7 @@ function ActivityMenuTab() {
 function ActivityOptionsTab() {
   const { t } = useI18n();
   const [customDate, setCustomDate] = useState(false);
+  const [mergeAct, setMergeAct]   = useState(false);
   const [saving, setSaving]         = useState(false);
   const [msg, setMsg]               = useState('');
 
@@ -3091,7 +3166,7 @@ function ActivityOptionsTab() {
   const logoInputRef = useRef(null);
 
   useEffect(() => {
-    api.getFeatureFlags().then(f => setCustomDate(!!f.activity_custom_date)).catch(() => {});
+    api.getFeatureFlags().then(f => { setCustomDate(!!f.activity_custom_date); setMergeAct(!!f.merge_activity); }).catch(() => {});
     api.getPdfLogo().then(r => setLogoPreview(r.logo || null)).catch(() => {});
   }, []);
 
@@ -3101,7 +3176,19 @@ function ActivityOptionsTab() {
     try {
       await api.setFeatureFlags({ activity_custom_date: newVal });
       setCustomDate(newVal);
-      setMsg(newVal ? 'Option activée.' : 'Option désactivée.');
+      setMsg(newVal ? t('common.option_on') || 'Option activée.' : t('common.option_off') || 'Option désactivée.');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function toggleMerge() {
+    const newVal = !mergeAct;
+    setSaving(true); setMsg('');
+    try {
+      await api.setFeatureFlags({ merge_activity: newVal });
+      setMergeAct(newVal);
+      setMsg(newVal ? t('common.option_on') || 'Option activée.' : t('common.option_off') || 'Option désactivée.');
       setTimeout(() => setMsg(''), 3000);
     } catch (e) { setMsg('Erreur : ' + e.message); }
     finally { setSaving(false); }
@@ -3164,36 +3251,68 @@ function ActivityOptionsTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Card date cosmétique */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
-              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-            </svg>
-            Date d'affichage personnalisée
+      {/* Date cosmétique + Fusion — 2 colonnes */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        {/* Card date cosmétique */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              {t('activity_opts.custom_date_title') || "Date d'affichage personnalisée"}
+            </div>
+          </div>
+          <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer',
+              padding: '12px 14px', borderRadius: 'var(--r)',
+              background: customDate ? 'var(--acc-s)' : 'var(--surf2)',
+              border: `1px solid ${customDate ? 'var(--acc)' : 'var(--brd)'}`, transition: 'all .15s',
+            }}>
+              <input type="checkbox" checked={customDate} onChange={toggle} disabled={saving}
+                style={{ marginTop: 2, accentColor: 'var(--acc)', width: 16, height: 16 }} />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{t('activity_opts.custom_date_label') || "Permettre la modification de la date d'affichage"}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  {t('activity_opts.custom_date_desc') || "Quand activée, un champ date apparaît dans le formulaire d'édition. Cette date est purement cosmétique."}
+                </div>
+              </div>
+            </label>
           </div>
         </div>
-        <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <label style={{
-            display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer',
-            padding: '12px 14px', borderRadius: 'var(--r)',
-            background: customDate ? 'var(--acc-s)' : 'var(--surf2)',
-            border: `1px solid ${customDate ? 'var(--acc)' : 'var(--brd)'}`, transition: 'all .15s',
-          }}>
-            <input type="checkbox" checked={customDate} onChange={toggle} disabled={saving}
-              style={{ marginTop: 2, accentColor: 'var(--acc)', width: 16, height: 16 }} />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>Permettre la modification de la date d'affichage</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                Quand cette option est activée, un champ date apparaît dans le formulaire d'édition d'une note.
-                Cette date est purement cosmétique : elle modifie uniquement l'affichage dans la liste des suivis.
-              </div>
+
+        {/* Card fusion des suivis */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+              {t('activity_opts.merge_title') || 'Fusion des suivis'}
             </div>
-          </label>
-          {msg && <div className={`alert ${msg.startsWith('Erreur') ? 'alert-err' : 'alert-ok'}`} style={{ fontSize: 12 }}>{msg}</div>}
+          </div>
+          <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer',
+              padding: '12px 14px', borderRadius: 'var(--r)',
+              background: mergeAct ? 'var(--acc-s)' : 'var(--surf2)',
+              border: `1px solid ${mergeAct ? 'var(--acc)' : 'var(--brd)'}`, transition: 'all .15s',
+            }}>
+              <input type="checkbox" checked={mergeAct} onChange={toggleMerge} disabled={saving}
+                style={{ marginTop: 2, accentColor: 'var(--acc)', width: 16, height: 16 }} />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{t('activity_opts.merge_label') || "Fusionner les suivis d'activité"}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  {t('activity_opts.merge_desc') || "Tous les suivis de tous les utilisateurs sont affichés ensemble. La liste déroulante est masquée et le nom de l'auteur apparaît sur chaque note."}
+                </div>
+              </div>
+            </label>
+          </div>
         </div>
       </div>
+      {msg && <div className={`alert ${msg.startsWith('Erreur') ? 'alert-err' : 'alert-ok'}`} style={{ fontSize: 12 }}>{msg}</div>}
 
       {/* Cards Logo + CSV sur 2 colonnes */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>

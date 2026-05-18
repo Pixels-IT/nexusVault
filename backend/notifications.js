@@ -26,9 +26,9 @@ const EVENT_CATALOG = {
   },
   preview_recap: {
     key:         'preview_recap',
-    label:       'Récapitulatif des notes en preview',
-    description: 'Résumé périodique de toutes les notes marquées preview (00h05).',
-    options:     { frequency: 'weekly', day_of_week: 1, day_of_month: 1 },
+    key:         'preview_recap',
+    label:       'Récapitulatif des notes en brouillon à venir',
+    description: 'Résumé périodique de toutes les notes futures marquées en brouillon (00h05).'
   },
   retention_recap: {
     key:         'retention_recap',
@@ -38,14 +38,13 @@ const EVENT_CATALOG = {
   },
   preview_overdue: {
     key:         'preview_overdue',
-    label:       'Notes preview sur mois/années passés',
-    description: 'Alerte si des notes preview existent sur des périodes déjà écoulées.',
-    options:     { frequency: 'daily' },
+    label:       'Récapitulatif des notes en brouillon passées',
+    description: 'Résumé périodique de toutes les notes passées en brouillon (00h05)',
   },
   expiration_document: {
     key:         'expiration_document',
     label:       'Expiration de document',
-    description: 'Envoie une notification x jours avant la fin de la validité d\'une catégorie temporaire.',
+    description: 'Envoie une notification à partir de x jours avant la fin de la validité d\'une catégorie temporaire. (00h05)',
     options:     { days_before: 30 },
   },
   backup_schedule_result: {

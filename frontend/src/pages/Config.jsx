@@ -66,9 +66,9 @@ function SiteModal({ site, onClose, onSave, countries = [], allSites = [] }) {
         <input className="form-control" value={data.description || ''} onChange={set('description')} /></div>
       {parentOptions.length > 0 && (
         <div className="form-group">
-          <label className="form-label">Site parent <span style={{ fontSize: 11, color: 'var(--muted)' }}>(optionnel — pour créer une hiérarchie)</span></label>
+          <label className="form-label">{t('config.site_parent')} <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t('config.site_hierarchy')}</span></label>
           <select className="form-control" value={data.parent_id || ''} onChange={e => setData(d => ({ ...d, parent_id: e.target.value ? parseInt(e.target.value) : null }))}>
-            <option value="">— Aucun (site racine) —</option>
+            <option value="">{t('config.site_root')}</option>
             {buildParentList().map(s => (
               <option key={s.id} value={s.id}>
                 {'　'.repeat(s.depth)}{s.depth > 0 ? '└ ' : ''}{s.name}

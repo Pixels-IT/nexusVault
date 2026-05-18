@@ -19,21 +19,24 @@ En cas de compromission, les attaquants ont tout sous la main !
 
 ### Backups de configuration
 - **Sauvegarde de la configuration des équipements réseaux : Switch, NAS, Pare-Feu, Autres**
-- **Importation de backup manuel et automatique (SSH)**
-- **Comparaison visuelle entre deux versions (ajouts en vert, suppressions en rouge)**
-- **Gestion des pays, sites, équipements et modèles d'équipements**
-- **Regroupement optionnel des sites par pays (option activable dans Appareils → Options)**
-- **Export CSV.gz des backups**
+- **Import manuel** (coller le contenu) et **automatique via SSH** (commandes personnalisables par modèle)
+- **Planificateur de sauvegardes automatiques** : fréquence horaire/quotidienne/hebdomadaire/mensuelle, heure et équipements configurables par planification
+- **Déduplication intelligente** : si la configuration n'a pas changé, aucune nouvelle version n'est créée. Les lignes dynamiques sont ignorées (timestamps, uptime, last login, NTP, etc.)
+- **Comparaison visuelle** entre deux versions (ajouts en vert, suppressions en rouge)
+- **Hiérarchie sites parents/enfants** : un site peut contenir des sous-sites, affichage arborescent sur la page Backup
+- **Groupement optionnel** des sites par pays (option activable dans Appareils → Options)
+- **Export CSV.gz** des backups
 
 ### Automatisation
-- **Catégories hiérarchiques** de types : Générique, Temporaire, Procédure, Script, Sécurisé
+- **Catégories hiérarchiques** avec niveaux imbriqués, types : Générique, Temporaire, Procédure, Script, Sécurisé
+- **Catégories colorées** avec date de validité (type Temporaire) et alertes d'expiration
 - **Documents** : création, édition, historique complet des modifications
-- **Fichiers joints** par document : upload multiple, téléchargement, suppression
-- **Aperçu intégré** des fichiers : PDF natif (iframe), Word/ODT (LibreOffice → PDF), scripts (coloration syntaxique via highlight.js — yaml, json, python, bash, sql…)
-- **Documents sécurisés** : protection par mot de passe global (Admin → Automatisation → Options) ou par document
+- **Fichiers joints** par document : upload multiple, téléchargement, suppression, **remplacement** d'un fichier (historisé en audit)
+- **Aperçu intégré** : PDF natif (iframe), Word/ODT (LibreOffice → PDF), scripts (coloration syntaxique via highlight.js — yaml, json, python, bash, sql…)
+- **Documents sécurisés** : protection par mot de passe global ou par document
 - **Documents temporaires** : date de validité avec alertes d'expiration sur le tableau de bord
 - **Copie en un clic** du contenu des scripts dans le presse-papier avec audit
-- **Audit complet** de chaque accès, modification, visualisation, copie et tentative échouée
+- **Audit complet** de chaque accès, modification, visualisation, copie, remplacement et tentative échouée
 
 ### Suivi d'activités
 - **Suivi d'activité par utilisateurs des équipes IT par TAG avec filtrage**
@@ -44,6 +47,29 @@ En cas de compromission, les attaquants ont tout sous la main !
 - **Import CSV** de notes historiques (format `ANNEE;MOIS;JOUR;TAG;NOTE`)
 - **Export PDF** avec logo personnalisable — 4 modes : par mois, par année, toutes périodes, par TAG
 - **Protection des notes** : suppression d'un TAG bloquée s'il est utilisé dans des notes
+
+### Notifications
+- **SMTP, Telegram et Slack** configurables depuis l'interface Admin (Sécurité → Notifications)
+- **Validation par code à 6 chiffres** : après configuration, un code est envoyé via le canal pour confirmer son bon fonctionnement avant activation
+- **Événements notifiables** :
+  - Tentatives de connexion échouées (seuil configurable)
+  - Compte verrouillé par brute-force
+  - Téléchargement de configuration
+  - Résultat des sauvegardes automatiques (rapport succès/échec par équipement)
+  - Expiration de documents temporaires
+  - Suppression d'un document / fichier de document / suivi / fichier de suivi / sauvegarde
+  - Récapitulatif des notes en preview (00h05, fréquence quotidienne/hebdo/mensuelle)
+  - Récapitulatif des fichiers en rétention (00h05, fréquence quotidienne/hebdo/mensuelle)
+- **Journal des notifications** : historique des envois avec statut succès/erreur
+
+### Rétention des éléments supprimés
+- **Corbeille configurable** pour les backups, documents, fichiers de documents et suivis d'activité
+- **Durée de rétention indépendante** par type : 0 (aucune), 7, 15, 30 ou 60 jours
+- **Restauration complète** : un document restauré récupère aussi ses fichiers joints ; un suivi restaure aussi ses fichiers liés
+- **Modal de gestion** avec 3 onglets (Backup / Automatisation / Suivi), colonnes supprimé par / supprimé le / expire le (orange si < 3 jours)
+- **Suppression définitive** depuis la corbeille avec confirmation
+- **Droit d'accès dédié** `retention_access` configurable par utilisateur
+- **Audit complet** : consultation, restauration et suppression définitive journalisées
 
 ### Tableau de bord
 - **Section Backups** : total backups, équipements, sites, modèles
@@ -58,19 +84,21 @@ En cas de compromission, les attaquants ont tout sous la main !
 - **Traduction des actions** selon la langue de l'interface
 
 ### Sécurité
-- **Gestion des droits d'accès par rôle** (Admin, Opérateur, Lecteur)
+- **Gestion des droits d'accès par rôle** (Admin, Opérateur, Lecteur) avec permissions fines par utilisateur
+- **Liste blanche IP / CIDR** : restreindre l'accès à des IP ou plages réseau spécifiques (`192.168.1.0/24`). Sans règle, l'accès est ouvert à tous
 - **Protection brute-force configurable** : nombre de tentatives et durée de verrouillage
 - **Timeout de session configurable** avec décompte visuel et audit automatique
 - **Authentification TOTP** (Google Authenticator, Authy…) obligatoire ou optionnelle
 - **Déverrouillage manuel des comptes** depuis l'interface Admin
+- **Authentification OIDC / SSO** configurable depuis l'interface Admin
+- **Changement de mot de passe obligatoire** à la première connexion (minimum 14 caractères)
+- **Onglet Système** : surveillance en temps réel — uptime, mémoire Node.js, taille DB SQLite table par table, activité 24h, état du planificateur, statut whitelist
 - **Mode sombre / clair**
 - **Multilangues i18n (11 langues)** : `fr`, `en`, `de`, `es`, `it`, `ja`, `nl`, `pl`, `pt`, `ru`, `zh`
-- **Connexion LDAP/LDAPS, OIDC** *(non testé à ce jour)*
-- **Notifications par SMTP, Telegram et Slack** *(non testé à ce jour)*
 - **Chiffrement AES-256** de toutes les données sensibles en base SQLite
 
 ### Administration
-- **Gestion des utilisateurs** avec verrouillage/déverrouillage, reset TOTP
+- **Gestion des utilisateurs** avec verrouillage/déverrouillage, reset TOTP, permissions individuelles
 - **URL de l'application configurable**
 - **Planificateur d'archivage** (1er du mois, heure configurable)
 - **Logo PDF personnalisable** (hauteur max 120px)
@@ -131,7 +159,7 @@ Identifiants par défaut :
 - Login : `admin`
 - Mot de passe : `changeme`
 
-> Le changement de mot de passe est **obligatoire** à la première connexion (minimum 14 caractères).
+> Le changement de mot de passe est **obligatoire** à la première connexion (minimum 14 caractères). Un modal dédié s'affiche directement sur la page de login.
 
 ### 4. Arrêt et données
 
@@ -142,13 +170,6 @@ docker compose down
 # Arrêter ET supprimer les données (⚠️ irréversible)
 docker compose down -v
 ```
-
-### 5. Screenshots
-
-![Dashboard](screenshots/dashboard.png)
-![Backup](screenshots/backup.png)
-![Activity Tracking](screenshots/activity_tracking.png)
-![Admin](screenshots/admin.png)
 
 ---
 
@@ -166,8 +187,8 @@ nexusvault/
 ├── backend/
 │   ├── server.js               # API REST Express — toutes les routes
 │   ├── db.js                   # Init SQLite + chiffrement AES-256 + migrations
-│   ├── auth.js                 # Middleware JWT, requirePerm, brute-force
-│   ├── notifications.js        # SMTP / Telegram / Slack
+│   ├── auth.js                 # Middleware JWT, requirePerm, brute-force, whitelist CIDR
+│   ├── notifications.js        # SMTP / Telegram / Slack — EVENT_CATALOG, dispatch
 │   ├── entrypoint.sh           # Chown /data puis su-exec app-nexus
 │   ├── package.json
 │   └── Dockerfile              # Node 22 Alpine, user app-nexus non-root
@@ -195,11 +216,11 @@ nexusvault/
         │   ├── index.js         # Moteur i18n, import statique EN, fallback
         │   └── locales/         # fr, en, de, es, it, ja, nl, pl, pt, ru, zh
         └── pages/
-            ├── Login.jsx        # Connexion, reset MDP
+            ├── Login.jsx        # Connexion, reset MDP, modal changement obligatoire
             ├── Dashboard.jsx    # Tableau de bord (3 sections)
-            ├── Backups.jsx      # Backups réseau, comparaison, groupement pays
+            ├── Backups.jsx      # Backups réseau, arborescence sites, comparaison
             ├── Activity.jsx     # Suivi d'activité, tags, export PDF
-            ├── Config.jsx       # Appareils : Pays, Sites, Modèles, Équipements
+            ├── Config.jsx       # Appareils : Pays, Sites (hiérarchie), Modèles, Équipements
             ├── Scripts.jsx      # Automatisation : catégories, documents, fichiers
             └── Admin.jsx        # Administration complète
 ```
@@ -250,32 +271,44 @@ Chaque valeur sensible est individuellement chiffrée avec un IV aléatoire avan
 | Configuration (écriture) | ✓ | ✓ | ✗ |
 | Journal d'audit | ✓ | ✗ | ✗ |
 | Accès sécurité | ✓ | ✗ | ✗ |
+| Accès à la rétention | ✓ | ✗ | ✗ |
 | Suivi d'activité (écriture) | ✓ | ✓ | ✓ |
 | Suivi d'activité (lecture) | ✓ | ✓ | ✗ |
 | Automatisation (lecture) | ✓ | ✓ | ✓ |
 | Automatisation (écriture) | ✓ | ✓ | ✗ |
 
+> Les permissions sont entièrement configurables par utilisateur depuis Administration → Droits d'accès.
+
+---
+
+## Planificateur de sauvegardes SSH
+
+### Fréquences disponibles
+| Fréquence | Description |
+|---|---|
+| Toutes les heures | À l'heure H de chaque heure |
+| Quotidienne | Une fois par jour à l'heure configurée |
+| Hebdomadaire | Un jour de la semaine à une heure |
+| Mensuelle | Un jour du mois à une heure |
+
+### Déduplication intelligente
+Les lignes ignorées lors de la comparaison : timestamps, dates de dernier login SSH, uptime, horodatages NTP, `! Last configuration change`, `! NVRAM config last updated`, lignes de dates ISO (YYYY-MM-DD), etc.
+
 ---
 
 ## Sauvegarde des données
 
-> **Identifier le nom exact du volume** :
-> ```bash
-> docker volume ls | grep nexusvault
-> ```
-
 ```bash
-# 1. Arrêter
-docker compose down
+# Identifier le volume
+docker volume ls | grep nexusvault
 
-# 2. Sauvegarder
+# Sauvegarder
+docker compose down
 docker run --rm \
   -v VOLUME_NAME:/data \
   -v $(pwd):/backup \
   alpine \
   tar czf /backup/nexusvault-backup-$(date +%Y%m%d).tar.gz -C / data
-
-# 3. Relancer
 docker compose up -d
 ```
 
@@ -301,8 +334,6 @@ docker run --rm \
 docker exec -it nexusvault-backend node server.js reset-password <nomducompte>
 ```
 
-Mot de passe réinitialisé à `changeme`, changement obligatoire imposé à la prochaine connexion.
-
 ---
 
 ## Variable LOG_LEVEL
@@ -314,8 +345,6 @@ Mot de passe réinitialisé à `changeme`, changement obligatoire imposé à la 
 | `warn` | Brute-force, SMTP absent, anomalies non critiques |
 | `error` | Erreurs critiques uniquement |
 
-> 💡 La configuration SMTP génère des logs détaillés en `info` (`docker logs nexusvault-backend`) pour faciliter le diagnostic.
-
 ---
 
 ## Internationalisation (i18n)
@@ -325,8 +354,6 @@ Mot de passe réinitialisé à `changeme`, changement obligatoire imposé à la 
 | `en` | English | ✅ Complet (référence) |
 | `fr` | Français | ✅ Complet |
 | `de` `es` `it` `pt` `nl` `pl` `ru` `ja` `zh` | Autres | 🔧 Partiel — contributions bienvenues |
-
-Fichiers à compléter : `frontend/src/i18n/locales/XX.js`
 
 ---
 

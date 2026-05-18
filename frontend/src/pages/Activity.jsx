@@ -67,7 +67,7 @@ function HistoryModal({ entryId, onClose }) {
       footer={<button className="btn" onClick={onClose}>{t('activity.close')}</button>}>
       {loading ? <div style={{ textAlign:'center', padding:24 }}><span className="spinner"/></div> : (
         history.length === 0 ? (
-          <div style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:12 }}>Aucun historique disponible</div>
+          <div style={{ textAlign:'center', color:'var(--muted)', padding:24, fontSize:12 }}>{t('activity.no_history')}</div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:0, maxHeight:400, overflowY:'auto' }}>
             {history.map((h, i) => (
@@ -519,7 +519,7 @@ function FilesModal({ entryId, files, setFiles, fileError, setFileError, onClose
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{width:36,height:36,marginBottom:8,opacity:.4}}>
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
           </svg>
-          <div>Aucun fichier joint</div>
+          <div>{t('activity.no_files')}</div>
           <div style={{fontSize:11,marginTop:4}}>Utilisez le bouton "Importer" pour ajouter des fichiers.</div>
         </div>
       ) : (
@@ -584,7 +584,7 @@ function FilesModal({ entryId, files, setFiles, fileError, setFileError, onClose
   );
 }
 
-function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
+function EntryRow({ entry, tags, onEdit, onDelete, canEdit, showAuthor = false }) {
   const tag = tags.find(tag => tag.code === entry.tag_code);
   const isPreview = !!entry.is_preview;
 
@@ -616,6 +616,14 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
             </span>
           )}
           <span style={{ color:'rgba(247,103,7,0.5)', fontSize:11 }}>—</span>
+          {showAuthor && (entry.display_name || entry.username) && (
+            <span style={{ fontSize:11, fontWeight:600, color:'var(--acc)', whiteSpace:'nowrap' }}>
+              {entry.display_name || entry.username}
+            </span>
+          )}
+          {showAuthor && (entry.display_name || entry.username) && (
+            <span style={{ color:'rgba(247,103,7,0.5)', fontSize:11 }}>—</span>
+          )}
         </div>
         <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, fontStyle: 'italic', alignSelf:'center', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
           {renderMasked((entry.content||'').replace(/\r/g,'').split('\n')[0])}
@@ -647,6 +655,14 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
           </span>
         )}
         <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>
+        {showAuthor && (entry.display_name || entry.username) && (
+          <span style={{ fontSize:11, fontWeight:600, color:'var(--acc)', whiteSpace:'nowrap' }}>
+            {entry.display_name || entry.username}
+          </span>
+        )}
+        {showAuthor && (entry.display_name || entry.username) && (
+          <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>
+        )}
       </div>
       <div style={{ flex: 1, fontSize: 13, color: 'var(--txt)', lineHeight: 1.6, alignSelf:'center' }}>
         {renderMasked(entry.content)}
@@ -662,7 +678,7 @@ function EntryRow({ entry, tags, onEdit, onDelete, canEdit }) {
 }
 
 // ── MOIS SECTION ──────────────────────────────────────────────────────────────
-function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateEnabled, isOpenDefault, onToggle }) {
+function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateEnabled, isOpenDefault, onToggle, mergeActivity = false }) {
     const { t } = useI18n();
   const [entries, setEntries]   = useState([]);
   const [loading, setLoading]   = useState(false);
@@ -679,7 +695,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateE
   const load = useCallback(() => {
     setLoading(true);
     const params = { year, month };
-    if (userId) params.user_id = userId;
+    if (mergeActivity) { params.merge = '1'; } else if (userId) { params.user_id = userId; }
     api.activityEntries(params)
       .then(data => { setEntries(data); setLoaded(true); })
       .catch(() => {})
@@ -703,7 +719,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateE
   useEffect(() => {
     if (!filterTag) return;
     const params = { year, month };
-    if (userId) params.user_id = userId;
+    if (mergeActivity) { params.merge = '1'; } else if (userId) { params.user_id = userId; }
     if (!loaded) setLoading(true);
     api.activityEntries(params)
       .then(data => {
@@ -783,7 +799,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateE
             </div>
           )}
           {(filterTag ? entries.filter(e => e.tag_code === filterTag) : entries).map(e => (
-            <EntryRow key={e.id} entry={e} tags={tags} canEdit={canEdit}
+            <EntryRow key={e.id} entry={e} tags={tags} canEdit={canEdit} showAuthor={mergeActivity}
               onEdit={entry => setEditEntry(entry)}
               onDelete={entry => setDelEntry(entry)}
             />
@@ -831,7 +847,7 @@ function MonthSection({ year, month, tags, onAdd, userId, filterTag, customDateE
 }
 
 // ── t('activity.year_label') || 'YEAR' SECTION ─────────────────────────────────────────────────────────────
-function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle, customDateEnabled, openMonths, onToggleMonth, hideHeader }) {
+function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onToggle, customDateEnabled, openMonths, onToggleMonth, hideHeader, mergeActivity = false }) {
     const { t } = useI18n();
   const [open, setOpen] = useState(isOpenDefault || false);
   const [yearCount, setYearCount] = useState(null);
@@ -891,7 +907,7 @@ function YearSection({ year, tags, onAdd, userId, filterTag, isOpenDefault, onTo
       {(open || hideHeader) && (
         <div>
           {months.map(m => (
-            <MonthSection key={m} year={year} month={m} tags={tags} onAdd={onAdd} userId={userId} filterTag={filterTag} customDateEnabled={customDateEnabled}
+            <MonthSection key={m} year={year} month={m} tags={tags} onAdd={onAdd} userId={userId} filterTag={filterTag} customDateEnabled={customDateEnabled} mergeActivity={mergeActivity}
               isOpenDefault={!!(openMonths && openMonths[`${year}-${m}`])}
               onToggle={isOpen => onToggleMonth && onToggleMonth(m, isOpen)}
             />
@@ -1198,7 +1214,7 @@ ${statPillsHtml}
       {error && <Alert type="err">{error}</Alert>}
 
       <div className="form-group">
-        <label className="form-label">Périmètre de l'export</label>
+        <label className="form-label">{t('activity.export_scope')}</label>
         <div style={{ display: 'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap: 8 }}>
           {[{ k:'month', l:t('activity.month') },{ k:'year', l:t('activity.year_mode') },{ k:'all', l:t('activity.all_years') },{ k:'tag', l:t('activity.by_tag') }].map(({ k, l }) => (
             <button key={k} onClick={() => setMode(k)} style={{
@@ -1249,7 +1265,7 @@ ${statPillsHtml}
               );
             })}
           </div>
-          {!filterTag && <div style={{ fontSize:11, color:'var(--muted)', marginTop:6 }}>Aucun tag = tous les tags</div>}
+          {!filterTag && <div style={{ fontSize:11, color:'var(--muted)', marginTop:6 }}>{t('activity.no_tag_all')}</div>}
         </div>
       )}
 
@@ -1309,6 +1325,7 @@ export default function Activity() {
   const [addModal, setAddModal] = useState(null);
   const [showExport, setShowExport] = useState(false);
   const [customDateEnabled, setCustomDateEnabled] = useState(false);
+  const [mergeActivity, setMergeActivity] = useState(false);
   // Mémoriser les années ET les mois dépliés pour ne pas perdre l'état après rechargement
   const [openYears,  setOpenYears]  = useState({});
   const [openMonths, setOpenMonths] = useState({}); // clé: "year-month"
@@ -1318,14 +1335,14 @@ export default function Activity() {
   const [yearCounts,  setYearCounts]  = useState({});
 
   useEffect(() => {
-    api.getFeatureFlags().then(f => setCustomDateEnabled(!!f.activity_custom_date)).catch(() => {});
+    api.getFeatureFlags().then(f => { setCustomDateEnabled(!!f.activity_custom_date); setMergeActivity(!!f.merge_activity); }).catch(() => {});
   }, []);
 
   const canViewAll = isAdmin || can('activity_read');
   const targetUserId = canViewAll && selectedUser ? selectedUser : null;
 
   const loadYears = useCallback(() => {
-    const params = targetUserId ? { user_id: targetUserId } : {};
+    const params = mergeActivity ? { merge: '1' } : (targetUserId ? { user_id: targetUserId } : {});
     setLoading(true);
     api.activityYears(params)
       .then(data => {
@@ -1336,7 +1353,7 @@ export default function Activity() {
       })
       .catch(() => { setYears([new Date().getFullYear()]); })
       .finally(() => setLoading(false));
-  }, [targetUserId]);
+  }, [targetUserId, mergeActivity]);
 
   useEffect(() => {
     api.activityTags().then(data => setTags(Array.isArray(data) ? data : [])).catch(() => {});
@@ -1351,18 +1368,21 @@ export default function Activity() {
   // Charger le nombre de notes par année
   useEffect(() => {
     if (!years.length) return;
-    // Initialiser à 0 immédiatement pour éviter le spinner infini
     const initCounts = {};
     years.forEach(y => { initCounts[y] = 0; });
     setYearCounts(initCounts);
-    const params = targetUserId ? { user_id: targetUserId } : {};
+    // Passer merge=1 si fusion active, sinon user_id
+    const params = mergeActivity ? { merge: '1' } : (targetUserId ? { user_id: targetUserId } : {});
     const counts = { ...initCounts };
     Promise.all(years.map(y =>
       api.activityEntries({ ...params, year: y })
-        .then(entries => { counts[y] = Array.isArray(entries) ? entries.length : 0; })
+        .then(entries => {
+          // Compter seulement les notes NON-preview (les vraies notes publiées)
+          counts[y] = Array.isArray(entries) ? entries.filter(e => !e.is_preview).length : 0;
+        })
         .catch(() => { counts[y] = 0; })
     )).then(() => setYearCounts({...counts}));
-  }, [years.join(','), targetUserId]); // eslint-disable-line
+  }, [years.join(','), targetUserId, mergeActivity]); // eslint-disable-line
 
   function openAdd(year, month, onSaved) {
     setAddModal({ year, month, onSaved });
@@ -1377,7 +1397,7 @@ export default function Activity() {
         </div>
         <div className="page-actions">
           {/* Sélecteur utilisateur (admin) */}
-          {canViewAll && users.length > 0 && (
+          {canViewAll && users.length > 0 && !mergeActivity && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, color: 'var(--muted)', flexShrink: 0 }}>
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
@@ -1385,7 +1405,7 @@ export default function Activity() {
               <select className="form-control" style={{ padding: '5px 8px', fontSize: 12, height: 30, minWidth: 150 }}
                 value={selectedUser || ''} onChange={e => setSelectedUser(e.target.value ? parseInt(e.target.value) : null)}>
                 <option value="">{t('activity.my_activity')}</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
+                {users.filter(u => u.id !== user?.id).map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
               </select>
             </div>
           )}
@@ -1448,8 +1468,8 @@ export default function Activity() {
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12, opacity: .3 }}>
             <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/>
           </svg>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Aucune note pour l'instant</div>
-          <div style={{ fontSize: 12 }}>Cliquez sur "Nouvelle note" pour commencer</div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{t('activity.no_notes')}</div>
+          <div style={{ fontSize: 12 }}>{t('activity.start_hint')}</div>
         </div>
       ) : (() => {
         const curYear = new Date().getFullYear();
@@ -1559,6 +1579,7 @@ export default function Activity() {
                   openMonths={openMonths}
                   onToggleMonth={(mo, isOpen) => setOpenMonths(prev => ({ ...prev, [`${activeTile}-${mo}`]: isOpen }))}
                   customDateEnabled={customDateEnabled}
+                  mergeActivity={mergeActivity}
                   hideHeader={true}
                 />
               </div>

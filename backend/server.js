@@ -76,6 +76,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 // ── WHITELIST MIDDLEWARE (sauf health) ─────────────────────────────────────────
 app.use((req, res, next) => {
   if (req.path === '/api/health') return next();
+  // Les routes de gestion de la whitelist sont exemptées (protégées par auth+admin)
+  if (req.path.startsWith('/api/whitelist')) return next();
   if (!checkWhitelist(req)) {
     const ip = getClientIp(req);
     const db = getDb();
@@ -1134,44 +1136,57 @@ setInterval(() => {
 
 
 // ── CRONS NOTIFICATIONS PREVIEW ───────────────────────────────────────────────
+let _lastCronDate = ''; // verrou anti-doublon : une exécution par jour max pour 00h05
+
 function checkPreviewCrons() {
   const db = getDb();
   const now = nowLocal();
   const nowDate = new Date();
   const curYear = nowDate.getFullYear(), curMonth = nowDate.getMonth() + 1;
   const hh = nowDate.getHours(), mm = nowDate.getMinutes();
-  const isAt0005 = (hh === 0 && mm === 5);
+  const todayStr = nowDate.toISOString().slice(0,10);
+  const isAt0005 = (hh === 0 && mm === 5 && _lastCronDate !== todayStr);
 
-  // preview_overdue : notes preview sur mois/années passés
+  // Si c'est 00h05 et pas encore exécuté aujourd'hui, marquer comme exécuté
+  if (isAt0005) _lastCronDate = todayStr;
+
+  // Récapitulatif des notes en brouillon passées (00h05 seulement)
   const overdueRow = db.prepare("SELECT * FROM notification_config WHERE event_key='preview_overdue' AND enabled=1").get();
-  if (overdueRow) {
-    const overdue = db.prepare(
-      "SELECT e.*, u.username FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.is_preview=1 AND (e.year < ? OR (e.year=? AND e.month < ?))"
-    ).all(curYear, curYear, curMonth);
-    if (overdue.length > 0) {
-      const grouped = {};
-      overdue.forEach(e => {
-        const key = `${e.year}-${String(e.month).padStart(2,'0')}`;
-        if (!grouped[key]) grouped[key] = [];
-        grouped[key].push(e);
-      });
-      const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-      let html = '<table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#fef3c7"><th style="padding:8px;text-align:left">Période</th><th style="padding:8px;text-align:left">Utilisateur</th><th style="padding:8px;text-align:left">Tag</th><th style="padding:8px;text-align:left">Extrait</th></tr>';
-      let text = `${overdue.length} note(s) preview sur des périodes passées :
-`;
-      Object.entries(grouped).sort().forEach(([period, entries]) => {
-        const [y, m] = period.split('-');
-        entries.forEach(e => {
-          html += `<tr><td style="padding:6px 8px">${MONTHS_FR[parseInt(m)-1]} ${y}</td><td style="padding:6px 8px">${e.username}</td><td style="padding:6px 8px">${e.tag_code}</td><td style="padding:6px 8px;color:#64748b">${(e.content||'').slice(0,60)}…</td></tr>`;
-          text += `  - ${MONTHS_FR[parseInt(m)-1]} ${y} / ${e.username} / [${e.tag_code}]: ${(e.content||'').slice(0,60)}
-`;
+  if (overdueRow && isAt0005) {
+    let opts = {}; try { opts = JSON.parse(overdueRow.options || '{}'); } catch {}
+    const freq = opts.frequency || 'weekly';
+    const shouldSendOverdue = (
+      (freq === 'daily') ||
+      (freq === 'weekly' && nowDate.getDay() === (parseInt(opts.day_of_week) || 1)) ||
+      (freq === 'monthly' && nowDate.getDate() === (parseInt(opts.day_of_month) || 1))
+    );
+    if (shouldSendOverdue) {
+      // Notes brouillon PASSÉES uniquement
+      const overdue = db.prepare(
+        "SELECT e.*, u.username FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.is_preview=1 AND (e.year < ? OR (e.year = ? AND e.month < ?)) ORDER BY e.year DESC, e.month DESC"
+      ).all(curYear, curYear, curMonth);
+      if (overdue.length > 0) {
+        const grouped = {};
+        overdue.forEach(e => {
+          const key = `${e.year}-${String(e.month).padStart(2,'0')}`;
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(e);
         });
-      });
-      html += '</table>';
-      dispatch('preview_overdue', { html, text }, getDb).catch(() => {});
+        const MONTHS_FR2 = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+        let html = `<p>⚠️ ${overdue.length} note(s) en brouillon sur des périodes passées :</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Période</th><th style="padding:6px 8px;text-align:left">Utilisateur</th><th style="padding:6px 8px;text-align:left">Tag</th></tr>`;
+        let text = `${overdue.length} note(s) en brouillon passées :\n`;
+        Object.entries(grouped).sort().reverse().forEach(([period, entries]) => {
+          const [y, m] = period.split('-');
+          entries.forEach(e => {
+            html += `<tr><td style="padding:6px 8px">${MONTHS_FR2[parseInt(m)-1]} ${y}</td><td style="padding:6px 8px">${e.username}</td><td style="padding:6px 8px">[${e.tag_code}]</td></tr>`;
+            text += `  - ${MONTHS_FR2[parseInt(m)-1]} ${y} / ${e.username} / [${e.tag_code}]\n`;
+          });
+        });
+        html += '</table>';
+        dispatch('preview_overdue', { html, text }, getDb).catch(() => {});
+      }
     }
   }
-
   // preview_recap : récapitulatif périodique (00h05 seulement)
   const recapRow = db.prepare("SELECT * FROM notification_config WHERE event_key='preview_recap' AND enabled=1").get();
   if (recapRow && isAt0005) {
@@ -1184,18 +1199,17 @@ function checkPreviewCrons() {
       (freq === 'monthly' && nowDate.getDate() === (parseInt(opts.day_of_month) || 1))
     );
     if (shouldSend) {
+      // Notes brouillon FUTURES uniquement (année > now ou même année mois > now)
       const previews = db.prepare(
-        "SELECT e.*, u.username FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.is_preview=1 ORDER BY e.year DESC, e.month DESC"
-      ).all();
+        "SELECT e.*, u.username FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.is_preview=1 AND (e.year > ? OR (e.year = ? AND e.month > ?)) ORDER BY e.year ASC, e.month ASC"
+      ).all(curYear, curYear, curMonth);
       const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-      let html = previews.length === 0 ? '<p>✅ Aucune note en preview actuellement.</p>'
-        : `<p>${previews.length} note(s) en preview :</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Période</th><th style="padding:6px 8px;text-align:left">Utilisateur</th><th style="padding:6px 8px;text-align:left">Statut</th></tr>` +
+      let html = previews.length === 0 ? '<p>✅ Aucune note en brouillon à venir.</p>'
+        : `<p>${previews.length} note(s) en brouillon à venir :</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Période</th><th style="padding:6px 8px;text-align:left">Utilisateur</th></tr>` +
           previews.map(e => {
-            const isFuture = e.year > curYear || (e.year === curYear && e.month > curMonth);
-            const status = isFuture ? '🔮 Futur' : '⚠️ Passé';
-            return `<tr><td style="padding:6px 8px">${MONTHS_FR[e.month-1]} ${e.year}</td><td style="padding:6px 8px">${e.username}</td><td style="padding:6px 8px">${status}</td></tr>`;
+            return `<tr><td style="padding:6px 8px">${MONTHS_FR[e.month-1]} ${e.year}</td><td style="padding:6px 8px">${e.username}</td></tr>`;
           }).join('') + '</table>';
-      const text = previews.length === 0 ? 'Aucune note en preview.' : `${previews.length} note(s) en preview.`;
+      const text = previews.length === 0 ? 'Aucune note en brouillon à venir.' : `${previews.length} note(s) en brouillon à venir.`;
       dispatch('preview_recap', { html, text }, getDb).catch(() => {});
     }
   }
@@ -1242,20 +1256,31 @@ function checkPreviewCrons() {
     }
   }
   // expiration_document : catégories temporaires arrivant à expiration
+  // expiration_document : catégories temporaires — multi-seuils (00h05)
   const expiRow = db.prepare("SELECT * FROM notification_config WHERE event_key='expiration_document' AND enabled=1").get();
-  if (expiRow) {
+  if (expiRow && isAt0005) {
     let opts = {}; try { opts = JSON.parse(expiRow.options || '{}'); } catch {}
     const daysBefore = parseInt(opts.days_before) || 30;
-    const limitDate = new Date(nowDate.getTime() + daysBefore * 86400000).toISOString().slice(0,10);
-    const expiringCats = db.prepare(
-      "SELECT * FROM automation_categories WHERE type='temporary' AND valid_until IS NOT NULL AND valid_until <= ? AND valid_until >= ?"
-    ).all(limitDate, nowDate.toISOString().slice(0,10));
-    for (const cat of expiringCats) {
-      const catName = decrypt(cat.label_enc || cat.name_enc || '');
-      dispatch('expiration_document', {
-        name: catName, valid_until: cat.valid_until,
-        category: catName, datetime: nowLocal(),
-      }, getDb).catch(() => {});
+    // Seuils : daysBefore, puis 5j, 2j, 1j (si <= daysBefore)
+    const thresholds = [daysBefore, 5, 2, 1].filter((v,i,a) => v <= daysBefore && a.indexOf(v)===i).sort((a,b)=>b-a);
+    const todayStr2 = nowDate.toISOString().slice(0,10);
+    const allExpiring = db.prepare("SELECT * FROM automation_categories WHERE type='temporary' AND valid_until IS NOT NULL AND valid_until >= ?").all(todayStr2);
+    const toNotify = allExpiring.filter(cat => {
+      const daysLeft = Math.ceil((new Date(cat.valid_until) - nowDate) / 86400000);
+      return thresholds.some(t => daysLeft === t);
+    });
+    if (toNotify.length > 0) {
+      const items = toNotify.map(cat => {
+        const name = decrypt(cat.label_enc || cat.name_enc || '');
+        const daysLeft = Math.ceil((new Date(cat.valid_until) - nowDate) / 86400000);
+        return { name, valid_until: cat.valid_until, daysLeft };
+      });
+      const html = `<p>⏰ ${items.length} catégorie(s) arrivant à expiration :</p>`
+        + `<table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Catégorie</th><th style="padding:6px 8px;text-align:left">Expiration</th><th style="padding:6px 8px;text-align:left">Jours restants</th></tr>`
+        + items.map(i => `<tr><td style="padding:6px 8px"><strong>${i.name}</strong></td><td style="padding:6px 8px">${i.valid_until}</td><td style="padding:6px 8px">${i.daysLeft} jour${i.daysLeft>1?'s':''}</td></tr>`).join('')
+        + '</table>';
+      const text = items.map(i => `${i.name} : expire le ${i.valid_until} (dans ${i.daysLeft} jour${i.daysLeft>1?'s':''})`).join('\n');
+      dispatch('expiration_document', { html, text, count: items.length, datetime: nowLocal() }, getDb).catch(() => {});
     }
   }
 }
@@ -2225,6 +2250,16 @@ function checkActivityReadPerm(req) {
   return false;
 }
 
+function isMergeActivityEnabled(db) {
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key='feature_flags'").get();
+    if (!row) return false;
+    const f = JSON.parse(row.value);
+    return !!f.merge_activity;
+  } catch { return false; }
+}
+
+
 app.get('/api/activity/tags', authMiddleware, (req, res) => {
   res.json(getDb().prepare('SELECT * FROM activity_tags ORDER BY code').all());
 });
@@ -2279,17 +2314,18 @@ app.get('/api/activity/entries', authMiddleware, (req, res) => {
   const { user_id, year, month } = req.query;
   const canViewAll = checkActivityReadPerm(req);
   const targetUserId = (canViewAll && user_id) ? parseInt(user_id) : req.user.id;
-  let q = 'SELECT e.*, u.username, u.display_name FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.user_id=?';
-  const p = [targetUserId];
+  // merge autorisé si feature flag activé (indépendamment des droits activity_read)
+  const mergeAll = req.query.merge === '1' && isMergeActivityEnabled(db);
+  let q, p;
+  if (mergeAll) {
+    q = 'SELECT e.*, u.username, u.display_name FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE 1=1'; p = [];
+  } else {
+    q = 'SELECT e.*, u.username, u.display_name FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.user_id=?'; p = [targetUserId];
+  }
   if (year)  { q += ' AND e.year=?';  p.push(parseInt(year));  }
   if (month) { q += ' AND e.month=?'; p.push(parseInt(month)); }
   q += ' ORDER BY e.year DESC, e.month ASC, e.created_at ASC';
   res.json(db.prepare(q).all(...p));
-});
-
-// Historique d'une note
-app.get('/api/activity/entries/:id/history', authMiddleware, (req, res) => {
-  const db = getDb();
   const entry = db.prepare('SELECT user_id FROM activity_entries WHERE id=?').get(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Introuvable' });
   if (entry.user_id !== req.user.id && req.user.role !== 'admin')
@@ -2306,9 +2342,13 @@ app.get('/api/activity/years', authMiddleware, (req, res) => {
   const { user_id } = req.query;
   const canViewAll = checkActivityReadPerm(req);
   const targetUserId = (canViewAll && user_id) ? parseInt(user_id) : req.user.id;
-  const rows = db.prepare('SELECT DISTINCT year FROM activity_entries WHERE user_id=? ORDER BY year DESC').all(targetUserId);
+  const mergeAll = req.query.merge === '1' && isMergeActivityEnabled(db);
+  const rows = mergeAll
+    ? db.prepare('SELECT DISTINCT year FROM activity_entries ORDER BY year DESC').all()
+    : db.prepare('SELECT DISTINCT year FROM activity_entries WHERE user_id=? ORDER BY year DESC').all(targetUserId);
   res.json(rows.map(r => r.year));
 });
+
 
 app.post('/api/activity/entries', authMiddleware, (req, res) => {
   const { year, month, tag_code, content, is_preview } = req.body;

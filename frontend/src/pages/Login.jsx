@@ -232,7 +232,7 @@ export default function Login() {
         {step === 'credentials' && (
           <div className="card" style={{padding:'32px 36px 16px 36px'}}>
             <div style={{textAlign:'center', marginBottom:24}}>
-              <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', maxWidth:260, height:'auto'}} />
+              <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', height:'auto'}} />
             </div>
             {passwordChanged && <div className="alert alert-ok" style={{fontSize:12, marginBottom:16}}>✓ {t('auth.password_changed')}</div>}
             {error && <div className="alert alert-err" style={{fontSize:12, marginBottom:16}}>{error}</div>}
@@ -285,7 +285,7 @@ export default function Login() {
         {step === 'totp' && (
           <div className="card" style={{padding:'32px 36px'}}>
             <div style={{textAlign:'center', marginBottom:24}}>
-              <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', maxWidth:260, height:'auto'}} />
+              <img src="/logo-login.png" alt="NexusVault" style={{width:'100%', height:'auto'}} />
             </div>
             <div style={{textAlign:'center', marginBottom:20}}>
               <svg viewBox="0 0 24 24" fill="none" stroke="var(--acc)" strokeWidth="2" style={{width:40,height:40,marginBottom:8}}>
@@ -371,18 +371,18 @@ export default function Login() {
       {mustChangePwd && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>
           <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', padding:32, width:'100%', maxWidth:400, boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}>
-            <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>Changement de mot de passe requis</div>
+            <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>{t('login.change_required')}</div>
             <div style={{ fontSize:13, color:'var(--muted)', marginBottom:20 }}>
-              Pour des raisons de sécurité, vous devez choisir un nouveau mot de passe avant de continuer.
+              {t('login.change_reason')}
             </div>
             {changePwdErr && <div className="alert alert-err" style={{ marginBottom:12, fontSize:12 }}>{changePwdErr}</div>}
             <div className="form-group">
-              <label className="form-label">Nouveau mot de passe <span style={{ color:'var(--muted)', fontSize:11 }}>(14 caractères minimum)</span></label>
+              <label className="form-label">{t('auth.new_pwd_label')} <span style={{ color:'var(--muted)', fontSize:11 }}>{t('login.new_pwd_min')}</span></label>
               <input className="form-control" type="password" value={newPwd}
                 onChange={e => setNewPwd(e.target.value)} placeholder="••••••••••••••" autoFocus />
             </div>
             <div className="form-group">
-              <label className="form-label">Confirmer le mot de passe</label>
+              <label className="form-label">{t('login.confirm_pwd')}</label>
               <input className="form-control" type="password" value={newPwd2}
                 onChange={e => setNewPwd2(e.target.value)} placeholder="••••••••••••••" />
             </div>
@@ -390,8 +390,8 @@ export default function Login() {
               disabled={changePwdLoading || newPwd.length < 14 || newPwd !== newPwd2}
               onClick={async () => {
                 setChangePwdErr('');
-                if (newPwd.length < 14) return setChangePwdErr('14 caractères minimum');
-                if (newPwd !== newPwd2) return setChangePwdErr('Les mots de passe ne correspondent pas');
+                if (newPwd.length < 14) return setChangePwdErr(t('auth.new_pwd_label') ? '14 caractères minimum' : '14 characters minimum');
+                if (newPwd !== newPwd2) return setChangePwdErr('Les mots de passe ne correspondent pas.');
                 setChangePwdLoading(true);
                 try {
                   const r = await fetch('/api/auth/force-change-password', {
@@ -405,7 +405,7 @@ export default function Login() {
                   navigate('/');
                 } catch (e2) { setChangePwdErr(e2.message); } finally { setChangePwdLoading(false); }
               }}>
-              {changePwdLoading ? 'Enregistrement…' : 'Définir le mot de passe'}
+              {changePwdLoading ? t('common.saving') : t('login.set_pwd')}
             </button>
           </div>
         </div>
