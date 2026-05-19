@@ -1,7 +1,23 @@
 const jwt = require('jsonwebtoken');
 const { getDb, audit } = require('./db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-me';
+// ── Validation du secret JWT au démarrage ───────────────────────────────────
+// Un secret manquant ou laissé à une valeur par défaut connue permettrait à
+// quiconque de forger des tokens : on refuse de démarrer.
+const KNOWN_BAD_JWT_SECRETS = [
+  'fallback-secret-change-me',
+  'CHANGEZ-CE-SECRET-JWT-AVANT-PROD!!',
+  'CHANGEZ-CE-SECRET-JWT-AVANT-PRODUCTION!!',
+];
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 32 || KNOWN_BAD_JWT_SECRETS.includes(JWT_SECRET)) {
+  console.error('[FATAL] JWT_SECRET absent, trop court (<32 caractères) ou laissé à sa valeur par défaut.');
+  console.error('[FATAL] Générez un secret : openssl rand -hex 32  — puis renseignez-le dans .env');
+  process.exit(1);
+}
+
+// Algorithme de signature imposé — empêche les attaques de confusion d'algorithme
+const JWT_ALG = 'HS256';
 
 function getClientIp(req) {
   return req.headers['x-real-ip']
@@ -47,7 +63,7 @@ function authMiddleware(req, res, next) {
   if (!header) return res.status(401).json({ error: 'Non authentifié' });
   const token = header.replace('Bearer ', '');
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALG] });
     req.user = payload;
     next();
   } catch {
@@ -85,4 +101,4 @@ function requirePerm(perm) {
   };
 }
 
-module.exports = { authMiddleware, requireRole, requirePerm, JWT_SECRET, getClientIp, checkWhitelist };
+module.exports = { authMiddleware, requireRole, requirePerm, JWT_SECRET, JWT_ALG, getClientIp, checkWhitelist };

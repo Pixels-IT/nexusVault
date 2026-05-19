@@ -4,8 +4,20 @@ const crypto = require('crypto');
 
 const DB_PATH = process.env.DB_PATH || '/data/nexusvault.db';
 
-// Clé maître : chiffrement SQLite (niveau fichier) ET chiffrement AES-256 des colonnes sensibles
-const ENC_KEY = process.env.ENCRYPTION_KEY || 'default-insecure-key-change-me!!';
+// ── Validation de la clé de chiffrement au démarrage ────────────────────────
+// Une clé manquante, trop courte ou laissée à une valeur par défaut connue
+// rend tout le coffre-fort illusoire : on refuse de démarrer.
+const KNOWN_BAD_ENC_KEYS = [
+  'default-insecure-key-change-me!!',
+  'CHANGEZ-CETTE-CLE-MAINTENANT-32chars!!',
+  'CHANGEZ-CETTE-CLE-MAINTENANT-minimum-32-caracteres!!',
+];
+const ENC_KEY = process.env.ENCRYPTION_KEY;
+if (!ENC_KEY || ENC_KEY.length < 32 || KNOWN_BAD_ENC_KEYS.includes(ENC_KEY)) {
+  console.error('[FATAL] ENCRYPTION_KEY absente, trop courte (<32 caractères) ou laissée à sa valeur par défaut.');
+  console.error('[FATAL] Générez une clé : openssl rand -hex 32  — puis renseignez-la dans .env');
+  process.exit(1);
+}
 
 let db;
 
@@ -350,28 +362,78 @@ function initSchema() {
 }
 
 
-function deriveKey(key) {
+// ── Dérivation de clé ───────────────────────────────────────────────────────
+// deriveKeyLegacy : SHA-256 simple — conservée UNIQUEMENT pour relire les
+//   données déjà en base (formats "gcm:" et CBC). Ne plus l'utiliser pour
+//   chiffrer.
+// La clé courante est dérivée par scrypt (KDF coûteux, résistant au brute
+//   force) à partir d'ENCRYPTION_KEY et d'un sel propre à l'installation,
+//   généré une seule fois et stocké en base. La dérivation scrypt n'a donc
+//   lieu qu'une fois par démarrage : la clé est ensuite gardée en mémoire,
+//   ce qui évite un coût par opération de chiffrement.
+function deriveKeyLegacy(key) {
   return crypto.createHash('sha256').update(key).digest();
 }
 
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 }; // ~16 Mo de mémoire par dérivation
+let _cachedKey = null;
+
+function getEncryptionKey() {
+  if (_cachedKey) return _cachedKey;
+  const d = getDb();
+  d.exec(`CREATE TABLE IF NOT EXISTS crypto_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  let row = d.prepare("SELECT value FROM crypto_meta WHERE key='kdf_salt'").get();
+  if (!row) {
+    // Premier démarrage avec le KDF : on génère et persiste un sel unique.
+    const salt = crypto.randomBytes(16).toString('hex');
+    d.prepare("INSERT INTO crypto_meta (key, value) VALUES ('kdf_salt', ?)").run(salt);
+    row = { value: salt };
+  }
+  _cachedKey = crypto.scryptSync(ENC_KEY, Buffer.from(row.value, 'hex'), 32,
+    { ...SCRYPT_PARAMS, maxmem: 64 * 1024 * 1024 });
+  return _cachedKey;
+}
+
+// ── Chiffrement AES-256-GCM (authentifié) ───────────────────────────────────
+// Format courant : "gcm2:" + iv(hex) + ":" + tag(hex) + ":" + data(hex)
+//   Clé dérivée par scrypt (sel d'installation). L'IV aléatoire garantit
+//   l'unicité du chiffrement de chaque valeur.
+// Formats anciens lus en rétrocompatibilité :
+//   "gcm:" + iv + ":" + tag + ":" + data   → clé SHA-256
+//   "iv:data"                              → AES-CBC, clé SHA-256
+// Toute réécriture d'une valeur la migre automatiquement vers "gcm2:".
 function encrypt(text) {
   if (text === null || text === undefined) return null;
-  const key = deriveKey(ENC_KEY);
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(12); // 96 bits — recommandé pour GCM
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(String(text), 'utf8'), cipher.final()]);
-  return iv.toString('hex') + ':' + encrypted.toString('hex');
+  const tag = cipher.getAuthTag();
+  return 'gcm2:' + iv.toString('hex') + ':' + tag.toString('hex') + ':' + encrypted.toString('hex');
 }
 
 function decrypt(enc) {
   if (!enc) return null;
   try {
+    if (enc.startsWith('gcm2:')) {
+      const [, ivHex, tagHex, dataHex] = enc.split(':');
+      const key = getEncryptionKey();
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
+      decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+      return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+    }
+    const key = deriveKeyLegacy(ENC_KEY);
+    if (enc.startsWith('gcm:')) {
+      // Ancien format GCM (clé SHA-256) — lecture seule
+      const [, ivHex, tagHex, dataHex] = enc.split(':');
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
+      decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+      return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+    }
+    // Ancien format CBC : "iv:data" — lecture seule, rétrocompatibilité
     const [ivHex, dataHex] = enc.split(':');
-    const key = deriveKey(ENC_KEY);
-    const iv = Buffer.from(ivHex, 'hex');
-    const data = Buffer.from(dataHex, 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-    return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(ivHex, 'hex'));
+    return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
   } catch { return '[erreur déchiffrement]'; }
 }
 

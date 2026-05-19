@@ -8,8 +8,12 @@ services:
     container_name: nexusvault-backend
     restart: unless-stopped
     environment:
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-CHANGEZ-CETTE-CLE-MAINTENANT-32chars!!}
-      JWT_SECRET: ${JWT_SECRET:-CHANGEZ-CE-SECRET-JWT-AVANT-PROD!!}
+      # ENCRYPTION_KEY et JWT_SECRET sont OBLIGATOIRES et doivent être définis
+      # dans le fichier .env. Aucune valeur par défaut n'est fournie : le
+      # backend refuse de démarrer si elles sont absentes, trop courtes ou
+      # laissées à une valeur d'exemple connue.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY manquante - voir .env.example}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant - voir .env.example}
       DB_PATH: /data/nexusvault.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
       APP_URL: ${APP_URL:-http://localhost:8080}

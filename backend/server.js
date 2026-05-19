@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { sshExec } = require('./ssh');
+const { sshExec, forgetHostKey } = require('./ssh');
 const cors = require('cors');
 const helmet = require('helmet');
 const bcrypt = require('bcryptjs');
@@ -9,8 +9,9 @@ const { authenticator } = require('otplib');
 authenticator.options = { window: 2 };
 const QRCode = require('qrcode');
 const jwt = require('jsonwebtoken');
+const jwksClient = require('jwks-rsa');
 const { getDb, encrypt, decrypt, audit } = require('./db');
-const { authMiddleware, requireRole, requirePerm, JWT_SECRET, getClientIp, checkWhitelist } = require('./auth');
+const { authMiddleware, requireRole, requirePerm, JWT_SECRET, JWT_ALG, getClientIp, checkWhitelist } = require('./auth');
 
 // ── CLI : reset-password ────────────────────────────────────────────────────
 // Usage : node server.js reset-password <username>
@@ -57,10 +58,44 @@ if (process.argv[2] === 'reset-password') {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// ── EN-TÊTES DE SÉCURITÉ ─────────────────────────────────────────────────────
+// CSP activée : limite les sources de scripts/styles pour réduire l'impact
+// d'une éventuelle injection XSS. 'unsafe-inline' sur les styles est conservé
+// car le frontend (Vite/React) utilise des styles inline.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"],
+      baseUri: ["'self'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+
+// CORS : restreint aux origines explicitement configurées. Le repli '*'
+// précédent autorisait n'importe quel site à appeler l'API. En l'absence de
+// FRONTEND_URL, l'API est servie en même origine que le frontend (proxy
+// nginx) — aucune origine tierce n'a besoin d'y accéder.
+const allowedOrigins = (process.env.FRONTEND_URL || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: allowedOrigins.length ? allowedOrigins : false,
+  credentials: true,
+}));
+
+// Limite de payload : 50 Mo s'applique aux imports de fichiers ; 1 Mo suffit
+// pour les routes JSON classiques et réduit la surface de déni de service.
+app.use('/api/automation', express.json({ limit: '50mb' }));
+app.use('/api/activity', express.json({ limit: '50mb' }));
+app.use('/api/backups', express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 
 // Helper : heure locale formatée pour SQLite (respecte TZ du conteneur)
@@ -68,6 +103,75 @@ function nowLocal() {
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// Helper : nom de fichier sûr pour l'en-tête Content-Disposition.
+// Empêche l'injection d'en-tête HTTP (CR/LF) et neutralise les guillemets
+// et séparateurs de chemin. Encode aussi en RFC 5987 pour l'Unicode.
+function safeContentDisposition(filename) {
+  const fallback = String(filename || 'fichier')
+    .replace(/[\r\n"\\/]/g, '_')
+    .replace(/[\x00-\x1F\x7F]/g, '_')
+    .slice(0, 200) || 'fichier';
+  const encoded = encodeURIComponent(String(filename || 'fichier'));
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+// ── VÉRIFICATION DE SIGNATURE OIDC (JWKS) ───────────────────────────────────
+// Cache des clients JWKS, un par jwks_uri. jwks-rsa met lui-même en cache les
+// clés récupérées et gère la rotation (récupération à la demande sur kid).
+const _jwksClients = new Map();
+function getJwksClient(jwksUri, tlsInsecure) {
+  const cacheKey = `${jwksUri}|${tlsInsecure ? 'insecure' : 'secure'}`;
+  let client = _jwksClients.get(cacheKey);
+  if (!client) {
+    client = jwksClient({
+      jwksUri,
+      cache: true,
+      cacheMaxEntries: 10,
+      cacheMaxAge: 10 * 60 * 1000, // 10 min
+      rateLimit: true,
+      jwksRequestsPerMinute: 10,
+      requestAgent: tlsInsecure
+        ? new (require('https').Agent)({ rejectUnauthorized: false })
+        : undefined,
+    });
+    _jwksClients.set(cacheKey, client);
+  }
+  return client;
+}
+
+/**
+ * Vérifie cryptographiquement la signature d'un id_token OIDC via le JWKS
+ * du fournisseur, puis contrôle issuer, audience et expiration.
+ * Rejette (throw) si le token est invalide.
+ * @returns {Promise<object>} les claims vérifiés
+ */
+function verifyIdTokenSignature(idToken, cfg) {
+  return new Promise((resolve, reject) => {
+    // Récupère la clé publique correspondant au `kid` de l'en-tête du token.
+    function getKey(header, callback) {
+      if (!header || !header.kid) {
+        return callback(new Error('id_token sans identifiant de clé (kid)'));
+      }
+      const client = getJwksClient(cfg.jwks_uri, cfg.tls_insecure);
+      client.getSigningKey(header.kid, (err, key) => {
+        if (err) return callback(err);
+        callback(null, key.getPublicKey());
+      });
+    }
+    const opts = {
+      // RSA et ECDSA asymétriques uniquement — jamais HS256 (qui utiliserait
+      // un secret partagé et ouvrirait une confusion d'algorithme).
+      algorithms: ['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'ES512'],
+    };
+    if (cfg.client_id) opts.audience = cfg.client_id;
+    if (cfg.issuer_url) opts.issuer = cfg.issuer_url.replace(/\/$/, '');
+    jwt.verify(idToken, getKey, opts, (err, claims) => {
+      if (err) return reject(err);
+      resolve(claims);
+    });
+  });
 }
 
 // ── HEALTH ────────────────────────────────────────────────────────────────────
@@ -89,6 +193,46 @@ app.use((req, res, next) => {
   next();
 });
 // ── AUTH ──────────────────────────────────────────────────────────────────────
+// Rate limiting par IP — protège contre le password spraying (un attaquant
+// qui teste un même mot de passe sur de nombreux comptes sans verrouiller
+// aucun compte individuel) et le déni de service sur les routes sensibles.
+const rateLimitBuckets = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, b] of rateLimitBuckets) {
+    if (b.resetAt < now) rateLimitBuckets.delete(key);
+  }
+}, 5 * 60 * 1000).unref?.();
+
+function rateLimit({ windowMs, max, key }) {
+  return (req, res, next) => {
+    const ip = getClientIp(req) || 'unknown';
+    const bucketKey = `${key}:${ip}`;
+    const now = Date.now();
+    let b = rateLimitBuckets.get(bucketKey);
+    if (!b || b.resetAt < now) {
+      b = { count: 0, resetAt: now + windowMs };
+      rateLimitBuckets.set(bucketKey, b);
+    }
+    b.count++;
+    if (b.count > max) {
+      const retryAfter = Math.ceil((b.resetAt - now) / 1000);
+      res.setHeader('Retry-After', String(retryAfter));
+      try {
+        audit(getDb(), { action: 'RATE_LIMIT', category: 'sécurité', severity: 'warn',
+          detail: `Trop de requêtes sur ${req.path} depuis ${ip}`, ip, success: 0 });
+      } catch {}
+      return res.status(429).json({ error: `Trop de requêtes. Réessayez dans ${retryAfter}s.` });
+    }
+    next();
+  };
+}
+
+// Limiteurs : 20 tentatives de login / 10 min / IP ; 5 demandes de reset / 15 min / IP
+const loginRateLimit  = rateLimit({ windowMs: 10 * 60 * 1000, max: 20, key: 'login' });
+const resetRateLimit  = rateLimit({ windowMs: 15 * 60 * 1000, max: 5,  key: 'reset' });
+const oidcRateLimit   = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, key: 'oidc' });
+
 // Brute force : 5 tentatives en 10 minutes → compte verrouillé
 function getBruteConfig(db) {
   try {
@@ -101,7 +245,7 @@ function getBruteConfig(db) {
   return { max: 5, window: 600 };
 }
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginRateLimit, (req, res) => {
   const { username, password } = req.body;
   const ip = getClientIp(req);
   const db = getDb();
@@ -174,7 +318,7 @@ app.post('/api/auth/login', (req, res) => {
           return res.status(401).json({error:'Code TOTP invalide'});
         }
       } else {
-        const sToken=jwt.sign({id:user.id,username:user.username,totp_setup_required:true},JWT_SECRET,{expiresIn:'15m'});
+        const sToken=jwt.sign({id:user.id,username:user.username,totp_setup_required:true},JWT_SECRET,{expiresIn:'15m',algorithm:JWT_ALG});
         return res.json({totp_required:true,totp_setup:true,setup_token:sToken});
       }
     }
@@ -183,7 +327,7 @@ app.post('/api/auth/login', (req, res) => {
   db.prepare('UPDATE users SET failed_attempts=0, locked_until=NULL, last_login_at=? WHERE id=?').run(nowLocal(), user.id);
   const token = jwt.sign(
     { id: user.id, username: user.username, displayName: user.display_name, email: user.email, role: user.role, permissions: user.permissions || '{}', mustChangePassword: user.must_change_password === 1 },
-    JWT_SECRET, { expiresIn: '8h' }
+    JWT_SECRET, { expiresIn: '8h', algorithm: JWT_ALG }
   );
   audit(db, { userId: user.id, username: user.username, action: 'CONNEXION_RÉUSSIE', category: 'auth', severity: 'info', detail: `Depuis ${ip}`, ip, success: 1 });
   res.json({ token, mustChangePassword: user.must_change_password === 1 });
@@ -257,6 +401,29 @@ app.get('/api/users/admin-count', authMiddleware, requireRole('admin'), (req, re
   res.json({ count });
 });
 
+// ── SSH : empreintes de clés d'hôte connues (TOFU) ──────────────────────────
+app.get('/api/ssh/known-hosts', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  db.exec(`CREATE TABLE IF NOT EXISTS ssh_known_hosts (
+    host_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, key_type TEXT,
+    first_seen TEXT DEFAULT (datetime('now','localtime')), last_seen TEXT
+  )`);
+  const rows = db.prepare("SELECT host_key, fingerprint, first_seen, last_seen FROM ssh_known_hosts ORDER BY host_key").all();
+  res.json(rows);
+});
+
+// Réinitialise l'empreinte d'un hôte — à utiliser après remplacement légitime
+// d'un équipement. La prochaine connexion ré-enregistrera la nouvelle clé.
+app.delete('/api/ssh/known-hosts/:hostKey', authMiddleware, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  const hostKey = req.params.hostKey;
+  const removed = db.prepare("DELETE FROM ssh_known_hosts WHERE host_key=?").run(hostKey).changes;
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'SSH_EMPREINTE_RÉINITIALISÉE',
+    category: 'sécurité', severity: 'warn', detail: `Hôte: ${hostKey}`, ip: getClientIp(req), success: removed ? 1 : 0 });
+  if (!removed) return res.status(404).json({ error: 'Empreinte introuvable' });
+  res.json({ success: true });
+});
+
 
 // Liste des utilisateurs pour le sélecteur du suivi d'activité
 // Accessible à tout utilisateur ayant activity_read ou admin
@@ -308,7 +475,13 @@ app.post('/api/users', authMiddleware, requireRole('admin'), async (req, res) =>
 
   // Envoi de l'email d'initialisation
   const transport = getMailTransport();
-  logger.info(`[USER] Compte créé: ${username.trim()} — lien d'initialisation: ${initUrl}`);
+  // Ne pas exposer le lien complet (contient un token réutilisable) dans les
+  // logs au niveau info. Il n'est journalisé que si l'email ne peut pas être
+  // envoyé, comme moyen de secours pour l'administrateur.
+  logger.info(`[USER] Compte créé: ${username.trim()}`);
+  if (!transport) {
+    logger.warn(`[USER] SMTP non configuré — lien d'initialisation pour "${username.trim()}": ${initUrl}`);
+  }
 
   if (transport) {
     const from = process.env.SMTP_FROM || 'NexusVault <no-reply@nexusvault.local>';
@@ -520,6 +693,8 @@ app.put('/api/oidc/config', authMiddleware, requirePerm('security_access'), (req
     redirect_uri, scopes, auto_create_users, default_role,
     allow_local_login,
     authorization_endpoint, token_endpoint, userinfo_endpoint,
+    jwks_uri,
+    tls_insecure,
   } = req.body;
   // Récupérer l'ancien secret si le nouveau est masqué
   let finalSecret = client_secret;
@@ -541,6 +716,13 @@ app.put('/api/oidc/config', authMiddleware, requirePerm('security_access'), (req
     authorization_endpoint: authorization_endpoint || '',
     token_endpoint: token_endpoint || '',
     userinfo_endpoint: userinfo_endpoint || '',
+    // Point JWKS du fournisseur — permet la vérification cryptographique de
+    // la signature de l'id_token. Fortement recommandé : sans lui, seuls
+    // l'expiration et l'audience sont contrôlées.
+    jwks_uri: jwks_uri || '',
+    // Vérification TLS du fournisseur d'identité. Désactivez UNIQUEMENT pour
+    // un IdP interne à certificat auto-signé, et de préférence jamais en prod.
+    tls_insecure: !!tls_insecure,
   };
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('oidc_config', ?)").run(JSON.stringify(cfg));
   audit(db, { userId: req.user.id, username: req.user.username, action: 'OIDC_CONFIG_MODIFIÉ', category: 'security', ip });
@@ -573,8 +755,8 @@ app.get('/api/oidc/public', (req, res) => {
 
 
 // ── OIDC CALLBACK : échange du code contre un token JWT ──────────────────────
-app.post('/api/oidc/exchange', (req, res) => {
-  const { code, redirect_uri } = req.body;
+app.post('/api/oidc/exchange', oidcRateLimit, (req, res) => {
+  const { code, redirect_uri, nonce } = req.body;
   if (!code) return res.status(400).json({ error: 'Code manquant' });
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key='oidc_config'").get();
@@ -586,6 +768,13 @@ app.post('/api/oidc/exchange', (req, res) => {
   const http  = require('http');
   const url   = require('url');
 
+  // Vérification TLS active par défaut. Désactivable uniquement via la config
+  // explicite tls_insecure (IdP interne auto-signé) — jamais en silence.
+  const rejectUnauthorized = !cfg.tls_insecure;
+  if (cfg.tls_insecure) {
+    logger.warn('[OIDC] Vérification TLS DÉSACTIVÉE (tls_insecure) — déconseillé hors IdP interne');
+  }
+
   function fetchPost(endpoint, body) {
     return new Promise((resolve, reject) => {
       const u = new url.URL(endpoint);
@@ -594,7 +783,7 @@ app.post('/api/oidc/exchange', (req, res) => {
         hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
         path: u.pathname + u.search, method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData) },
-        rejectUnauthorized: false,
+        rejectUnauthorized,
       };
       const mod = u.protocol === 'https:' ? https : http;
       const req2 = mod.request(opts, r => {
@@ -615,7 +804,7 @@ app.post('/api/oidc/exchange', (req, res) => {
         hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
         path: u.pathname + u.search, method: 'GET',
         headers: { Authorization: 'Bearer ' + accessToken },
-        rejectUnauthorized: false,
+        rejectUnauthorized,
       };
       const mod = u.protocol === 'https:' ? https : http;
       const req2 = mod.request(opts, r => {
@@ -649,6 +838,59 @@ app.post('/api/oidc/exchange', (req, res) => {
       }
       const accessToken = tokenRes.access_token;
       if (!accessToken) return res.status(401).json({ error: 'Pas de access_token' });
+
+      // ── Validation de l'id_token ────────────────────────────────────────
+      // L'id_token est la preuve d'authentification OIDC. Comportement :
+      //  - jwks_uri configuré  → vérification cryptographique OBLIGATOIRE de
+      //    la signature (issuer, audience et expiration inclus). Tout échec
+      //    rejette la connexion.
+      //  - jwks_uri absent     → repli sur un contrôle partiel (expiration +
+      //    audience) avec avertissement. Configurer jwks_uri est recommandé.
+      let verifiedClaims = null;
+      if (tokenRes.id_token && cfg.jwks_uri) {
+        try {
+          verifiedClaims = await verifyIdTokenSignature(tokenRes.id_token, cfg);
+          logger.info('[OIDC] Signature de l\'id_token vérifiée via JWKS');
+        } catch (e) {
+          logger.error('[OIDC] Échec de vérification de l\'id_token:', e.message);
+          audit(db, { action: 'OIDC_TOKEN_REJETÉ', category: 'sécurité', severity: 'error',
+            detail: `Signature id_token invalide: ${e.message}`, ip: getClientIp(req), success: 0 });
+          return res.status(401).json({ error: 'id_token invalide (signature non vérifiée)' });
+        }
+        // Vérification du nonce — protège contre le rejeu d'un id_token.
+        // Fiable uniquement parce que l'id_token vient d'être vérifié
+        // cryptographiquement : le claim nonce ne peut donc pas être forgé.
+        if (verifiedClaims && verifiedClaims.nonce) {
+          if (!nonce || nonce !== verifiedClaims.nonce) {
+            logger.error('[OIDC] nonce mismatch');
+            audit(db, { action: 'OIDC_TOKEN_REJETÉ', category: 'sécurité', severity: 'error',
+              detail: 'Le nonce de l\'id_token ne correspond pas à la requête', ip: getClientIp(req), success: 0 });
+            return res.status(401).json({ error: 'id_token invalide (nonce)' });
+          }
+          logger.info('[OIDC] nonce vérifié');
+        }
+      } else if (tokenRes.id_token) {
+        // Repli : pas de JWKS configuré — contrôle partiel uniquement.
+        logger.warn('[OIDC] jwks_uri non configuré — signature de l\'id_token NON vérifiée (contrôle partiel)');
+        try {
+          const idClaims = jwt.decode(tokenRes.id_token);
+          if (idClaims) {
+            if (idClaims.exp && idClaims.exp * 1000 < Date.now()) {
+              return res.status(401).json({ error: 'id_token expiré' });
+            }
+            if (idClaims.aud && cfg.client_id) {
+              const aud = Array.isArray(idClaims.aud) ? idClaims.aud : [idClaims.aud];
+              if (!aud.includes(cfg.client_id)) {
+                logger.error('[OIDC] id_token audience mismatch');
+                return res.status(401).json({ error: 'id_token invalide (audience)' });
+              }
+            }
+          }
+        } catch (e) {
+          logger.error('[OIDC] id_token decode error:', e.message);
+          return res.status(401).json({ error: 'id_token illisible' });
+        }
+      }
       logger.info(`[OIDC] Token OK, fetching userinfo`);
 
 
@@ -658,22 +900,47 @@ app.post('/api/oidc/exchange', (req, res) => {
         return base + '/api/oidc/userinfo';
       })();
       const userInfo = await fetchGet(userInfoEndpoint, accessToken);
-      const email = userInfo.email || userInfo.preferred_username || userInfo.sub;
-      const name  = userInfo.preferred_username || userInfo.name || email;
+
+      // Si l'id_token a été vérifié cryptographiquement, son `sub` fait foi :
+      // le `sub` renvoyé par userinfo doit correspondre (protège contre un
+      // point userinfo compromis ou un mélange de réponses).
+      if (verifiedClaims && verifiedClaims.sub && userInfo.sub
+          && verifiedClaims.sub !== userInfo.sub) {
+        logger.error('[OIDC] Incohérence sub id_token vs userinfo');
+        audit(db, { action: 'OIDC_TOKEN_REJETÉ', category: 'sécurité', severity: 'error',
+          detail: 'Le sub de userinfo ne correspond pas à celui de l\'id_token vérifié',
+          ip: getClientIp(req), success: 0 });
+        return res.status(401).json({ error: 'Incohérence d\'identité OIDC' });
+      }
+
+      // Les claims vérifiés de l'id_token priment sur la réponse userinfo.
+      const claims = verifiedClaims || userInfo;
+      const email = claims.email || userInfo.email || claims.preferred_username || claims.sub;
+      const name  = claims.preferred_username || userInfo.preferred_username || claims.name || userInfo.name || email;
       if (!name) return res.status(401).json({ error: 'Impossible de déterminer le nom utilisateur' });
 
       // 3. Find or create local user
-      let user = db.prepare("SELECT * FROM users WHERE username=? OR email=?").get(name, email);
+      // Résolution stricte par username uniquement : le rapprochement par
+      // email permettrait à un IdP de prendre le contrôle d'un compte local
+      // existant via un email choisi.
+      let user = db.prepare("SELECT * FROM users WHERE username=?").get(name);
+      // Un compte protégé par mot de passe local ne doit pas être détournable
+      // par OIDC : on exige que le compte soit explicitement marqué OIDC
+      // (password_hash vide) pour autoriser la connexion SSO.
+      if (user && user.password_hash) {
+        logger.warn(`[OIDC] Connexion SSO refusée pour "${name}" : compte protégé par mot de passe local`);
+        return res.status(403).json({ error: 'Ce compte utilise une authentification locale. Connexion SSO non autorisée.' });
+      }
       if (!user && cfg.auto_create_users) {
         const role = cfg.default_role || 'viewer';
         const ip = getClientIp(req);
         db.prepare("INSERT INTO users (username, password_hash, role, permissions, display_name, email, created_at) VALUES (?,?,?,?,?,?,?)")
-          .run(name, '', role, '{}', userInfo.name || name, email || '', nowLocal());
+          .run(name, '', role, '{}', claims.name || userInfo.name || name, email || '', nowLocal());
         user = db.prepare("SELECT * FROM users WHERE username=?").get(name);
         audit(db, { userId: user.id, username: name, action: 'COMPTE_CRÉÉ_OIDC', category: 'auth', severity: 'info', detail: `Via OIDC (${email})`, ip, success: 1 });
       }
       if (!user) return res.status(403).json({ error: `Aucun compte local trouvé pour "${name}". Activez la création automatique ou créez le compte manuellement.` });
-      if (user.locked) return res.status(403).json({ error: 'Compte verrouillé' });
+      if (user.locked || user.enabled === 0) return res.status(403).json({ error: 'Compte verrouillé ou désactivé' });
 
       // 4. Issue JWT
       const jwt = require('jsonwebtoken');
@@ -682,7 +949,7 @@ app.post('/api/oidc/exchange', (req, res) => {
         id: user.id, username: user.username, role: user.role,
         display_name: user.display_name || user.username,
         permissions: user.permissions || '{}',
-      }, JWT_SECRET, { expiresIn: '8h' });
+      }, JWT_SECRET, { expiresIn: '8h', algorithm: JWT_ALG });
 
       const ip = getClientIp(req);
       audit(db, { userId: user.id, username: user.username, action: 'CONNEXION_RÉUSSIE', category: 'auth', severity: 'info', detail: `Via OIDC (${cfg.provider_name || 'SSO'})`, ip, success: 1 });
@@ -957,7 +1224,7 @@ function getMailTransport() {
 }
 
 // POST /api/auth/forgot-password — demande de reset
-app.post('/api/auth/forgot-password', (req, res) => {
+app.post('/api/auth/forgot-password', resetRateLimit, (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: 'Identifiant requis' });
   const db   = getDb();
@@ -985,12 +1252,13 @@ app.post('/api/auth/forgot-password', (req, res) => {
   const resetUrl = `${appUrl}/reset-password?token=${token}`;
 
   const transport = getMailTransport();
-  // Toujours logger le lien (utile pour debug et pour comptes sans email)
-  logger.info(`[RESET] Lien de réinitialisation pour "${username}": ${resetUrl}`);
+  // Le lien de réinitialisation contient un token réutilisable : il n'est
+  // journalisé en clair que si l'email ne peut pas être délivré (secours admin).
+  logger.info(`[RESET] Demande de réinitialisation pour "${username}"`);
 
   if (!transport || !user.email) {
-    if (!transport) logger.warn('[RESET] SMTP non configuré — lien disponible dans les logs ci-dessus');
-    if (!user.email) logger.warn(`[RESET] Aucun email configuré pour "${username}" — lien disponible dans les logs ci-dessus`);
+    if (!transport) logger.warn(`[RESET] SMTP non configuré — lien pour "${username}": ${resetUrl}`);
+    if (!user.email) logger.warn(`[RESET] Aucun email pour "${username}" — lien: ${resetUrl}`);
     audit(db, {
       username: user.username, action: 'RESET_DEMANDÉ', category: 'auth', severity: 'info',
       detail: `Demande de réinitialisation — identifiant: ${user.username} — email: ${user.email || 'non renseigné'} — lien dans les logs`,
@@ -1028,7 +1296,7 @@ app.post('/api/auth/forgot-password', (req, res) => {
 });
 
 // POST /api/auth/reset-password — validation du token et changement
-app.post('/api/auth/reset-password', (req, res) => {
+app.post('/api/auth/reset-password', resetRateLimit, (req, res) => {
   const { token, password } = req.body;
   if (!token || !password) return res.status(400).json({ error: 'Paramètres manquants' });
   if (password.length < 14) return res.status(400).json({ error: '14 caractères minimum' });
@@ -1041,6 +1309,9 @@ app.post('/api/auth/reset-password', (req, res) => {
   const hash   = bcrypt.hashSync(password, 12);
   db.prepare("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?").run(hash, row.user_id);
   db.prepare("UPDATE password_reset_tokens SET used=1 WHERE id=?").run(row.id);
+  // Invalider tous les autres tokens de reset en attente pour ce compte :
+  // un seul lien doit pouvoir être consommé.
+  db.prepare("UPDATE password_reset_tokens SET used=1 WHERE user_id=? AND used=0").run(row.user_id);
 
   const user = db.prepare("SELECT username FROM users WHERE id=?").get(row.user_id);
   const ip   = getClientIp(req);
@@ -1850,7 +2121,7 @@ app.get('/api/audit/archives/:id/download', authMiddleware, requirePerm('audit_a
   const filename = `audit_${row.year}-${String(row.month).padStart(2,'0')}.csv.gz`;
   res.set({
     'Content-Type': 'application/gzip',
-    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Content-Disposition': safeContentDisposition(filename),
     'Content-Length': compressed.length,
   });
   res.send(compressed);
@@ -2562,7 +2833,7 @@ app.delete('/api/activity/entries/:id', authMiddleware, (req, res) => {
 app.post('/api/auth/totp/setup-qr', (req, res) => {
   const { setup_token } = req.body;
   if (!setup_token) return res.status(400).json({ error: 'setup_token requis' });
-  let p; try { p = jwt.verify(setup_token, JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
+  let p; try { p = jwt.verify(setup_token, JWT_SECRET, { algorithms: [JWT_ALG] }); } catch { return res.status(401).json({ error: 'Token expiré' }); }
   if (!p.totp_setup_required) return res.status(403).json({ error: 'Non autorisé' });
   const db = getDb();
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(p.id);
@@ -2579,7 +2850,7 @@ app.post('/api/auth/totp/setup-verify', (req, res) => {
   const { setup_token, totp_token } = req.body;
   if (!setup_token || !totp_token) return res.status(400).json({ error: 'Champs requis' });
   const db = getDb(); const ip = getClientIp(req);
-  let p; try { p = jwt.verify(setup_token, JWT_SECRET); } catch { return res.status(401).json({ error: 'Token expiré' }); }
+  let p; try { p = jwt.verify(setup_token, JWT_SECRET, { algorithms: [JWT_ALG] }); } catch { return res.status(401).json({ error: 'Token expiré' }); }
   if (!p.totp_setup_required) return res.status(403).json({ error: 'Non autorisé' });
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(p.id);
   if (!user) return res.status(404).json({ error: 'Introuvable' });
@@ -2588,7 +2859,7 @@ app.post('/api/auth/totp/setup-verify', (req, res) => {
   db.prepare('UPDATE users SET totp_enabled=1, failed_attempts=0, locked_until=NULL, last_login_at=? WHERE id=?').run(nowLocal(), user.id);
   const tok = jwt.sign(
     { id: user.id, username: user.username, displayName: user.display_name, email: user.email, role: user.role, permissions: user.permissions || '{}', mustChangePassword: user.must_change_password === 1 },
-    JWT_SECRET, { expiresIn: '8h' }
+    JWT_SECRET, { expiresIn: '8h', algorithm: JWT_ALG }
   );
   audit(db, { userId: user.id, username: user.username, action: 'TOTP_CONFIGURE', category: 'auth', severity: 'info', detail: 'TOTP configuré et activé', ip, success: 1 });
   res.json({ token: tok, mustChangePassword: user.must_change_password === 1 });
@@ -2647,12 +2918,22 @@ app.get('/api/activity/files/:id/download', authMiddleware, (req, res) => {
   const db=getDb(); const ip=getClientIp(req);
   const row=db.prepare('SELECT * FROM activity_files WHERE id=?').get(req.params.id);
   if (!row) return res.status(404).json({error:'Fichier introuvable'});
+  // Contrôle d'accès : propriétaire de l'entrée OU permission activity_read.
+  // Sans ce contrôle, n'importe quel utilisateur authentifié pourrait
+  // énumérer les fichiers des autres en incrémentant l'identifiant (IDOR).
+  const entry = db.prepare('SELECT user_id FROM activity_entries WHERE id=?').get(row.entry_id);
+  const isOwner = entry && entry.user_id === req.user.id;
+  if (!isOwner && !checkActivityReadPerm(req)) {
+    audit(db,{userId:req.user.id,username:req.user.username,action:'ACCÈS_REFUSÉ',category:'sécurité',severity:'warn',detail:`Tentative de téléchargement du fichier d'activité #${row.id} sans autorisation`,ip,success:0});
+    return res.status(403).json({error:'Permission insuffisante'});
+  }
   const fname=decrypt(row.filename);
   const buf=Buffer.from(decrypt(row.data),'base64');
   // Audit global
   audit(db,{userId:req.user.id,username:req.user.username,action:'FICHIER_TELECHARGE',category:'activity',severity:'info',detail:`Note #${row.entry_id} — ${fname}`,ip,success:1});
-  res.setHeader('Content-Disposition','attachment; filename="'+fname+'"');
-  res.setHeader('Content-Type',row.mimetype);
+  res.setHeader('Content-Disposition',safeContentDisposition(fname));
+  res.setHeader('Content-Type',row.mimetype || 'application/octet-stream');
+  res.setHeader('X-Content-Type-Options','nosniff');
   res.send(buf);
 });
 
@@ -3055,14 +3336,15 @@ app.post('/api/automation/documents/:id/files', authMiddleware, requirePerm('aut
 });
 
 // Télécharger un fichier joint
-app.get('/api/automation/files/:id/download', authMiddleware, (req, res) => {
+app.get('/api/automation/files/:id/download', authMiddleware, requirePerm('automatisation_read'), (req, res) => {
   const db = getDb(); const ip = getClientIp(req);
   const row = db.prepare(`SELECT f.*, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Introuvable' });
   audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_TÉLÉCHARGÉ', category: 'automatisation', severity: 'info',
     detail: `"${row.filename}" (doc: "${row.doc_name}")`, ip, success: 1, ref_id: row.document_id });
-  res.setHeader('Content-Disposition', `attachment; filename="${row.filename}"`);
+  res.setHeader('Content-Disposition', safeContentDisposition(row.filename));
   res.setHeader('Content-Type', row.mimetype || 'application/octet-stream');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.send(Buffer.from(row.data));
 });
 

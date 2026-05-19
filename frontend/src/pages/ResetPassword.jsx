@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api.js';
 import { useI18n } from '../contexts/I18nContext.jsx';
-
-const APP_VERSION = '2026-04-24_b50.144';
+import { APP_VERSION } from '../version.js';
 
 export default function ResetPassword() {
   const { t } = useI18n();

@@ -1,4 +1,88 @@
 const { Client } = require('ssh2');
+const crypto = require('crypto');
+
+// ── Vérification de clé d'hôte SSH — mode TOFU (Trust On First Use) ─────────
+// Au premier contact avec un équipement, l'empreinte de sa clé d'hôte est
+// enregistrée. Aux connexions suivantes, toute empreinte différente fait
+// échouer la connexion : cela détecte un éventuel détournement (MITM) ou un
+// remplacement non annoncé de l'équipement.
+//
+// Variable d'environnement SSH_TOFU :
+//   'enforce' (défaut) → empreinte différente = connexion refusée
+//   'permissive'       → empreinte différente = avertissement, connexion permise
+//   'off'              → aucune vérification (déconseillé)
+const SSH_TOFU_MODE = (process.env.SSH_TOFU || 'enforce').toLowerCase();
+
+function getKnownHostsDb() {
+  // Chargement paresseux pour éviter une dépendance circulaire avec db.js
+  const { getDb } = require('./db');
+  const db = getDb();
+  db.exec(`CREATE TABLE IF NOT EXISTS ssh_known_hosts (
+    host_key TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    key_type TEXT,
+    first_seen TEXT DEFAULT (datetime('now','localtime')),
+    last_seen TEXT
+  )`);
+  return db;
+}
+
+function fingerprintOf(keyBuffer) {
+  return crypto.createHash('sha256').update(keyBuffer).digest('base64');
+}
+
+/**
+ * Construit le hostVerifier pour une cible donnée.
+ * @returns {{ verifier: function, getResult: function }}
+ */
+function makeHostVerifier(hostKey) {
+  let result = { status: 'unknown', detail: '' };
+  const verifier = (keyBuffer) => {
+    const fp = fingerprintOf(keyBuffer);
+    if (SSH_TOFU_MODE === 'off') {
+      result = { status: 'skipped', detail: 'Vérification désactivée (SSH_TOFU=off)' };
+      return true;
+    }
+    let db;
+    try { db = getKnownHostsDb(); }
+    catch (e) {
+      // En cas d'indisponibilité de la base, on n'aggrave pas : on laisse
+      // passer mais on le signale clairement.
+      result = { status: 'error', detail: `Base indisponible: ${e.message}` };
+      return true;
+    }
+    const known = db.prepare('SELECT fingerprint FROM ssh_known_hosts WHERE host_key=?').get(hostKey);
+    if (!known) {
+      // Premier contact : on enregistre l'empreinte.
+      db.prepare('INSERT INTO ssh_known_hosts (host_key, fingerprint, last_seen) VALUES (?,?,datetime(\'now\',\'localtime\'))')
+        .run(hostKey, fp);
+      result = { status: 'first_seen', detail: `Empreinte enregistrée: SHA256:${fp}` };
+      return true;
+    }
+    if (known.fingerprint === fp) {
+      db.prepare('UPDATE ssh_known_hosts SET last_seen=datetime(\'now\',\'localtime\') WHERE host_key=?').run(hostKey);
+      result = { status: 'match', detail: 'Empreinte connue, identique' };
+      return true;
+    }
+    // Empreinte différente : potentiel MITM ou changement d'équipement.
+    result = {
+      status: 'mismatch',
+      detail: `Empreinte INATTENDUE pour ${hostKey}. Attendue SHA256:${known.fingerprint}, reçue SHA256:${fp}`,
+    };
+    if (SSH_TOFU_MODE === 'permissive') return true;
+    return false; // mode enforce : connexion refusée
+  };
+  return { verifier, getResult: () => result };
+}
+
+/**
+ * Réinitialise l'empreinte connue d'un hôte (à utiliser après un
+ * remplacement légitime d'équipement). Exposé pour une route d'administration.
+ */
+function forgetHostKey(host, port = 22) {
+  const db = getKnownHostsDb();
+  return db.prepare('DELETE FROM ssh_known_hosts WHERE host_key=?').run(`${host}:${port}`).changes;
+}
 
 /**
  * Exécute une commande SSH sur un équipement réseau.
@@ -9,6 +93,8 @@ function sshExec({ host, port = 22, username, password, privateKey, command, tim
     const conn = new Client();
     let output = '';
     let timedOut = false;
+    const hostKey = `${host}:${parseInt(port, 10)}`;
+    const { verifier, getResult } = makeHostVerifier(hostKey);
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -100,6 +186,13 @@ function sshExec({ host, port = 22, username, password, privateKey, command, tim
     conn.on('error', (err) => {
       if (timedOut) return;
       clearTimeout(timer);
+      const r = getResult();
+      if (r.status === 'mismatch') {
+        // ssh2 rejette la connexion quand le hostVerifier renvoie false ;
+        // on remonte un message explicite plutôt qu'une erreur générique.
+        return reject(new Error(`Clé d'hôte SSH non vérifiée (${hostKey}): ${r.detail}. `
+          + `Si l'équipement a été remplacé volontairement, réinitialisez son empreinte.`));
+      }
       reject(new Error(`Connexion SSH échouée (${host}:${port}): ${err.message}`));
     });
 
@@ -108,26 +201,32 @@ function sshExec({ host, port = 22, username, password, privateKey, command, tim
       port: parseInt(port, 10),
       username,
       readyTimeout: timeout,
-      hostVerifier: () => true,
+      hostVerifier: verifier,
       algorithms: {
         kex: [
-          'diffie-hellman-group14-sha256',
-          'diffie-hellman-group14-sha1',
-          'diffie-hellman-group1-sha1',
+          // Algorithmes d'échange de clés modernes en priorité.
+          'curve25519-sha256',
+          'curve25519-sha256@libssh.org',
           'ecdh-sha2-nistp256',
           'ecdh-sha2-nistp384',
           'ecdh-sha2-nistp521',
-          'curve25519-sha256',
-          'curve25519-sha256@libssh.org',
+          'diffie-hellman-group14-sha256',
+          // group14-sha1 conservé pour les équipements réseau anciens ;
+          // group1-sha1 retiré (trop faible).
+          'diffie-hellman-group14-sha1',
         ],
         cipher: [
-          'aes128-ctr', 'aes192-ctr', 'aes256-ctr',
-          'aes128-gcm', 'aes256-gcm',
-          '3des-cbc', 'aes128-cbc',
+          // Chiffrements AEAD et CTR uniquement. 3des-cbc et aes128-cbc
+          // (CBC, sans authentification) retirés.
+          'aes256-gcm', 'aes128-gcm',
+          'aes256-ctr', 'aes192-ctr', 'aes128-ctr',
         ],
         serverHostKey: [
-          'ssh-rsa', 'ssh-dss', 'ecdsa-sha2-nistp256',
-          'ssh-ed25519', 'rsa-sha2-256', 'rsa-sha2-512',
+          // ssh-dss (DSA) retiré : clés 1024 bits, obsolète.
+          'ssh-ed25519',
+          'rsa-sha2-512', 'rsa-sha2-256',
+          'ecdsa-sha2-nistp256',
+          'ssh-rsa',
         ],
       },
     };
@@ -194,4 +293,4 @@ function cleanOutput(raw) {
   return filtered.join('\n').trim();
 }
 
-module.exports = { sshExec };
+module.exports = { sshExec, forgetHostKey };

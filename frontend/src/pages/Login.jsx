@@ -123,16 +123,21 @@ export default function Login() {
     if (!code) return;
     // Nettoyer l'URL immédiatement pour éviter re-soumission sur refresh
     window.history.replaceState({}, '', window.location.pathname);
-    // Vérifier le state anti-CSRF
+    // Vérifier le state anti-CSRF — strict : un state attendu DOIT être
+    // présent et correspondre. Son absence est un échec, pas un contournement.
     const savedState = sessionStorage.getItem('oidc_state');
-    if (state && savedState && state !== savedState) {
-      setError('Erreur de sécurité OIDC (state mismatch). Réessayez.');
+    const savedNonce = sessionStorage.getItem('oidc_nonce');
+    if (!savedState || !state || state !== savedState) {
+      sessionStorage.removeItem('oidc_state');
+      sessionStorage.removeItem('oidc_nonce');
+      setError('Erreur de sécurité OIDC (state invalide). Réessayez.');
       return;
     }
     sessionStorage.removeItem('oidc_state');
+    sessionStorage.removeItem('oidc_nonce');
     setLoading(true); setError('');
     const redirectUri = window.location.origin + '/login';
-    api.oidcExchange({ code, redirect_uri: redirectUri })
+    api.oidcExchange({ code, redirect_uri: redirectUri, nonce: savedNonce || '' })
       .then(res => {
         const payload = JSON.parse(atob(res.token.split('.')[1]));
         if (payload.mustChangePassword) {
@@ -150,18 +155,28 @@ export default function Login() {
       });
   }, []); // s'exécute une seule fois au montage — window.location.search est lu synchroniquement
 
+  // Génère une valeur aléatoire cryptographiquement sûre (URL-safe).
+  function randomToken() {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  }
+
   function redirectToOidc(cfg) {
     const authEndpoint = cfg.authorization_endpoint || '';
     if (!authEndpoint || !cfg.client_id) return;
     const redirectUri = window.location.origin + '/login';
-    const state = btoa(Math.random().toString(36).slice(2));
+    const state = randomToken();
+    const nonce = randomToken();
     sessionStorage.setItem('oidc_state', state);
+    sessionStorage.setItem('oidc_nonce', nonce);
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: cfg.client_id,
       redirect_uri: redirectUri,
       scope: cfg.scopes || 'openid email profile',
       state,
+      nonce,
     });
     window.location.href = authEndpoint + '?' + params.toString();
   }
@@ -288,8 +303,6 @@ export default function Login() {
                 onMouseEnter={e=>e.target.style.color='var(--acc)'} onMouseLeave={e=>e.target.style.color='var(--muted)'}
                 onClick={() => setShowForgot(true)}>{t('auth.forgot_link')}</button>
             </div>
-            {/* Version */}
-            <div style={{textAlign:'center', marginTop:24, fontSize:12, color:'var(--muted)', fontWeight:500, letterSpacing:'.2px', marginBottom:0}}>
             {/* OIDC button */}
             {oidc?.enabled && (
               <div style={{marginTop:16, textAlign:'center'}}>
@@ -309,6 +322,8 @@ export default function Login() {
                 </button>
               </div>
             )}
+            {/* Version — ligne vide de séparation avec le bouton SSO */}
+            <div style={{textAlign:'center', marginTop:24, fontSize:12, color:'var(--muted)', fontWeight:500, letterSpacing:'.2px'}}>
               {APP_VERSION}
             </div>
           </div>

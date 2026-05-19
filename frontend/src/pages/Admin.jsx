@@ -2421,11 +2421,6 @@ function SecurityOidcTab() {
             {t('security.oidc_desc') || 'OIDC authentication complements local authentication. Local accounts remain active.'}tes locaux restent accessibles même si OIDC est activé.
           </div>
 
-        </div>
-      </div>
-
-      <div className="card">
-        <div style={{ padding: 20 }}>
           <form onSubmit={save}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
               {field('provider_name', t('security.oidc_provider') || 'Nom du fournisseur', 'text', 'Keycloak, Authentik, Azure…')}
@@ -2448,7 +2443,9 @@ function SecurityOidcTab() {
                 {t('security.oidc_endpoints_hint') || 'Leave empty to auto-detect from Issuer URL'}
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+
+            {/* 3 options sur la même ligne en 3 colonnes égales */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 14 }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', padding: '8px 10px', borderRadius: 'var(--r)', background: cfg.auto_create_users ? 'var(--acc-s)' : 'var(--surf2)', border: `1px solid ${cfg.auto_create_users ? 'var(--acc)' : 'var(--brd)'}` }}>
                 <input type="checkbox" checked={cfg.auto_create_users} style={{ marginTop: 2, accentColor: 'var(--acc)' }}
                   onChange={e => setCfg(c => ({ ...c, auto_create_users: e.target.checked }))} />
@@ -2464,15 +2461,8 @@ function SecurityOidcTab() {
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{t('security.oidc_allow_local_desc') || 'Users can still log in with local credentials'}</div>
                 </div>
               </label>
-            </div>
-            {cfg.enabled && cfg.allow_local_login === false && (
-              <div className="alert alert-warn" style={{ marginBottom: 14, fontSize: 12 }}>
-                {t('security.oidc_no_local_warn') || 'Local login disabled: login page will redirect to SSO automatically.'}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', justifyContent: 'space-between' }}>
-              <div className="form-group" style={{ margin: 0, flex: 1 }}>
-                <label className="form-label">{t('security.default_role') || 'Default role'}</label>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">{t('security.default_role') || 'Default role'} ({t('security.oidc_new_users') || 'nouveaux utilisateurs'})</label>
                 <select className="form-control" value={cfg.default_role}
                   onChange={e => setCfg(c => ({ ...c, default_role: e.target.value }))}>
                   <option value="viewer">{t('users.role_viewer') || 'Lecteur'}</option>
@@ -2480,7 +2470,15 @@ function SecurityOidcTab() {
                   <option value="admin">{t('users.role_admin')}</option>
                 </select>
               </div>
-              <button type="submit" className="btn btn-primary" disabled={saving} style={{ flexShrink: 0 }}>
+            </div>
+
+            {cfg.enabled && cfg.allow_local_login === false && (
+              <div className="alert alert-warn" style={{ marginBottom: 14, fontSize: 12 }}>
+                {t('security.oidc_no_local_warn') || 'Local login disabled: login page will redirect to SSO automatically.'}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="submit" className="btn btn-primary" disabled={saving}>
                 {saving ? (t('common.saving') || 'Saving…') : (t('auto_cat.save') || 'Save')}
               </button>
             </div>
