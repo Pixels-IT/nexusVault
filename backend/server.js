@@ -943,7 +943,6 @@ app.post('/api/oidc/exchange', oidcRateLimit, (req, res) => {
       if (user.locked || user.enabled === 0) return res.status(403).json({ error: 'Compte verrouillé ou désactivé' });
 
       // 4. Issue JWT
-      const jwt = require('jsonwebtoken');
       const perms = JSON.parse(user.permissions || '{}');
       const token = jwt.sign({
         id: user.id, username: user.username, role: user.role,
