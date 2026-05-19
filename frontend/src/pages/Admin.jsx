@@ -330,12 +330,7 @@ function AutomationCategoriesTab() {
                     </div>
                   </div>
                 </div>
-                {form.type === 'temporary' && (
-                  <div className="form-group" style={{margin:0}}>
-                    <label className="form-label">{t('automatisation.doc_validity_opt') || 'Expiry date'}</label>
-                    <input type="date" className="form-control" value={form.valid_until} onChange={e=>setForm(f=>({...f,valid_until:e.target.value}))} />
-                  </div>
-                )}
+                {/* La date de fin de validité est gérée au niveau du document, pas de la catégorie */}
               </div>
               {error && <div className="alert alert-err" style={{fontSize:12}}>{error}</div>}
             </form>
@@ -923,10 +918,11 @@ const PERM_DEFS = [
     section: 'Administration',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
     perms: [
-      { key: 'audit_access',    label: "Accès au journal d'audit" },
-      { key: 'audit_archive',   label: "Accès aux archives d'audit" },
-      { key: 'security_access', label: "Accès à Sécurité" },
-      { key: 'retention_access', label: "Accès à la rétention" },
+      { key: 'audit_access',      label: "Accès au journal d'audit" },
+      { key: 'audit_archive',     label: "Accès aux archives d'audit" },
+      { key: 'security_access',   label: "Accès à Sécurité" },
+      { key: 'retention_access',  label: "Accès à la rétention" },
+      { key: 'site_backup_access', label: "Accès au backup du site" },
     ],
   },
 ];
@@ -1294,10 +1290,6 @@ function SecurityGeneralTab() {
   const [timeout, setTimeout_] = useState('30');
   const [saving, setSaving]     = useState(false);
   const [msg, setMsg]           = useState('');
-  const [rows, setRows]         = useState([]);
-  const [form, setForm]         = useState({ value: '', label: '', type: 'ip' });
-  const [wlError, setWlError]   = useState('');
-  const [confirm, setConfirm]   = useState(null);
   const [appUrl, setAppUrl]       = useState('');
   const [urlSaving, setUrlSaving] = useState(false);
   const [urlMsg, setUrlMsg]       = useState('');
@@ -1310,11 +1302,6 @@ function SecurityGeneralTab() {
     api.getSettings().then(s => setTimeout_(s.session_timeout_minutes || '30')).catch(() => {});
     api.smtpConfig().then(s => setAppUrl(s.app_url || '')).catch(() => {});
     api.bruteConfig().then(cfg => { setBruteMax(String(cfg.max || 5)); setBruteWin(String(Math.round((cfg.window||600)/60))); }).catch(() => {});
-  }, []);
-
-  const loadWl = () => api.whitelist().then(setRows).catch(() => {});
-  useEffect(() => {
-    loadWl();
   }, []);
 
 
@@ -1345,18 +1332,6 @@ function SecurityGeneralTab() {
     try { await api.updateSettings({ session_timeout_minutes: parseInt(timeout) }); setMsg('Enregistré.'); }
     catch (e) { setMsg('Erreur : ' + e.message); }
     finally { setSaving(false); }
-  }
-
-  async function addRule(e) {
-    e.preventDefault(); setWlError('');
-    if (!form.value) return setWlError('Valeur requise');
-    try { await api.createWhitelist(form); setForm({ value: '', label: '', type: 'ip' }); loadWl(); }
-    catch (err) { setWlError(err.message); }
-  }
-
-  async function toggleRule(r) {
-    await api.updateWhitelist(r.id, { ...r, enabled: !r.enabled });
-    loadWl();
   }
 
   return (
@@ -1463,61 +1438,90 @@ function SecurityGeneralTab() {
 
       </div>
 
-      {/* Rétention */}
-      <RetentionCard />
-
-      {/* Liste d'accès */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-            {t('security.whitelist') || 'IP / URL access list'}
-          </div>
-        </div>
-        <div style={{ padding: 16 }}>
-          <div className="alert alert-warn" style={{ marginBottom: 14, justifyContent: 'center', textAlign: 'center' }}>
-            {t('security.whitelist_desc') || 'Empty list = all access allowed. Once a rule is active, only '}les adresses listées peuvent accéder.
-          </div>
-          {wlError && <div className="alert alert-err">{wlError}</div>}
-          <form onSubmit={addRule} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-            <select className="form-control" style={{ width: 90 }} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
-              <option value="ip">IP</option>
-              <option value="url">URL</option>
-            </select>
-            <input className="form-control" style={{ flex: 1, minWidth: 160 }} value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))} placeholder={form.type === 'ip' ? '192.168.1.0' : 'https://mon-domaine.com'} />
-            <input className="form-control" style={{ flex: 1, minWidth: 120 }} value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="Description (optionnel)" />
-            <button className="btn btn-primary" type="submit">{t('auto_cat.add')}</button>
-          </form>
-          <table>
-            <thead><tr><th>{t('auto_cat.col_type')}</th><th>Valeur</th><th>Label</th><th>Statut</th><th>{t('common.added_on') || 'Added on'}</th><th></th></tr></thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.id}>
-                  <td><span className={`badge ${r.type === 'ip' ? 'badge-info' : 'badge-warn'}`}>{r.type.toUpperCase()}</span></td>
-                  <td><span className="cell-mono">{r.value}</span></td>
-                  <td className="cell-sub">{r.label}</td>
-                  <td>
-                    <button onClick={() => toggleRule(r)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-                      {r.enabled
-                        ? <span className="badge badge-ok"><span className="dot dot-ok"/>{t('users.enabled')}</span>
-                        : <span className="badge badge-muted"><span className="dot dot-muted"/>Inactif</span>}
-                    </button>
-                  </td>
-                  <td className="cell-sub">{r.created_at?.slice(0, 10)}</td>
-                  <td><button className="btn btn-sm btn-danger" onClick={() => setConfirm(r)}>Suppr.</button></td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>{t('security.no_rules') || 'No rules'}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* Rétention 50% + Liste d'accès IP 50% — même ligne */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+        <RetentionCard />
+        <WhitelistCard />
       </div>
 
+      {/* Sauvegarde des données */}
+      <DbBackupCard />
 
+    </div>
+  );
+}
+
+
+// ── WHITELIST CARD (extraite pour layout 50/50) ──────────────────────────────
+function WhitelistCard() {
+  const { t } = useI18n();
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ type: 'ip', value: '', label: '' });
+  const [confirm, setConfirm] = useState(null);
+  const [wlError, setWlError] = useState('');
+  const loadWl = () => api.whitelist().then(setRows).catch(() => {});
+  useEffect(() => { loadWl(); }, []);
+
+  async function addRule(e) {
+    e.preventDefault(); setWlError('');
+    if (!form.value.trim()) { setWlError('Valeur requise'); return; }
+    try { await api.addWhitelist(form); setForm({ type: 'ip', value: '', label: '' }); loadWl(); }
+    catch (ex) { setWlError(ex.message || 'Erreur'); }
+  }
+  async function toggleRule(r) {
+    await api.updateWhitelist(r.id, { ...r, enabled: r.enabled ? 0 : 1 }); loadWl();
+  }
+
+  return (
+    <div className="card" style={{ height: '100%' }}>
+      <div className="card-header">
+        <div className="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          {t('security.whitelist') || "Liste d'accès IP / URL"}
+        </div>
+      </div>
+      <div style={{ padding: 16 }}>
+        <div className="alert alert-warn" style={{ marginBottom: 14, justifyContent: 'center', textAlign: 'center', fontSize: 12 }}>
+          {t('security.whitelist_desc') || "Liste vide = tout accès autorisé. Dès qu'une règle est active, seules "}les adresses listées peuvent accéder.
+        </div>
+        {wlError && <div className="alert alert-err">{wlError}</div>}
+        <form onSubmit={addRule} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <select className="form-control" style={{ width: 90 }} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+            <option value="ip">IP</option>
+            <option value="url">URL</option>
+          </select>
+          <input className="form-control" style={{ flex: 1, minWidth: 120 }} value={form.value}
+            onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
+            placeholder={form.type === 'ip' ? '192.168.1.0' : 'https://mon-domaine.com'} />
+          <input className="form-control" style={{ flex: 1, minWidth: 100 }} value={form.label}
+            onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="Description (opt.)" />
+          <button className="btn btn-primary" type="submit">{t('auto_cat.add')}</button>
+        </form>
+        <table>
+          <thead><tr><th>{t('auto_cat.col_type')}</th><th>Valeur</th><th>Statut</th><th></th></tr></thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id}>
+                <td><span className={`badge ${r.type === 'ip' ? 'badge-info' : 'badge-warn'}`}>{r.type.toUpperCase()}</span></td>
+                <td><span className="cell-mono" style={{ fontSize: 11 }}>{r.value}</span></td>
+                <td>
+                  <button onClick={() => toggleRule(r)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                    {r.enabled
+                      ? <span className="badge badge-ok"><span className="dot dot-ok"/>{t('users.enabled')}</span>
+                      : <span className="badge badge-muted"><span className="dot dot-muted"/>Inactif</span>}
+                  </button>
+                </td>
+                <td><button className="btn btn-sm btn-danger" onClick={() => setConfirm(r)}>Suppr.</button></td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>{t('security.no_rules') || 'Aucune règle'}</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       {confirm && <ConfirmModal message={`Supprimer la règle "${confirm.value}" ?`}
         onConfirm={async () => { await api.deleteWhitelist(confirm.id); setConfirm(null); loadWl(); }}
         onCancel={() => setConfirm(null)} />}
@@ -1527,6 +1531,359 @@ function SecurityGeneralTab() {
 
 
 
+
+// ── DB BACKUP CARD ───────────────────────────────────────────────────────────
+const DB_BACKUP_RETENTION_OPTIONS = [1,2,3,5,7,10,14,21,30];
+const DB_BACKUP_HOURS = Array.from({length:24},(_,i)=>i);
+const DB_BACKUP_MINUTES = [0,5,10,15,20,25,30,35,40,45,50,55];
+
+function DbBackupCard() {
+  const { t } = useI18n();
+  const { can } = usePerms();
+  if (!can('site_backup_access')) return null;
+
+  const [files, setFiles]             = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [showModal, setShowModal]     = useState(false);
+  const [triggering, setTriggering]   = useState(false);
+  const [triggerMsg, setTriggerMsg]   = useState('');
+  const [downloading, setDownloading] = useState(null);
+  const [deleting, setDeleting]       = useState(null);
+  const [confirmDel, setConfirmDel]   = useState(null);
+  const [restoring, setRestoring]     = useState(false);
+  const [restoreMsg, setRestoreMsg]   = useState('');
+  const [backupPassword, setBackupPassword] = useState(''); // mot de passe config
+  const [dlPasswordFor, setDlPasswordFor]   = useState(null); // filename demandant le mdp pour dl
+  const [dlPasswordInput, setDlPasswordInput] = useState('');
+  const fileInputRef = useRef(null);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([
+      api.dbBackups().catch(() => []),
+      api.dbBackupConfig().catch(() => ({})),
+    ]).then(([f, cfg]) => {
+      setFiles(f);
+      setBackupPassword(cfg.backup_password || '');
+    }).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  async function triggerNow() {
+    setTriggering(true); setTriggerMsg('');
+    try { await api.dbBackupTrigger(backupPassword ? { password: backupPassword } : undefined); setTriggerMsg('Sauvegarde effectuée.'); load(); }
+    catch (e) { setTriggerMsg('Erreur : ' + e.message); }
+    finally { setTriggering(false); }
+  }
+
+  async function download(filename, pwdOverride) {
+    if (filename.endsWith('.enc') && !pwdOverride) {
+      // Si le mot de passe config est déjà connu, l'utiliser directement
+      if (backupPassword && backupPassword.length >= 14) {
+        return download(filename, backupPassword);
+      }
+      // Sinon demander via le mini-modal
+      setDlPasswordFor(filename); setDlPasswordInput('');
+      return;
+    }
+    setDownloading(filename);
+    try {
+      const blob = await api.dbBackupDownload(filename, pwdOverride || undefined);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename.replace('.enc','');
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setDlPasswordFor(null); setDlPasswordInput('');
+    } catch (e) { alert('Erreur téléchargement : ' + e.message); }
+    finally { setDownloading(null); }
+  }
+
+  async function deleteBackup(filename) {
+    setDeleting(filename); setConfirmDel(null);
+    try { await api.dbBackupDelete(filename); load(); }
+    catch (e) { alert('Erreur suppression : ' + e.message); }
+    finally { setDeleting(null); }
+  }
+
+  function openRestore() { fileInputRef.current?.click(); }
+
+  async function handleRestoreFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    if (!file.name.endsWith('.sqlite') && !file.name.endsWith('.sqlite.enc')) {
+      setRestoreMsg("Fichier invalide — sélectionnez un .sqlite ou .sqlite.enc"); return;
+    }
+    // Si fichier chiffré, vérifier qu'on a un mot de passe
+    const isEnc = file.name.endsWith('.enc');
+    let restorePwd = isEnc ? (backupPassword || '') : '';
+    if (isEnc && (!restorePwd || restorePwd.length < 14)) {
+      const entered = window.prompt('Ce fichier est chiffré. Entrez le mot de passe de déchiffrement (min. 14 caractères) :');
+      if (!entered || entered.length < 14) { setRestoreMsg('Mot de passe requis pour restaurer un fichier chiffré.'); return; }
+      restorePwd = entered;
+    }
+    if (!window.confirm(`⚠️ Restaurer la base depuis "${file.name}" ?\n\nUne sauvegarde de sécurité sera créée automatiquement. Cette action est irréversible.`)) return;
+    setRestoring(true); setRestoreMsg('');
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(',')[1]);
+        r.onerror = () => rej(new Error('Lecture échouée'));
+        r.readAsDataURL(file);
+      });
+      await api.dbBackupRestore({ data: base64, filename: file.name, password: restorePwd || undefined });
+      setRestoreMsg('Base restaurée. Rechargement…');
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e) { setRestoreMsg('Erreur : ' + e.message); }
+    finally { setRestoring(false); }
+  }
+
+  const fmtSize = b => b >= 1048576 ? (b/1048576).toFixed(1)+' Mo' : b >= 1024 ? (b/1024).toFixed(0)+' Ko' : b+' o';
+
+  return (
+    <div className="card">
+      <input ref={fileInputRef} type="file" accept=".sqlite,.sqlite.enc" style={{ display:'none' }} onChange={handleRestoreFile} />
+      <div className="card-header">
+        <div className="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:15, height:15 }}>
+            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+          Sauvegarde des données
+        </div>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          <button className="btn" onClick={openRestore} disabled={restoring}
+            style={{ display:'flex', alignItems:'center', gap:6, borderColor:'var(--err)', color:'var(--err)' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:14, height:14 }}>
+              <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/>
+            </svg>
+            {restoring ? 'Restauration…' : 'Restaurer'}
+          </button>
+          <button className="btn" onClick={triggerNow} disabled={triggering}
+            style={{ display:'flex', alignItems:'center', gap:6, borderColor:'#f97316', color:'#f97316' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:14, height:14 }}>
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+            </svg>
+            {triggering ? 'Sauvegarde…' : 'Sauvegarder'}
+          </button>
+          <button className="btn" onClick={() => setShowModal(true)}
+            style={{ display:'flex', alignItems:'center', gap:6, borderColor:'var(--acc)', color:'var(--acc)' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:14, height:14 }}>
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/>
+              <line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/>
+            </svg>
+            Planification
+          </button>
+        </div>
+      </div>
+      <div style={{ padding:16 }}>
+        {(triggerMsg || restoreMsg) && (
+          <div className={`alert alert-${(triggerMsg||restoreMsg).startsWith('Err') ? 'err' : 'ok'}`}
+            style={{ marginBottom:12, fontSize:12 }}>
+            {triggerMsg || restoreMsg}
+          </div>
+        )}
+        {loading
+          ? <div style={{ textAlign:'center', padding:32, color:'var(--muted)' }}>Chargement…</div>
+          : files.length === 0
+            ? <div style={{ textAlign:'center', padding:32, color:'var(--muted)', fontSize:13 }}>Aucune sauvegarde disponible.</div>
+            : (
+              <table style={{ width:'100%' }}>
+                <thead><tr><th>Fichier</th><th>Date</th><th>Taille</th><th></th></tr></thead>
+                <tbody>
+                  {files.map(f => (
+                    <tr key={f.filename}>
+                      <td>
+                        <span className="cell-mono" style={{ fontSize:11 }}>{f.filename}</span>
+                        {f.encrypted && (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                            style={{ width:11, height:11, marginLeft:5, color:'var(--ok)', verticalAlign:'middle' }}
+                            title="Chiffré AES-256-GCM">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                          </svg>
+                        )}
+                      </td>
+                      <td className="cell-sub">{f.created_at}</td>
+                      <td className="cell-sub">{fmtSize(f.size)}</td>
+                      <td style={{ textAlign:'right', whiteSpace:'nowrap', display:'flex', gap:6, justifyContent:'flex-end' }}>
+                        <button className="btn btn-sm" onClick={() => download(f.filename)}
+                          disabled={downloading === f.filename}
+                          style={{ borderColor:'var(--ok)', color:'var(--ok)', display:'inline-flex', alignItems:'center', gap:4 }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:12, height:12 }}>
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                          </svg>
+                          {downloading === f.filename ? '…' : 'Télécharger'}
+                        </button>
+                        <button className="btn btn-sm btn-danger" onClick={() => setConfirmDel(f.filename)}
+                          disabled={deleting === f.filename}>
+                          {deleting === f.filename ? '…' : '✕'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+        }
+      </div>
+      {showModal && <DbBackupScheduleModal onClose={() => setShowModal(false)} />}
+      {/* Mini-modal mot de passe pour téléchargement d'un fichier chiffré */}
+      {dlPasswordFor && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1300 }}
+          onClick={() => setDlPasswordFor(null)}>
+          <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', padding:24, width:360, boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight:700, marginBottom:8, display:'flex', alignItems:'center', gap:8 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:16, height:16, color:'var(--ok)' }}>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              Fichier chiffré — mot de passe requis
+            </div>
+            <p style={{ fontSize:12, color:'var(--muted)', marginBottom:12 }}>
+              Ce fichier est chiffré. Entrez le mot de passe configuré lors de la sauvegarde.
+            </p>
+            <input className="form-control" type="password" autoFocus
+              placeholder="Mot de passe (min. 14 caractères)"
+              value={dlPasswordInput}
+              onChange={e => setDlPasswordInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && dlPasswordInput.length >= 14 && download(dlPasswordFor, dlPasswordInput)}
+              style={{ marginBottom:12 }} />
+            <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+              <button className="btn btn-primary" disabled={dlPasswordInput.length < 14}
+                onClick={() => download(dlPasswordFor, dlPasswordInput)}>
+                Télécharger
+              </button>
+              <button className="btn" onClick={() => setDlPasswordFor(null)}>Annuler</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmDel && (
+        <ConfirmModal
+          message={`Supprimer la sauvegarde "${confirmDel}" ?\nCette action est irréversible.`}
+          onConfirm={() => deleteBackup(confirmDel)}
+          onCancel={() => setConfirmDel(null)} />
+      )}
+    </div>
+  );
+}
+
+function DbBackupScheduleModal({ onClose }) {
+  const [cfg, setCfg]       = useState({ frequency:'daily', hour:'2', minute:'0', retention_count:'7', backup_password:'' });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg]       = useState('');
+  const [showPwd, setShowPwd] = useState(false);
+
+  useEffect(() => {
+    api.dbBackupConfig().then(d => setCfg(c => ({ ...c, ...d, backup_password: d.backup_password || '' }))).catch(() => {});
+  }, []);
+
+  async function save() {
+    if (cfg.backup_password && cfg.backup_password.length < 14) {
+      setMsg('Erreur : le mot de passe doit faire au moins 14 caractères.');
+      return;
+    }
+    setSaving(true); setMsg('');
+    try { await api.dbBackupSaveConfig(cfg); setMsg('Planification enregistrée.'); }
+    catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1200 }}
+      onClick={onClose}>
+      <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', width:'100%', maxWidth:480, boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ padding:'16px 20px', borderBottom:'1px solid var(--brd)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ fontWeight:700, fontSize:15, display:'flex', alignItems:'center', gap:8 }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:16, height:16 }}>
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/>
+              <line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/>
+            </svg>
+            Planification des sauvegardes automatiques
+          </div>
+          <button className="btn btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ padding:20, display:'flex', flexDirection:'column', gap:16 }}>
+          {msg && <div className={`alert alert-${msg.startsWith('Err') ? 'err' : 'ok'}`} style={{ fontSize:12 }}>{msg}</div>}
+
+          <div className="form-group" style={{ margin:0 }}>
+            <label className="form-label">Fréquence</label>
+            <select className="form-control" value={cfg.frequency} onChange={e => setCfg(c => ({...c, frequency: e.target.value}))}>
+              <option value="daily">Quotidien</option>
+              <option value="weekly">Hebdomadaire</option>
+              <option value="monthly">Mensuel</option>
+            </select>
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div className="form-group" style={{ margin:0 }}>
+              <label className="form-label">Heure</label>
+              <select className="form-control" value={cfg.hour} onChange={e => setCfg(c => ({...c, hour: e.target.value}))}>
+                {DB_BACKUP_HOURS.map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}h</option>)}
+              </select>
+            </div>
+            <div className="form-group" style={{ margin:0 }}>
+              <label className="form-label">Minutes</label>
+              <select className="form-control" value={cfg.minute} onChange={e => setCfg(c => ({...c, minute: e.target.value}))}>
+                {DB_BACKUP_MINUTES.map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group" style={{ margin:0 }}>
+            <label className="form-label">Nombre de sauvegardes à conserver</label>
+            <select className="form-control" value={cfg.retention_count} onChange={e => setCfg(c => ({...c, retention_count: e.target.value}))}>
+              {DB_BACKUP_RETENTION_OPTIONS.map(n => <option key={n} value={n}>{n} sauvegarde{n>1?'s':''}</option>)}
+            </select>
+          </div>
+
+          {/* Mot de passe de chiffrement */}
+          <div className="form-group" style={{ margin:0 }}>
+            <label className="form-label" style={{ display:'flex', alignItems:'center', gap:6 }}>
+              Mot de passe de chiffrement / déchiffrement
+              <span style={{ fontWeight:400, fontSize:11, color:'var(--muted)' }}>— min. 14 caractères, optionnel</span>
+            </label>
+            <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+              <input className="form-control" type={showPwd ? 'text' : 'password'}
+                value={cfg.backup_password}
+                onChange={e => setCfg(c => ({...c, backup_password: e.target.value}))}
+                placeholder="Laisser vide = pas de chiffrement"
+                style={{ paddingRight:36 }} />
+              <button type="button" onClick={() => setShowPwd(v => !v)}
+                style={{ position:'absolute', right:8, background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:0 }}>
+                {showPwd
+                  ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                }
+              </button>
+            </div>
+            {cfg.backup_password && cfg.backup_password.length > 0 && cfg.backup_password.length < 14 && (
+              <div style={{ fontSize:11, color:'var(--err)', marginTop:4 }}>
+                Minimum 14 caractères ({cfg.backup_password.length}/14)
+              </div>
+            )}
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, lineHeight:1.5 }}>
+              Si renseigné, les fichiers de backup seront chiffrés en AES-256-GCM.
+              Conservez ce mot de passe en lieu sûr — sans lui, les backups chiffrés sont irrécupérables.
+            </div>
+          </div>
+
+          <div style={{ fontSize:11, color:'var(--muted)', background:'var(--surf2)', padding:'8px 12px', borderRadius:'var(--r)' }}>
+            Le backup utilise <code>VACUUM INTO</code> — cohérent sans interruption de service.
+          </div>
+        </div>
+        <div style={{ padding:'12px 20px', borderTop:'1px solid var(--brd)', display:'flex', justifyContent:'flex-end', gap:8 }}>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+          <button className="btn" onClick={onClose}>Fermer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── RETENTION CARD ──────────────────────────────────────────────────────────
 const RETENTION_DAYS = [0, 7, 15, 30, 60];
@@ -1741,7 +2098,7 @@ function RetentionModal({ onClose }) {
 
 // ── ONGLET NOTIFICATIONS ──────────────────────────────────────────────────────
 // Modals de configuration des canaux
-function SmtpModal({ onClose, onSaved, onValidated }) {
+function SmtpModal({ onClose, onSaved, onValidated, onReset }) {
   const { t } = useI18n();
   const [s, setS] = useState({ host:'', port:'587', secure:false, user:'', pass:'', from:'' });
   const [loading, setLoading]     = useState(true);
@@ -1771,7 +2128,7 @@ function SmtpModal({ onClose, onSaved, onValidated }) {
       onSaved('email');
       setMsg(t('notif.saved_msg'));
     } catch(e){setErr(e.message);} finally{setSaving(false);} };
-  const reset = async () => { setConfirmReset(false); try { await api.smtpSave({ host:'', port:587, secure:false, user:'', pass:'', from:'', app_url:'' }); setS({ host:'', port:'587', secure:false, user:'', pass:'', from:'' }); setValidated(false); setAwaitCode(false); setMsg(''); setHasExistingPass(false); } catch(e){setErr(e.message);} };
+  const reset = async () => { setConfirmReset(false); try { await api.smtpSave({ host:'', port:587, secure:false, user:'', pass:'', from:'', app_url:'' }); setS({ host:'', port:'587', secure:false, user:'', pass:'', from:'' }); setValidated(false); setAwaitCode(false); setMsg(''); setHasExistingPass(false); onReset?.(); } catch(e){setErr(e.message);} };
   const test = async () => { setTesting(true); setMsg(''); setErr(''); setAwaitCode(false); setCodeInput(''); setValidated(false);
     try { const r=await api.smtpTest(); setMsg(`Code envoyé à ${r.to} — entrez-le pour valider.`); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
   const validate = async () => { setErr('');
@@ -1832,7 +2189,7 @@ function SmtpModal({ onClose, onSaved, onValidated }) {
   );
 }
 
-function TelegramModal({ onClose, onSaved, onValidated }) {
+function TelegramModal({ onClose, onSaved, onValidated, onReset }) {
   const { t } = useI18n();
   const [awaitCode, setAwaitCode] = useState(false);
   const [codeInput, setCodeInput] = useState('');
@@ -1853,17 +2210,18 @@ function TelegramModal({ onClose, onSaved, onValidated }) {
   const test = async () => { setTesting(true); setMsg(''); setErr('');
     try { const r=await api.telegramTest(); setMsg(t('notif.code_sent') || 'Code envoyé — entrez-le pour valider.'); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message); setAwaitCode(false);} finally{setTesting(false);} };
   const validate = async () => { setErr(''); try { await api.telegramValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg(t('notif.validated_tg')); onValidated?.(); } catch(e){setErr(e.message);} };
+  const reset = async () => { setConfirmReset(false); try { await api.telegramSave({ bot_token:'', chat_id:'' }); setTg({ bot_token:'', chat_id:'' }); setValidated(false); setAwaitCode(false); setMsg(''); onReset?.(); } catch(e){setErr(e.message);} };
   return (
-    <Modal title="Configuration Telegram" onClose={onClose}
+    <Modal title={t('notif.telegram_config') || 'Configuration Telegram'} onClose={onClose}
       footer={
         <div style={{display:'flex',justifyContent:'space-between',width:'100%',alignItems:'center'}}>
           <button className="btn" onClick={() => setConfirmReset(true)}
             style={{color:'var(--err)',borderColor:'var(--err)',fontSize:12}}>⊘ Reset</button>
           <div style={{display:'flex',gap:8}}>
             {awaitCode
-              ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>Valider le code</button>
+              ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>{t('notif.validate_code') || 'Valider le code'}</button>
               : <button className="btn" onClick={test} disabled={testing||!tg.bot_token||!tg.chat_id} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}
-            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button>
+            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':t('auto_cat.save')||'Enregistrer'}</button>
           </div>
         </div>
       }>
@@ -1873,8 +2231,8 @@ function TelegramModal({ onClose, onSaved, onValidated }) {
         {confirmReset && (
         <div style={{background:'rgba(0,0,0,.5)',position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'var(--rl)',zIndex:10}}>
           <div style={{background:'var(--surf)',padding:24,borderRadius:'var(--r)',maxWidth:320,boxShadow:'0 4px 20px rgba(0,0,0,.4)'}}>
-            <div style={{fontWeight:700,marginBottom:8}}>Réinitialiser la configuration SMTP ?</div>
-            <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>La configuration sera effacée et la validation annulée.</p>
+            <div style={{fontWeight:700,marginBottom:8}}>{t('notif.reset_telegram_title') || 'Réinitialiser la configuration Telegram ?'}</div>
+            <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>{t('notif.reset_desc') || 'La configuration sera effacée et la validation annulée.'}</p>
             <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
               <button className="btn" onClick={()=>setConfirmReset(false)}>Annuler</button>
               <button className="btn" style={{color:'var(--err)',borderColor:'var(--err)'}} onClick={reset}>Réinitialiser</button>
@@ -1922,7 +2280,7 @@ function TelegramModal({ onClose, onSaved, onValidated }) {
   );
 }
 
-function SlackModal({ onClose, onSaved, onValidated }) {
+function SlackModal({ onClose, onSaved, onValidated, onReset }) {
   const { t } = useI18n();
   const [awaitCode, setAwaitCode] = useState(false);
   const [codeInput, setCodeInput] = useState('');
@@ -1942,17 +2300,18 @@ function SlackModal({ onClose, onSaved, onValidated }) {
   const test = async () => { setTesting(true); setMsg(''); setErr('');
     try { await api.slackTest(); setMsg(t('notif.code_sent') || 'Code envoyé — entrez-le pour valider.'); setAwaitCode(true); } catch(e){setErr('Erreur: '+e.message);} finally{setTesting(false);} };
   const validate = async () => { setErr(''); try { await api.slackValidate(codeInput); setValidated(true); setAwaitCode(false); setMsg(t('notif.validated_slack')); onValidated?.(); } catch(e){setErr(e.message);} };
+  const reset = async () => { setConfirmReset(false); try { await api.slackSave({ webhook_url:'' }); setUrl(''); setValidated(false); setAwaitCode(false); setMsg(''); onReset?.(); } catch(e){setErr(e.message);} };
   return (
-    <Modal title="Configuration Slack" onClose={onClose}
+    <Modal title={t('notif.slack_config') || 'Configuration Slack'} onClose={onClose}
       footer={
         <div style={{display:'flex',justifyContent:'space-between',width:'100%',alignItems:'center'}}>
           <button className="btn" onClick={() => setConfirmReset(true)}
             style={{color:'var(--err)',borderColor:'var(--err)',fontSize:12}}>⊘ Reset</button>
           <div style={{display:'flex',gap:8}}>
             {awaitCode
-              ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>Valider le code</button>
+              ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length<4}>{t('notif.validate_code') || 'Valider le code'}</button>
               : <button className="btn" onClick={test} disabled={testing||!url||url.startsWith('••••')} style={validated?{borderColor:'var(--ok)',color:'var(--ok)'}:{}}>{testing?'Envoi…':'Tester'}{validated?' ✓':''}</button>}
-            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button>
+            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving?'…':t('auto_cat.save')||'Enregistrer'}</button>
           </div>
         </div>
       }>
@@ -1962,8 +2321,8 @@ function SlackModal({ onClose, onSaved, onValidated }) {
         {confirmReset && (
         <div style={{background:'rgba(0,0,0,.5)',position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'var(--rl)',zIndex:10}}>
           <div style={{background:'var(--surf)',padding:24,borderRadius:'var(--r)',maxWidth:320,boxShadow:'0 4px 20px rgba(0,0,0,.4)'}}>
-            <div style={{fontWeight:700,marginBottom:8}}>Réinitialiser la configuration SMTP ?</div>
-            <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>La configuration sera effacée et la validation annulée.</p>
+            <div style={{fontWeight:700,marginBottom:8}}>{t('notif.reset_slack_title') || 'Réinitialiser la configuration Slack ?'}</div>
+            <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>{t('notif.reset_desc') || 'La configuration sera effacée et la validation annulée.'}</p>
             <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
               <button className="btn" onClick={()=>setConfirmReset(false)}>Annuler</button>
               <button className="btn" style={{color:'var(--err)',borderColor:'var(--err)'}} onClick={reset}>Réinitialiser</button>
@@ -2022,6 +2381,20 @@ function SecurityNotifTab() {
   function onChannelValidated(channel) {
     // Code validé → on marque le canal comme disponible
     setValidated(v => ({ ...v, [channel]: true }));
+    api.notifCatalog().then(d => setCatalog(d)).catch(() => {});
+  }
+
+  async function onChannelReset(channel) {
+    // Reset canal : retirer le canal de toutes les lignes cochées,
+    // désactiver les lignes qui n'ont plus aucun canal, griser le canal.
+    setValidated(v => ({ ...v, [channel]: false }));
+    // Mettre à jour chaque config qui contient ce canal
+    const toUpdate = configs.filter(cfg => cfg.channels.includes(channel));
+    await Promise.all(toUpdate.map(cfg => {
+      const newChannels = cfg.channels.filter(c => c !== channel);
+      const newEnabled  = newChannels.length > 0 ? cfg.enabled : false;
+      return saveCfg(cfg.event_key, { channels: newChannels, enabled: newEnabled });
+    }));
     api.notifCatalog().then(d => setCatalog(d)).catch(() => {});
   }
 
@@ -2129,7 +2502,9 @@ function SecurityNotifTab() {
                 {/* Coches par canal */}
                 {channelList.map(ch => {
                   const active = cfg.channels.includes(ch);
-                  const available = catalog.channels?.[ch]?.available || validated[ch];
+                  // validated[ch] prime sur catalog.available — il est mis à jour immédiatement
+                  // lors d'un reset, alors que catalog nécessite un rechargement async.
+                  const available = validated[ch];
                   return (
                     <td key={ch} style={{ padding: '10px 8px', textAlign: 'center', width: 56 }}>
                       <label style={{ display: 'inline-flex', alignItems: 'center', cursor: available ? 'pointer' : 'not-allowed' }}
@@ -2201,9 +2576,9 @@ function SecurityNotifTab() {
       </div>
 
       {/* Modals de configuration */}
-      {modal === 'smtp'     && <SmtpModal     onClose={() => setModal(null)} onSaved={onChannelSaved} />}
-      {modal === 'telegram' && <TelegramModal onClose={() => setModal(null)} onSaved={onChannelSaved} />}
-      {modal === 'slack'    && <SlackModal    onClose={() => setModal(null)} onSaved={onChannelSaved} />}
+      {modal === 'smtp'     && <SmtpModal     onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('email')}    onReset={() => onChannelReset('email')} />}
+      {modal === 'telegram' && <TelegramModal onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('telegram')} onReset={() => onChannelReset('telegram')} />}
+      {modal === 'slack'    && <SlackModal    onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('slack')}    onReset={() => onChannelReset('slack')} />}
     </div>
   );
 }
@@ -2310,6 +2685,8 @@ function SecurityOidcTab() {
     authorization_endpoint: '',
     token_endpoint: '',
     userinfo_endpoint: '',
+    jwks_uri: '',
+    tls_insecure: false,
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg]       = useState('');
@@ -2390,7 +2767,7 @@ function SecurityOidcTab() {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:13,height:13,flexShrink:0}}>
                 <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
               </svg>
-              {t('security.totp_mandatory_desc') || 'Users without TOTP configured will be prompted to scan a QR code at login.'} leur prochaine connexion. Pour réinitialiser le TOTP d'un utilisateur, rendez-vous dans <strong>Utilisateurs</strong> → modifier le compte → <em>{t('security.totp_reset') || 'Reset 2FA'}</em>.
+              {t('security.totp_mandatory_desc') || "Users without TOTP configured will be prompted to scan a QR code at login."} leur prochaine connexion. Pour réinitialiser le TOTP d'un utilisateur, rendez-vous dans <strong>Utilisateurs</strong> → modifier le compte → <em>{t('security.totp_reset') || 'Reset 2FA'}</em>.
             </div>
           )}
         </div>
@@ -2442,6 +2819,34 @@ function SecurityOidcTab() {
               <div style={{ marginTop: 6, fontSize: 11, color: 'var(--muted)' }}>
                 {t('security.oidc_endpoints_hint') || 'Leave empty to auto-detect from Issuer URL'}
               </div>
+            </div>
+
+            {/* Sécurité avancée */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                Sécurité avancée
+              </div>
+              <div className="form-group" style={{ marginBottom: 10 }}>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  JWKS URI
+                  <span style={{ fontWeight: 400, color: 'var(--ok)', fontSize: 11 }}>— recommandé</span>
+                </label>
+                <input className="form-control" type="text"
+                  placeholder="https://idp.example.com/.well-known/jwks.json"
+                  value={cfg.jwks_uri || ''}
+                  onChange={e => setCfg(c => ({ ...c, jwks_uri: e.target.value }))} />
+                <div style={{ marginTop: 5, fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+                  Permet la vérification cryptographique de la signature des tokens OIDC. Trouvez cette URL dans la documentation de votre IdP ou dans son document de découverte
+                  {' '}<span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>/.well-known/openid-configuration</span>.
+                  Sans ce champ, seules l'expiration et l'audience sont vérifiées.
+                </div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                <input type="checkbox" checked={!!cfg.tls_insecure}
+                  onChange={e => setCfg(c => ({ ...c, tls_insecure: e.target.checked }))} />
+                <span>Désactiver la vérification TLS du fournisseur d'identité</span>
+                <span style={{ fontSize: 11, color: 'var(--warn)' }}>⚠ IdP interne auto-signé uniquement</span>
+              </label>
             </div>
 
             {/* 3 options sur la même ligne en 3 colonnes égales */}

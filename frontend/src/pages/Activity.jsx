@@ -1055,6 +1055,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
 
       // ── Graphique ─────────────────────────────────────────────────────────────
       let chartSection = '';
+        const _chartTagDist = t('activity.chart_tag_dist') || 'TAG distribution';
       if (showChart && tagEntries.length > 0) {
         const tot2 = tagEntries.reduce((s,[,v])=>s+v,0);
 
@@ -1081,7 +1082,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
           });
           const svgPie=`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${slices}</svg>`;
           const svgLegend=`<svg width="120" height="${14+tagEntries.length*17}">${legend}</svg>`;
-          chartSection=`<div class="chart-block"><h3 class="chart-title">{t('activity.chart_tag_dist') || 'TAG distribution'}</h3><div class="chart-inner"><div class="pie-wrap">${svgPie}</div><div class="legend-wrap">${svgLegend}</div></div>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">${_chartTagDist}</h3><div class="chart-inner"><div class="pie-wrap">${svgPie}</div><div class="legend-wrap">${svgLegend}</div></div>`;
 
         } else if (chartType === 'bar-h') {
           const bw=300, bh=20, gap=6, maxVal=tagEntries[0]?.[1]||1;
@@ -1093,7 +1094,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
             bars+=`<g transform="translate(0,${y})"><rect x="0" y="0" width="${w}" height="${bh}" rx="3" fill="${col}"/><text x="${w+6}" y="${bh/2+4}" font-size="9" fill="#444" font-family="Arial" dominant-baseline="middle">${code} (${count})</text></g>`;
           });
           const svgH=`<svg width="450" height="${tagEntries.length*(bh+gap)}" font-family="Arial">${bars}</svg>`;
-          chartSection=`<div class="chart-block"><h3 class="chart-title">{t('activity.chart_tag_dist') || 'TAG distribution'}</h3><div class="chart-inner">${svgH}</div>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">${_chartTagDist}</h3><div class="chart-inner">${svgH}</div>`;
 
         } else if (chartType === 'bar-v') {
           const barW=36, gap2=10, maxVal2=tagEntries[0]?.[1]||1, chartH=120;
@@ -1105,7 +1106,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
             bars2+=`<g transform="translate(${x},0)"><rect x="0" y="${chartH-h}" width="${barW}" height="${h}" rx="3" fill="${col}"/><text x="${barW/2}" y="${chartH+12}" text-anchor="middle" font-size="8" fill="#444" font-family="monospace">${code}</text><text x="${barW/2}" y="${chartH-h-4}" text-anchor="middle" font-size="8" fill="#444">${count}</text></g>`;
           });
           const svgV=`<svg width="${totalW}" height="${chartH+24}" font-family="Arial">${bars2}</svg>`;
-          chartSection=`<div class="chart-block"><h3 class="chart-title">{t('activity.chart_tag_dist') || 'TAG distribution'}</h3><div class="chart-inner">${svgV}</div>`;
+          chartSection=`<div class="chart-block"><h3 class="chart-title">${_chartTagDist}</h3><div class="chart-inner">${svgV}</div>`;
         }
         if(chartSection) chartSection += `</div>`;
       }
@@ -1301,7 +1302,7 @@ ${statPillsHtml}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:12, height:12 }}>
             <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
           </svg>
-          t('activity.chart_included') || 'A TAG distribution chart will be included in the PDF'
+          {t('activity.chart_included') || 'Un graphique de répartition par TAG sera inclus dans le PDF'}
         </div>
       )}
     </Modal>

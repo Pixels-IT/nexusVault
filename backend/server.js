@@ -667,6 +667,10 @@ app.post('/api/notifications/test/:eventKey', authMiddleware, requirePerm('secur
     preview_recap:          { html: '<p><em>Ceci est un test de notification.</em></p>', text: 'Test de notification preview_recap' },
     preview_overdue:        { html: '<p><em>Test : 2 notes en preview sur des périodes passées.</em></p>', text: 'Test preview_overdue' },
     retention_recap:        { html: '<p><em>Test : 3 éléments en rétention.</em></p>', text: 'Test retention_recap', count: 3 },
+    db_backup_created:      { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), filename: 'nexusvault_db_20260519_020000.sqlite', size: 172032 },
+    db_backup_deleted:      { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), filename: 'nexusvault_db_20260519_020000.sqlite' },
+    db_backup_downloaded:   { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), filename: 'nexusvault_db_20260519_020000.sqlite' },
+    db_backup_restored:     { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), filename: 'nexusvault_db_20260519_020000.sqlite' },
   };
   dispatch(req.params.eventKey, testPayloads[req.params.eventKey] || {}, getDb)
     .then(() => res.json({ success: true }))
@@ -2486,6 +2490,292 @@ app.delete('/api/backups/:id', authMiddleware, requirePerm('backup_write'), (req
     res.status(500).json({ error: e.message });
   }
 });
+// ── AUTO-BACKUP BDD ───────────────────────────────────────────────────────────
+// Backups automatiques de la base SQLite, gérés par cron interne.
+// La table db_backup_files stocke les métadonnées ; les fichiers sont dans DATA_DIR/db_backups/.
+// Permission requise : site_backup_access
+
+const path = require('path');
+const fs   = require('fs');
+const DB_BACKUP_DIR = path.join(path.dirname(process.env.DB_PATH || '/data/nexusvault.db'), 'db_backups');
+
+function ensureDbBackupDir() {
+  if (!fs.existsSync(DB_BACKUP_DIR)) fs.mkdirSync(DB_BACKUP_DIR, { recursive: true });
+}
+
+// Initialise la config cron d'auto-backup si absente
+function initDbBackupConfig(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS db_backup_config (
+    key TEXT PRIMARY KEY, value TEXT NOT NULL
+  )`);
+  const defaults = { frequency: 'daily', hour: '2', minute: '0', retention_count: '7', backup_password: '' };
+  for (const [k, v] of Object.entries(defaults)) {
+    db.prepare("INSERT OR IGNORE INTO db_backup_config (key, value) VALUES (?,?)").run(k, v);
+  }
+}
+
+// ── Chiffrement des fichiers de backup SQLite ────────────────────────────────
+// AES-256-GCM + scrypt pour la dérivation du mot de passe. Même approche que
+// le chiffrement des données en base, mais avec un mot de passe utilisateur.
+// Format du fichier chiffré : magic(4) + scrypt_salt(32) + iv(12) + tag(16) + data
+const BACKUP_ENC_MAGIC = Buffer.from('NVBK'); // NexusVault BacKup
+
+function encryptBackupFile(buf, password) {
+  const salt   = crypto.randomBytes(32);
+  const key    = crypto.scryptSync(password, salt, 32, { N:16384, r:8, p:1, maxmem:64*1024*1024 });
+  const iv     = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc    = Buffer.concat([cipher.update(buf), cipher.final()]);
+  const tag    = cipher.getAuthTag();
+  return Buffer.concat([BACKUP_ENC_MAGIC, salt, iv, tag, enc]);
+}
+
+function decryptBackupFile(encBuf, password) {
+  if (!encBuf.slice(0,4).equals(BACKUP_ENC_MAGIC)) {
+    throw new Error('Format de fichier invalide ou non chiffré');
+  }
+  const salt    = encBuf.slice(4, 36);
+  const iv      = encBuf.slice(36, 48);
+  const tag     = encBuf.slice(48, 64);
+  const data    = encBuf.slice(64);
+  const key     = crypto.scryptSync(password, salt, 32, { N:16384, r:8, p:1, maxmem:64*1024*1024 });
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  try {
+    return Buffer.concat([decipher.update(data), decipher.final()]);
+  } catch {
+    throw new Error('Mot de passe incorrect ou fichier corrompu');
+  }
+}
+
+// Crée réellement un fichier backup SQLite
+function doDbBackup(db, password) {
+  ensureDbBackupDir();
+  initDbBackupConfig(db);
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const encrypted = !!(password && password.length >= 14);
+  // Extension .sqlite.enc si chiffré, .sqlite sinon
+  const filename = `nexusvault_db_${stamp}${encrypted ? '.sqlite.enc' : '.sqlite'}`;
+  const dest = path.join(DB_BACKUP_DIR, filename);
+  if (encrypted) {
+    // VACUUM INTO un fichier temporaire, puis chiffrer
+    const tmpPath = dest + '.tmp';
+    db.exec(`VACUUM INTO '${tmpPath.replace(/'/g, "''")}'`);
+    const plainBuf = fs.readFileSync(tmpPath);
+    fs.unlinkSync(tmpPath);
+    const encBuf = encryptBackupFile(plainBuf, password);
+    fs.writeFileSync(dest, encBuf);
+  } else {
+    db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+  }
+  const size = fs.statSync(dest).size;
+  // Appliquer la rétention : supprimer les plus anciens si dépassé
+  const retRow = db.prepare("SELECT value FROM db_backup_config WHERE key='retention_count'").get();
+  const retCount = parseInt(retRow?.value || '7');
+  const files = fs.readdirSync(DB_BACKUP_DIR)
+    .filter(f => (f.startsWith('nexusvault_db_') && f.endsWith('.sqlite')) || f.endsWith('.sqlite.enc'))
+    .map(f => ({ name: f, mtime: fs.statSync(path.join(DB_BACKUP_DIR, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+  for (const old of files.slice(retCount)) {
+    try { fs.unlinkSync(path.join(DB_BACKUP_DIR, old.name)); } catch {}
+  }
+  return { filename, size, created_at: nowLocal(), encrypted };
+}
+
+// GET /api/db-backups — liste les fichiers de backup
+app.get('/api/db-backups', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
+  try {
+    ensureDbBackupDir();
+    const files = fs.readdirSync(DB_BACKUP_DIR)
+      .filter(f => (f.startsWith('nexusvault_db_') && f.endsWith('.sqlite')) || (f.startsWith('nexusvault_db_') && f.endsWith('.sqlite.enc')))
+      .map(f => {
+        const stat = fs.statSync(path.join(DB_BACKUP_DIR, f));
+        const d = stat.mtime;
+        const pad = n => String(n).padStart(2, '0');
+        const localDate = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        return { filename: f, size: stat.size, created_at: localDate, encrypted: f.endsWith('.enc') };
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    res.json(files);
+  } catch (e) { res.json([]); }
+});
+
+// GET /api/db-backups/download?f=filename — télécharger (déchiffré si mot de passe fourni)
+// Le nom de fichier est passé en query string pour éviter le parsing des points
+// dans les segments de route Express (:param s'arrête aux points par défaut).
+app.get('/api/db-backups/download', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
+  const filename = path.basename(req.query.f || '');
+  if (!filename || !/^nexusvault_db_[\d_]+(\.sqlite|\.sqlite\.enc)$/.test(filename))
+    return res.status(400).json({ error: 'Nom de fichier invalide' });
+  const filepath = path.join(DB_BACKUP_DIR, filename);
+  if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Fichier introuvable' });
+
+  let buf = fs.readFileSync(filepath);
+  let dlFilename = filename;
+
+  if (filename.endsWith('.enc')) {
+    const password = req.headers['x-backup-password'] || '';
+    if (!password) return res.status(400).json({ error: 'Ce fichier est chiffré. Le mot de passe est requis.' });
+    try {
+      buf = decryptBackupFile(buf, password);
+      dlFilename = filename.replace('.enc', '');
+    } catch (e) {
+      return res.status(403).json({ error: e.message });
+    }
+  }
+
+  dispatch('db_backup_downloaded', { filename, username: req.user.username, ip: getClientIp(req), datetime: nowLocal() }, getDb).catch(() => {});
+  audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'DB_BACKUP_TÉLÉCHARGÉ',
+    category: 'sécurité', severity: 'info', detail: filename, ip: getClientIp(req), success: 1 });
+  res.setHeader('Content-Disposition', safeContentDisposition(dlFilename));
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Length', buf.length);
+  res.end(buf);
+});
+
+// POST /api/db-backups/trigger — déclenche un backup immédiat
+app.post('/api/db-backups/trigger', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
+  try {
+    const password = req.body?.password || '';
+    const r = doDbBackup(getDb(), password);
+    const ip = getClientIp(req);
+    audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'DB_BACKUP_MANUEL',
+      category: 'sécurité', severity: 'info', detail: `${r.filename} — ${r.size} octets${r.encrypted?' (chiffré)':''}`, ip, success: 1 });
+    dispatch('db_backup_created', { filename: r.filename, size: r.size, username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(() => {});
+    res.json({ success: true, filename: r.filename, size: r.size, created_at: r.created_at, encrypted: r.encrypted });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/db-backups?f=filename — supprime un fichier de backup
+app.delete('/api/db-backups', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
+  const filename = path.basename(req.query.f || '');
+  if (!filename || !/^nexusvault_db_[\d_]+(\.sqlite|\.sqlite\.enc)$/.test(filename))
+    return res.status(400).json({ error: 'Nom de fichier invalide' });
+  const filepath = path.join(DB_BACKUP_DIR, filename);
+  if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Fichier introuvable' });
+  fs.unlinkSync(filepath);
+  const ip = getClientIp(req);
+  audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'DB_BACKUP_SUPPRIMÉ',
+    category: 'sécurité', severity: 'warn', detail: filename, ip, success: 1 });
+  dispatch('db_backup_deleted', { filename, username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(() => {});
+  res.json({ success: true });
+});
+
+// POST /api/db-backups/restore — restaure la BDD depuis un fichier uploadé
+app.post('/api/db-backups/restore', authMiddleware, requireRole('admin'), (req, res) => {
+  const { data, filename, password } = req.body;
+  if (!data) return res.status(400).json({ error: 'Données manquantes' });
+  const safeName = path.basename(filename || 'restore.sqlite');
+  try {
+    let buf = Buffer.from(data, 'base64');
+    // Si fichier chiffré (.enc ou magic NVBK détecté), déchiffrer d'abord
+    const isEncrypted = safeName.endsWith('.enc') || (buf.length >= 4 && buf.slice(0,4).equals(BACKUP_ENC_MAGIC));
+    if (isEncrypted) {
+      if (!password || password.length < 14) {
+        return res.status(400).json({ error: 'Ce fichier est chiffré. Fournissez le mot de passe (min. 14 caractères).' });
+      }
+      try { buf = decryptBackupFile(buf, password); }
+      catch (e) { return res.status(403).json({ error: e.message }); }
+    }
+    if (buf.length < 16 || buf.slice(0, 15).toString('ascii') !== 'SQLite format 3') {
+      return res.status(400).json({ error: "Fichier invalide — ce n'est pas une base SQLite." });
+    }
+    const dbPath = process.env.DB_PATH || '/data/nexusvault.db';
+    const safeguardPath = dbPath + '.pre-restore-' + Date.now();
+    fs.copyFileSync(dbPath, safeguardPath);
+    dispatch('db_backup_restored', { filename: safeName, username: req.user.username, ip: getClientIp(req), datetime: nowLocal() }, getDb).catch(() => {});
+    fs.writeFileSync(dbPath, buf);
+    audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'DB_RESTAURÉE',
+      category: 'sécurité', severity: 'warn',
+      detail: `Fichier: ${safeName} (${buf.length} octets)${isEncrypted?' (chiffré)':''} — sauvegarde pré-restauration: ${path.basename(safeguardPath)}`,
+      ip: getClientIp(req), success: 1 });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/db-backups/config — lire la config cron
+app.get('/api/db-backups/config', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
+  const db = getDb();
+  initDbBackupConfig(db);
+  const rows = db.prepare('SELECT key, value FROM db_backup_config').all();
+  const cfg = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  res.json(cfg);
+});
+
+// PUT /api/db-backups/config — enregistrer la config cron
+app.put('/api/db-backups/config', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
+  const { frequency, hour, minute, retention_count, backup_password } = req.body;
+  const db = getDb();
+  initDbBackupConfig(db);
+  const allowed = { frequency: ['daily','weekly','monthly'], hour: [...Array(24).keys()].map(String), minute: ['0','5','10','15','20','25','30','35','40','45','50','55'] };
+  if (!allowed.frequency.includes(frequency)) return res.status(400).json({ error: 'Fréquence invalide' });
+  if (!allowed.hour.includes(String(hour))) return res.status(400).json({ error: 'Heure invalide' });
+  if (!allowed.minute.includes(String(minute))) return res.status(400).json({ error: 'Minute invalide' });
+  const rc = parseInt(retention_count);
+  if (isNaN(rc) || rc < 1 || rc > 30) return res.status(400).json({ error: 'Rétention invalide (1-30)' });
+  // Mot de passe : soit vide (pas de chiffrement), soit ≥ 14 caractères
+  const pwd = backup_password || '';
+  if (pwd && pwd.length < 14) return res.status(400).json({ error: 'Le mot de passe de chiffrement doit faire au moins 14 caractères.' });
+  const updates = { frequency, hour: String(hour), minute: String(minute), retention_count: String(rc), backup_password: pwd };
+  for (const [k, v] of Object.entries(updates)) {
+    db.prepare("INSERT OR REPLACE INTO db_backup_config (key, value) VALUES (?,?)").run(k, v);
+  }
+  scheduleDbBackup(db);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DB_BACKUP_CONFIG_MAJ',
+    category: 'sécurité', severity: 'info',
+    detail: JSON.stringify({ frequency, hour, minute, retention_count, encrypted: !!pwd }),
+    ip: getClientIp(req), success: 1 });
+  res.json({ success: true });
+});
+
+// ── Cron d'auto-backup BDD ───────────────────────────────────────────────────
+let _dbBackupTimer = null;
+function scheduleDbBackup(db) {
+  if (_dbBackupTimer) { clearTimeout(_dbBackupTimer); _dbBackupTimer = null; }
+  try {
+    initDbBackupConfig(db);
+    const cfg = Object.fromEntries(db.prepare('SELECT key, value FROM db_backup_config').all().map(r => [r.key, r.value]));
+    const now   = new Date();
+    const h     = parseInt(cfg.hour   || '2');
+    const m     = parseInt(cfg.minute || '0');
+    const freq  = cfg.frequency || 'daily';
+    const next  = new Date(now);
+    next.setHours(h, m, 0, 0);
+    if (next <= now) {
+      if (freq === 'daily')   next.setDate(next.getDate() + 1);
+      if (freq === 'weekly')  next.setDate(next.getDate() + 7);
+      if (freq === 'monthly') next.setMonth(next.getMonth() + 1);
+    }
+    const ms = next - now;
+    logger.info(`[DB-BACKUP] Prochain backup : ${next.toISOString()} (dans ${Math.round(ms/60000)} min)`);
+    _dbBackupTimer = setTimeout(() => {
+      try {
+        const cronCfg = Object.fromEntries(getDb().prepare('SELECT key, value FROM db_backup_config').all().map(r => [r.key, r.value]));
+        const cronPwd = cronCfg.backup_password || '';
+        const r = doDbBackup(getDb(), cronPwd);
+        logger.info(`[DB-BACKUP] Backup effectué : ${r.filename} (${r.size} octets${r.encrypted?' chiffré':''})`);
+        audit(getDb(), { action: 'DB_BACKUP_AUTO', category: 'sécurité', severity: 'info',
+          detail: `${r.filename} — ${r.size} octets`, success: 1 });
+      } catch (e) {
+        logger.error('[DB-BACKUP] Échec du backup automatique :', e.message);
+      }
+      scheduleDbBackup(getDb()); // replanifier
+    }, ms);
+    if (_dbBackupTimer.unref) _dbBackupTimer.unref();
+  } catch (e) {
+    logger.error('[DB-BACKUP] Erreur de planification :', e.message);
+  }
+}
+// Démarrage du cron au lancement du serveur
+try { scheduleDbBackup(getDb()); } catch {}
+
 app.get('/api/backups/diff', authMiddleware, (req, res) => {
   const { id_a, id_b } = req.query;
   if (!id_a || !id_b) return res.status(400).json({ error: 'id_a et id_b requis' });

@@ -83,6 +83,30 @@ const EVENT_CATALOG = {
     description: 'Alerte quand un utilisateur supprime un fichier dans un suivi d\'activité.',
     options:     {},
   },
+  db_backup_created: {
+    key:         'db_backup_created',
+    label:       'Création d\'une backup SQLite',
+    description: 'Alerte quand un utilisateur déclenche une sauvegarde manuelle de la base de données.',
+    options:     {},
+  },
+  db_backup_deleted: {
+    key:         'db_backup_deleted',
+    label:       'Suppression d\'une backup SQLite',
+    description: 'Alerte quand un utilisateur supprime un fichier de sauvegarde SQLite.',
+    options:     {},
+  },
+  db_backup_downloaded: {
+    key:         'db_backup_downloaded',
+    label:       'Téléchargement d\'une backup SQLite',
+    description: 'Alerte quand un utilisateur télécharge un fichier de sauvegarde SQLite.',
+    options:     {},
+  },
+  db_backup_restored: {
+    key:         'db_backup_restored',
+    label:       'Restauration d\'une backup SQLite',
+    description: 'Alerte quand un utilisateur restaure la base de données depuis un fichier de sauvegarde.',
+    options:     {},
+  },
 };
 
 module.exports.EVENT_CATALOG = EVENT_CATALOG;

@@ -2,11 +2,15 @@ const BASE = '/api';
 
 function getToken() { return localStorage.getItem('dp_token'); }
 
-async function request(method, path, body) {
-  const headers = { 'Content-Type': 'application/json' };
+async function request(method, path, body, responseType, extraHeaders) {
+  const headers = { 'Content-Type': 'application/json', ...extraHeaders };
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${BASE}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (responseType === 'blob') {
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Erreur ${res.status}`); }
+    return res.blob();
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error || `Erreur ${res.status}`);
@@ -203,6 +207,19 @@ const api = {
   deleteBackup: (id) => request('DELETE', `/backups/${id}`),
   uploadBackup: (device_id, content, note) => request('POST', '/backups/upload', { device_id, content, note }),
   diff: (id_a, id_b) => request('GET', `/backups/diff?id_a=${id_a}&id_b=${id_b}`),
+  // Auto-backup BDD
+  dbBackups:           ()      => request('GET',    '/db-backups'),
+  dbBackupConfig:      ()      => request('GET',    '/db-backups/config'),
+  dbBackupSaveConfig:  (d)     => request('PUT',    '/db-backups/config', d),
+  dbBackupTrigger:     (d)     => request('POST',   '/db-backups/trigger', d || {}),
+  dbBackupDelete:      (fn)    => request('DELETE', `/db-backups?f=${encodeURIComponent(fn)}`),
+  dbBackupRestore:     (d)     => request('POST',   '/db-backups/restore', d),
+  dbBackupDownload:    (filename, password) => {
+    // Filename en query string pour éviter le parsing des points par Express
+    // Mot de passe en header (jamais dans l'URL)
+    const extraHeaders = password ? { 'X-Backup-Password': password } : {};
+    return request('GET', `/db-backups/download?f=${encodeURIComponent(filename)}`, null, 'blob', extraHeaders);
+  },
 };
 
 export default api;
