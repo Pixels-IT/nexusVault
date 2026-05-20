@@ -214,11 +214,17 @@ const api = {
   dbBackupTrigger:     (d)     => request('POST',   '/db-backups/trigger', d || {}),
   dbBackupDelete:      (fn)    => request('DELETE', `/db-backups?f=${encodeURIComponent(fn)}`),
   dbBackupRestore:     (d)     => request('POST',   '/db-backups/restore', d),
-  dbBackupDownload:    (filename, password) => {
-    // Filename en query string pour éviter le parsing des points par Express
-    // Mot de passe en header (jamais dans l'URL)
-    const extraHeaders = password ? { 'X-Backup-Password': password } : {};
-    return request('GET', `/db-backups/download?f=${encodeURIComponent(filename)}`, null, 'blob', extraHeaders);
+  dbBackupDownload:    (filename) => {
+    // Télécharge le fichier brut (chiffré si chiffré sur disque) — pas de déchiffrement côté serveur
+    const token = localStorage.getItem('dp_token');
+    return fetch('/api/db-backups/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ f: filename }),
+    }).then(async res => {
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Erreur ${res.status}`); }
+      return res.blob();
+    });
   },
 };
 

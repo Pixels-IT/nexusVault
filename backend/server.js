@@ -2602,34 +2602,27 @@ app.get('/api/db-backups', authMiddleware, requirePerm('site_backup_access'), (r
   } catch (e) { res.json([]); }
 });
 
-// GET /api/db-backups/download?f=filename — télécharger (déchiffré si mot de passe fourni)
-// Le nom de fichier est passé en query string pour éviter le parsing des points
-// dans les segments de route Express (:param s'arrête aux points par défaut).
-app.get('/api/db-backups/download', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
-  const filename = path.basename(req.query.f || '');
+// POST /api/db-backups/download — télécharger (déchiffré si mot de passe fourni)
+// POST pour recevoir le mot de passe dans le corps JSON (jamais dans l'URL ou headers custom).
+// POST /api/db-backups/download — télécharger le fichier brut (chiffré si chiffré)
+// Le fichier est envoyé tel quel — pas de déchiffrement côté serveur.
+// Si le fichier est chiffré (.enc), il est téléchargé sous son nom .sqlite.enc.
+app.post('/api/db-backups/download', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
+  const filename = path.basename(req.body.f || '');
+  logger.info(`[DB-BACKUP] Téléchargement: "${filename}" par ${req.user.username}`);
+
   if (!filename || !/^nexusvault_db_[\d_]+(\.sqlite|\.sqlite\.enc)$/.test(filename))
     return res.status(400).json({ error: 'Nom de fichier invalide' });
   const filepath = path.join(DB_BACKUP_DIR, filename);
   if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Fichier introuvable' });
 
-  let buf = fs.readFileSync(filepath);
-  let dlFilename = filename;
-
-  if (filename.endsWith('.enc')) {
-    const password = req.headers['x-backup-password'] || '';
-    if (!password) return res.status(400).json({ error: 'Ce fichier est chiffré. Le mot de passe est requis.' });
-    try {
-      buf = decryptBackupFile(buf, password);
-      dlFilename = filename.replace('.enc', '');
-    } catch (e) {
-      return res.status(403).json({ error: e.message });
-    }
-  }
+  const buf = fs.readFileSync(filepath);
 
   dispatch('db_backup_downloaded', { filename, username: req.user.username, ip: getClientIp(req), datetime: nowLocal() }, getDb).catch(() => {});
   audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'DB_BACKUP_TÉLÉCHARGÉ',
     category: 'sécurité', severity: 'info', detail: filename, ip: getClientIp(req), success: 1 });
-  res.setHeader('Content-Disposition', safeContentDisposition(dlFilename));
+  // Le fichier est toujours envoyé sous son vrai nom (ex: .sqlite.enc)
+  res.setHeader('Content-Disposition', safeContentDisposition(filename));
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Length', buf.length);
@@ -2640,13 +2633,16 @@ app.get('/api/db-backups/download', authMiddleware, requirePerm('site_backup_acc
 app.post('/api/db-backups/trigger', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
   try {
     const password = req.body?.password || '';
+    logger.info(`[DB-BACKUP TRIGGER] password reçu: longueur=${password.length}, chiffrement=${password.length >= 14}`);
     const r = doDbBackup(getDb(), password);
+    logger.info(`[DB-BACKUP TRIGGER] fichier créé: ${r.filename}, encrypted=${r.encrypted}`);
     const ip = getClientIp(req);
     audit(getDb(), { userId: req.user.id, username: req.user.username, action: 'DB_BACKUP_MANUEL',
       category: 'sécurité', severity: 'info', detail: `${r.filename} — ${r.size} octets${r.encrypted?' (chiffré)':''}`, ip, success: 1 });
     dispatch('db_backup_created', { filename: r.filename, size: r.size, username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(() => {});
     res.json({ success: true, filename: r.filename, size: r.size, created_at: r.created_at, encrypted: r.encrypted });
   } catch (e) {
+    logger.error(`[DB-BACKUP TRIGGER] erreur: ${e.message}`);
     res.status(500).json({ error: e.message });
   }
 });
@@ -2701,17 +2697,23 @@ app.post('/api/db-backups/restore', authMiddleware, requireRole('admin'), (req, 
 });
 
 // GET /api/db-backups/config — lire la config cron
+// Le mot de passe n'est JAMAIS retourné : on expose seulement has_password (booléen)
 app.get('/api/db-backups/config', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
   const db = getDb();
   initDbBackupConfig(db);
   const rows = db.prepare('SELECT key, value FROM db_backup_config').all();
   const cfg = Object.fromEntries(rows.map(r => [r.key, r.value]));
-  res.json(cfg);
+  // Remplacer le mot de passe en clair par un indicateur booléen
+  const { backup_password, ...safeCfg } = cfg;
+  safeCfg.has_password = !!(backup_password && backup_password.length >= 14);
+  res.json(safeCfg);
 });
 
 // PUT /api/db-backups/config — enregistrer la config cron
 app.put('/api/db-backups/config', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
-  const { frequency, hour, minute, retention_count, backup_password } = req.body;
+  const { frequency, hour, minute, retention_count } = req.body;
+  // backup_password : undefined = garder l'ancien, '' = supprimer, string = nouveau
+  const changingPassword = 'backup_password' in req.body;
   const db = getDb();
   initDbBackupConfig(db);
   const allowed = { frequency: ['daily','weekly','monthly'], hour: [...Array(24).keys()].map(String), minute: ['0','5','10','15','20','25','30','35','40','45','50','55'] };
@@ -2720,17 +2722,19 @@ app.put('/api/db-backups/config', authMiddleware, requirePerm('site_backup_acces
   if (!allowed.minute.includes(String(minute))) return res.status(400).json({ error: 'Minute invalide' });
   const rc = parseInt(retention_count);
   if (isNaN(rc) || rc < 1 || rc > 30) return res.status(400).json({ error: 'Rétention invalide (1-30)' });
-  // Mot de passe : soit vide (pas de chiffrement), soit ≥ 14 caractères
-  const pwd = backup_password || '';
-  if (pwd && pwd.length < 14) return res.status(400).json({ error: 'Le mot de passe de chiffrement doit faire au moins 14 caractères.' });
-  const updates = { frequency, hour: String(hour), minute: String(minute), retention_count: String(rc), backup_password: pwd };
+  const updates = { frequency, hour: String(hour), minute: String(minute), retention_count: String(rc) };
+  if (changingPassword) {
+    const pwd = req.body.backup_password || '';
+    if (pwd && pwd.length < 14) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 14 caractères.' });
+    updates.backup_password = pwd;
+  }
   for (const [k, v] of Object.entries(updates)) {
     db.prepare("INSERT OR REPLACE INTO db_backup_config (key, value) VALUES (?,?)").run(k, v);
   }
   scheduleDbBackup(db);
   audit(db, { userId: req.user.id, username: req.user.username, action: 'DB_BACKUP_CONFIG_MAJ',
     category: 'sécurité', severity: 'info',
-    detail: JSON.stringify({ frequency, hour, minute, retention_count, encrypted: !!pwd }),
+    detail: JSON.stringify({ frequency, hour, minute, retention_count, password_changed: changingPassword }),
     ip: getClientIp(req), success: 1 });
   res.json({ success: true });
 });

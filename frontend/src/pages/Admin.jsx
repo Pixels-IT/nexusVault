@@ -1552,9 +1552,10 @@ function DbBackupCard() {
   const [confirmDel, setConfirmDel]   = useState(null);
   const [restoring, setRestoring]     = useState(false);
   const [restoreMsg, setRestoreMsg]   = useState('');
-  const [backupPassword, setBackupPassword] = useState(''); // mot de passe config
-  const [dlPasswordFor, setDlPasswordFor]   = useState(null); // filename demandant le mdp pour dl
-  const [dlPasswordInput, setDlPasswordInput] = useState('');
+  const [restoreModal, setRestoreModal] = useState(null); // { file, isEnc } — modal de confirmation/mdp
+  const [hasPassword, setHasPassword]           = useState(false); // la config a un mdp de chiffrement
+  const [showTriggerPwd, setShowTriggerPwd]     = useState(false); // modal mdp avant sauvegarde manuelle
+  const [triggerPwdInput, setTriggerPwdInput]   = useState('');
   const fileInputRef = useRef(null);
 
   const load = () => {
@@ -1564,38 +1565,38 @@ function DbBackupCard() {
       api.dbBackupConfig().catch(() => ({})),
     ]).then(([f, cfg]) => {
       setFiles(f);
-      setBackupPassword(cfg.backup_password || '');
+      setHasPassword(!!cfg.has_password);
     }).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
 
-  async function triggerNow() {
+  async function triggerNow(pwdOverride) {
+    if (hasPassword && !pwdOverride) {
+      // Demander le mot de passe avant de chiffrer
+      setShowTriggerPwd(true); setTriggerPwdInput('');
+      return;
+    }
+    setShowTriggerPwd(false);
     setTriggering(true); setTriggerMsg('');
-    try { await api.dbBackupTrigger(backupPassword ? { password: backupPassword } : undefined); setTriggerMsg('Sauvegarde effectuée.'); load(); }
+    try {
+      await api.dbBackupTrigger(pwdOverride ? { password: pwdOverride } : {});
+      setTriggerMsg('Sauvegarde effectuée.'); setTriggerPwdInput(''); load();
+    }
     catch (e) { setTriggerMsg('Erreur : ' + e.message); }
     finally { setTriggering(false); }
   }
 
-  async function download(filename, pwdOverride) {
-    if (filename.endsWith('.enc') && !pwdOverride) {
-      // Si le mot de passe config est déjà connu, l'utiliser directement
-      if (backupPassword && backupPassword.length >= 14) {
-        return download(filename, backupPassword);
-      }
-      // Sinon demander via le mini-modal
-      setDlPasswordFor(filename); setDlPasswordInput('');
-      return;
-    }
+  async function download(filename) {
     setDownloading(filename);
     try {
-      const blob = await api.dbBackupDownload(filename, pwdOverride || undefined);
+      // Le fichier est téléchargé tel quel (brut) — chiffré si chiffré sur le serveur.
+      const blob = await api.dbBackupDownload(filename);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = filename.replace('.enc','');
+      a.href = url; a.download = filename; // vrai nom conservé (.sqlite ou .sqlite.enc)
       document.body.appendChild(a); a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setDlPasswordFor(null); setDlPasswordInput('');
     } catch (e) { alert('Erreur téléchargement : ' + e.message); }
     finally { setDownloading(null); }
   }
@@ -1609,22 +1610,19 @@ function DbBackupCard() {
 
   function openRestore() { fileInputRef.current?.click(); }
 
-  async function handleRestoreFile(e) {
+  function handleRestoreFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
     if (!file.name.endsWith('.sqlite') && !file.name.endsWith('.sqlite.enc')) {
       setRestoreMsg("Fichier invalide — sélectionnez un .sqlite ou .sqlite.enc"); return;
     }
-    // Si fichier chiffré, vérifier qu'on a un mot de passe
-    const isEnc = file.name.endsWith('.enc');
-    let restorePwd = isEnc ? (backupPassword || '') : '';
-    if (isEnc && (!restorePwd || restorePwd.length < 14)) {
-      const entered = window.prompt('Ce fichier est chiffré. Entrez le mot de passe de déchiffrement (min. 14 caractères) :');
-      if (!entered || entered.length < 14) { setRestoreMsg('Mot de passe requis pour restaurer un fichier chiffré.'); return; }
-      restorePwd = entered;
-    }
-    if (!window.confirm(`⚠️ Restaurer la base depuis "${file.name}" ?\n\nUne sauvegarde de sécurité sera créée automatiquement. Cette action est irréversible.`)) return;
+    // Ouvrir le modal custom (mot de passe masqué + confirmation)
+    setRestoreModal({ file, isEnc: file.name.endsWith('.enc') });
+  }
+
+  async function doRestore(file, password) {
+    setRestoreModal(null);
     setRestoring(true); setRestoreMsg('');
     try {
       const base64 = await new Promise((res, rej) => {
@@ -1633,7 +1631,7 @@ function DbBackupCard() {
         r.onerror = () => rej(new Error('Lecture échouée'));
         r.readAsDataURL(file);
       });
-      await api.dbBackupRestore({ data: base64, filename: file.name, password: restorePwd || undefined });
+      await api.dbBackupRestore({ data: base64, filename: file.name, password: password || undefined });
       setRestoreMsg('Base restaurée. Rechargement…');
       setTimeout(() => window.location.reload(), 1500);
     } catch (e) { setRestoreMsg('Erreur : ' + e.message); }
@@ -1660,7 +1658,7 @@ function DbBackupCard() {
             </svg>
             {restoring ? 'Restauration…' : 'Restaurer'}
           </button>
-          <button className="btn" onClick={triggerNow} disabled={triggering}
+          <button className="btn" onClick={() => triggerNow()} disabled={triggering}
             style={{ display:'flex', alignItems:'center', gap:6, borderColor:'#f97316', color:'#f97316' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:14, height:14 }}>
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
@@ -1728,38 +1726,51 @@ function DbBackupCard() {
         }
       </div>
       {showModal && <DbBackupScheduleModal onClose={() => setShowModal(false)} />}
-      {/* Mini-modal mot de passe pour téléchargement d'un fichier chiffré */}
-      {dlPasswordFor && (
+      {/* Mini-modal mot de passe avant sauvegarde manuelle */}
+      {showTriggerPwd && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1300 }}
-          onClick={() => setDlPasswordFor(null)}>
-          <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', padding:24, width:360, boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}
+          onClick={() => setShowTriggerPwd(false)}>
+          <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', padding:24, width:380, boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}
             onClick={e => e.stopPropagation()}>
             <div style={{ fontWeight:700, marginBottom:8, display:'flex', alignItems:'center', gap:8 }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:16, height:16, color:'var(--ok)' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:16, height:16, color:'#f97316' }}>
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
               </svg>
-              Fichier chiffré — mot de passe requis
+              Mot de passe de chiffrement
             </div>
             <p style={{ fontSize:12, color:'var(--muted)', marginBottom:12 }}>
-              Ce fichier est chiffré. Entrez le mot de passe configuré lors de la sauvegarde.
+              Entrez le mot de passe pour chiffrer cette sauvegarde.
             </p>
             <input className="form-control" type="password" autoFocus
               placeholder="Mot de passe (min. 14 caractères)"
-              value={dlPasswordInput}
-              onChange={e => setDlPasswordInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && dlPasswordInput.length >= 14 && download(dlPasswordFor, dlPasswordInput)}
+              value={triggerPwdInput}
+              onChange={e => setTriggerPwdInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && triggerPwdInput.length >= 14 && triggerNow(triggerPwdInput)}
               style={{ marginBottom:12 }} />
+            {triggerPwdInput.length > 0 && triggerPwdInput.length < 14 && (
+              <div style={{ fontSize:11, color:'var(--err)', marginBottom:8 }}>
+                Minimum 14 caractères ({triggerPwdInput.length}/14)
+              </div>
+            )}
             <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-              <button className="btn btn-primary" disabled={dlPasswordInput.length < 14}
-                onClick={() => download(dlPasswordFor, dlPasswordInput)}>
-                Télécharger
+              <button className="btn btn-primary" disabled={triggerPwdInput.length < 14 || triggering}
+                onClick={() => triggerNow(triggerPwdInput)}>
+                {triggering ? 'Sauvegarde…' : 'Sauvegarder'}
               </button>
-              <button className="btn" onClick={() => setDlPasswordFor(null)}>Annuler</button>
+              <button className="btn" onClick={() => setShowTriggerPwd(false)}>Annuler</button>
             </div>
           </div>
         </div>
       )}
-      {confirmDel && (
+      {/* Modal de restauration — mot de passe masqué + confirmation */}
+      {restoreModal && (
+        <RestoreModal
+          file={restoreModal.file}
+          isEnc={restoreModal.isEnc}
+          onConfirm={(pwd) => doRestore(restoreModal.file, pwd)}
+          onCancel={() => setRestoreModal(null)} />
+      )}
+            {confirmDel && (
         <ConfirmModal
           message={`Supprimer la sauvegarde "${confirmDel}" ?\nCette action est irréversible.`}
           onConfirm={() => deleteBackup(confirmDel)}
@@ -1769,23 +1780,119 @@ function DbBackupCard() {
   );
 }
 
+// ── RESTORE MODAL ────────────────────────────────────────────────────────────
+function RestoreModal({ file, isEnc, onConfirm, onCancel }) {
+  const [pwd, setPwd]         = useState('');
+  const [showPwd, setShowPwd] = useState(false);
+  const isValid = !isEnc || pwd.length >= 14;
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1300 }}
+      onClick={onCancel}>
+      <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', padding:24, width:420, boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}
+        onClick={e => e.stopPropagation()}>
+        {/* Titre */}
+        <div style={{ fontWeight:700, fontSize:15, marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:18, height:18, color:'var(--err)' }}>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          Restaurer la base de données
+        </div>
+        {/* Avertissement */}
+        <div className="alert alert-err" style={{ fontSize:12, marginBottom:16 }}>
+          <strong>Action irréversible.</strong> La base actuelle sera remplacée par{' '}
+          <span style={{ fontFamily:'var(--mono)', fontSize:11 }}>{file.name}</span>.
+          Une sauvegarde de sécurité sera créée automatiquement avant l'écrasement.
+        </div>
+        {/* Mot de passe — uniquement si fichier chiffré */}
+        {isEnc && (
+          <div className="form-group" style={{ margin:'0 0 16px' }}>
+            <label className="form-label">Mot de passe de déchiffrement</label>
+            <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+              <input className="form-control" type={showPwd ? 'text' : 'password'}
+                autoFocus
+                placeholder="Mot de passe (min. 14 caractères)"
+                value={pwd}
+                onChange={e => setPwd(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && isValid && onConfirm(pwd)}
+                style={{ paddingRight:36 }} />
+              <button type="button" onClick={() => setShowPwd(v => !v)}
+                style={{ position:'absolute', right:8, background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:0 }}>
+                {showPwd
+                  ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                }
+              </button>
+            </div>
+            {pwd.length > 0 && pwd.length < 14 && (
+              <div style={{ fontSize:11, color:'var(--err)', marginTop:4 }}>
+                Minimum 14 caractères ({pwd.length}/14)
+              </div>
+            )}
+          </div>
+        )}
+        {/* Boutons */}
+        <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+          <button className="btn" style={{ borderColor:'var(--err)', color:'var(--err)' }}
+            disabled={!isValid}
+            onClick={() => onConfirm(isEnc ? pwd : undefined)}>
+            Restaurer
+          </button>
+          <button className="btn" onClick={onCancel}>Annuler</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DbBackupScheduleModal({ onClose }) {
-  const [cfg, setCfg]       = useState({ frequency:'daily', hour:'2', minute:'0', retention_count:'7', backup_password:'' });
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg]       = useState('');
+  const [cfg, setCfg]         = useState({ frequency:'daily', hour:'2', minute:'0', retention_count:'7' });
+  const [hasPassword, setHasPassword] = useState(false); // un mdp est configuré côté serveur
+  const [newPassword, setNewPassword] = useState('');    // nouveau mdp saisi (vide = garder l'ancien)
+  const [saving, setSaving]   = useState(false);
+  const [msg, setMsg]         = useState('');
   const [showPwd, setShowPwd] = useState(false);
 
   useEffect(() => {
-    api.dbBackupConfig().then(d => setCfg(c => ({ ...c, ...d, backup_password: d.backup_password || '' }))).catch(() => {});
+    api.dbBackupConfig().then(d => {
+      setCfg({ frequency: d.frequency||'daily', hour: d.hour||'2', minute: d.minute||'0', retention_count: d.retention_count||'7' });
+      setHasPassword(!!d.has_password);
+    }).catch(() => {});
   }, []);
 
   async function save() {
-    if (cfg.backup_password && cfg.backup_password.length < 14) {
+    // Mot de passe : si l'utilisateur a saisi quelque chose, on valide et on l'envoie
+    // Sinon on envoie undefined pour que le backend garde l'ancien
+    if (newPassword && newPassword.length < 14) {
       setMsg('Erreur : le mot de passe doit faire au moins 14 caractères.');
       return;
     }
     setSaving(true); setMsg('');
-    try { await api.dbBackupSaveConfig(cfg); setMsg('Planification enregistrée.'); }
+    try {
+      const payload = { ...cfg };
+      if (newPassword) payload.backup_password = newPassword;
+      // Si l'utilisateur efface tout (newPassword vide) et qu'il y avait un mdp,
+      // on considère qu'il veut le garder — pour le supprimer il doit saisir explicitement.
+      await api.dbBackupSaveConfig(payload);
+      if (newPassword) {
+        setHasPassword(true);
+        setNewPassword('');
+      }
+      setMsg('Planification enregistrée.');
+    }
+    catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function removePassword() {
+    if (!window.confirm('Supprimer le mot de passe de chiffrement ?\nLes prochaines sauvegardes ne seront plus chiffrées.')) return;
+    setSaving(true); setMsg('');
+    try {
+      await api.dbBackupSaveConfig({ ...cfg, backup_password: '' });
+      setHasPassword(false); setNewPassword('');
+      setMsg('Mot de passe supprimé. Les prochaines sauvegardes ne seront plus chiffrées.');
+    }
     catch (e) { setMsg('Erreur : ' + e.message); }
     finally { setSaving(false); }
   }
@@ -1841,15 +1948,30 @@ function DbBackupScheduleModal({ onClose }) {
 
           {/* Mot de passe de chiffrement */}
           <div className="form-group" style={{ margin:0 }}>
-            <label className="form-label" style={{ display:'flex', alignItems:'center', gap:6 }}>
-              Mot de passe de chiffrement / déchiffrement
-              <span style={{ fontWeight:400, fontSize:11, color:'var(--muted)' }}>— min. 14 caractères, optionnel</span>
+            <label className="form-label" style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                Mot de passe de chiffrement
+                {hasPassword && (
+                  <span style={{ fontSize:11, color:'var(--ok)', fontWeight:600 }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:11, height:11, verticalAlign:'middle', marginRight:3 }}>
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    Actif
+                  </span>
+                )}
+              </span>
+              {hasPassword && (
+                <button type="button" className="btn btn-sm" onClick={removePassword}
+                  style={{ fontSize:11, color:'var(--err)', borderColor:'var(--err)', padding:'1px 8px' }}>
+                  Supprimer
+                </button>
+              )}
             </label>
             <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
               <input className="form-control" type={showPwd ? 'text' : 'password'}
-                value={cfg.backup_password}
-                onChange={e => setCfg(c => ({...c, backup_password: e.target.value}))}
-                placeholder="Laisser vide = pas de chiffrement"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                placeholder={hasPassword ? '••••••••••••••  (laisser vide pour conserver)' : 'Laisser vide = pas de chiffrement (min. 14 car.)'}
                 style={{ paddingRight:36 }} />
               <button type="button" onClick={() => setShowPwd(v => !v)}
                 style={{ position:'absolute', right:8, background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:0 }}>
@@ -1859,14 +1981,15 @@ function DbBackupScheduleModal({ onClose }) {
                 }
               </button>
             </div>
-            {cfg.backup_password && cfg.backup_password.length > 0 && cfg.backup_password.length < 14 && (
+            {newPassword.length > 0 && newPassword.length < 14 && (
               <div style={{ fontSize:11, color:'var(--err)', marginTop:4 }}>
-                Minimum 14 caractères ({cfg.backup_password.length}/14)
+                Minimum 14 caractères ({newPassword.length}/14)
               </div>
             )}
             <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, lineHeight:1.5 }}>
-              Si renseigné, les fichiers de backup seront chiffrés en AES-256-GCM.
-              Conservez ce mot de passe en lieu sûr — sans lui, les backups chiffrés sont irrécupérables.
+              {hasPassword
+                ? 'Un mot de passe est actif. Laissez le champ vide pour le conserver, ou saisissez-en un nouveau pour le remplacer.'
+                : 'Si renseigné, les fichiers de backup seront chiffrés en AES-256-GCM. Conservez ce mot de passe en lieu sûr.'}
             </div>
           </div>
 
