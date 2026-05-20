@@ -103,7 +103,7 @@ function ProtectedRoutes() {
         <Route path="/backups"        element={<Backups />} />
         <Route path="/activite"       element={<Activity />} />
         <Route path="/appareils"      element={<Config />} />
-        <Route path="/automatisation" element={<Scripts />} />
+        <Route path="/documents" element={<Scripts />} />
         <Route path="/admin"          element={<Admin />} />
         <Route path="*"               element={<Navigate to="/" replace />} />
       </Routes>

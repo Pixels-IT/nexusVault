@@ -77,7 +77,7 @@ export default function Scripts() {
     <main>
       <div className="page-header">
         <div>
-          <div className="page-title">Automatisation</div>
+          <div className="page-title">Documents</div>
           <div className="page-sub">{t('automatisation.subtitle')}</div>
         </div>
       </div>
@@ -125,14 +125,20 @@ export default function Scripts() {
                     </span>
                     <span style={{ fontSize:14, color:'var(--txt)', fontWeight:600 }}>{cat.name}</span>
                   </div>
-                  <div style={{ fontSize:12, color:'var(--muted)', paddingLeft:20 }}>
-                    {cat.description || (childCount > 0
-                    ? `${childCount} sous-catégorie(s)`
-                    : docCounts[cat.id] !== undefined
-                      ? `${docCounts[cat.id]} document${docCounts[cat.id]!==1?'s':''}`
-                      : '…'
+                  {cat.description && (
+                    <div style={{ fontSize:11, color:'var(--muted)', paddingLeft:20, marginTop:2, fontStyle:'italic', lineHeight:1.4 }}>
+                      {cat.description}
+                    </div>
                   )}
-                  </div>
+                </div>
+                <div style={{ position:'absolute', bottom:12, left:14 }}>
+                  <span style={{ fontSize:10, color:'var(--muted)' }}>
+                    {childCount > 0
+                      ? `${childCount} sous-cat.`
+                      : docCounts[cat.id] !== undefined
+                        ? `${docCounts[cat.id]} doc${docCounts[cat.id]!==1?'s':''}`
+                        : '…'}
+                  </span>
                 </div>
                 <div style={{ position:'absolute', bottom:12, right:14 }}>
                   <span style={{ fontSize:10, color, background:`${color}22`, border:`1px solid ${color}44`, borderRadius:4, padding:'2px 6px', fontWeight:600 }}>
@@ -599,14 +605,48 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
                       <td style={{ padding:'7px 8px', textAlign:'right', whiteSpace:'nowrap' }}>
                         {(() => {
                           const fn = f.filename.toLowerCase();
-                          const canPreview = (catType === 'procedure' || catType === 'script') && (
-                            fn.endsWith('.pdf') || fn.endsWith('.txt') || fn.endsWith('.docx') || fn.endsWith('.doc') ||
-                            fn.endsWith('.md') || fn.endsWith('.yaml') || fn.endsWith('.yml') || fn.endsWith('.json') ||
-                            fn.endsWith('.xml') || fn.endsWith('.sh') || fn.endsWith('.py') || fn.endsWith('.js') ||
-                            fn.endsWith('.ts') || fn.endsWith('.sql') || fn.endsWith('.ini') || fn.endsWith('.conf') ||
-                            fn.endsWith('.log') || fn.endsWith('.csv') || fn.endsWith('.html') || fn.endsWith('.css') ||
-                            (f.mimetype||'').startsWith('text/')
-                          );
+                          const ext = fn.includes('.') ? fn.slice(fn.lastIndexOf('.')) : '';
+                          // Extensions reconnues — basé sur les ~90 langages Notepad++
+                          const TEXT_EXTENSIONS = new Set([
+                            '.sh','.bash','.zsh','.fish','.ksh','.csh','.tcsh','.ps1','.psm1','.psd1','.bat','.cmd',
+                            '.html','.htm','.xhtml','.css','.scss','.sass','.less',
+                            '.js','.mjs','.cjs','.jsx','.ts','.tsx','.vue','.svelte',
+                            '.json','.json5','.jsonc','.jsonl',
+                            '.xml','.xsl','.xslt','.xsd','.dtd','.rss','.atom','.svg','.wsdl',
+                            '.jsp','.asp','.aspx','.php','.phtml',
+                            '.yaml','.yml','.toml','.ini','.cfg','.conf','.config',
+                            '.env','.properties','.prop','.reg','.inf',
+                            '.tf','.tfvars','.hcl','.dockerfile',
+                            '.htaccess','.gitignore','.gitattributes','.editorconfig',
+                            '.py','.pyw','.pyi','.pyx','.pxd',
+                            '.rb','.rbw','.rake','.gemspec',
+                            '.java','.kt','.kts','.groovy','.scala','.clj','.cljs',
+                            '.c','.h','.cpp','.cxx','.cc','.hpp','.hxx',
+                            '.cs','.m','.mm','.swift','.go','.rs','.d','.nim',
+                            '.vb','.vbs','.bas',
+                            '.sql','.mysql','.pgsql','.plsql',
+                            '.md','.markdown','.rst','.txt','.log','.err','.text',
+                            '.tex','.latex','.bib',
+                            '.csv','.tsv','.diff','.patch',
+                            '.lua','.tcl','.r','.rmd','.jl',
+                            '.pl','.pm','.pod','.perl',
+                            '.awk','.sed',
+                            '.dart','.ex','.exs','.erl','.hrl','.elm',
+                            '.hs','.lhs','.f','.for','.f90','.f95',
+                            '.asm','.s','.nasm',
+                            '.lisp','.el','.scm','.ss','.rkt',
+                            '.coffee','.nsi','.nsh','.au3','.ahk',
+                            '.proto','.thrift','.gradle',
+                          ]);
+                          const SPECIAL_NAMES = new Set(['makefile','dockerfile','rakefile','vagrantfile',
+                            'gnumakefile','cmakelists.txt','sconscript','sconstruct','wscript','gemfile','procfile']);
+                          const baseName = fn.split('/').pop().split('\\').pop();
+                          // Tous les fichiers de type script/procédure peuvent être prévisualisés
+                          const canPreview = catType === 'procedure' || catType === 'script';
+                          const isKnownText = TEXT_EXTENSIONS.has(ext) || SPECIAL_NAMES.has(baseName) ||
+                            (f.mimetype||'').startsWith('text/') ||
+                            ext === '.pdf' || ext === '.docx' || ext === '.doc' ||
+                            ['.odt','.ods','.odp','.pptx','.xlsx'].includes(ext);
                           return (
                             <>
                               {canPreview && (
@@ -615,7 +655,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
                                     const btn = e.currentTarget;
                                     btn.disabled = true;
                                     const prev = btn.textContent;
-                                    btn.textContent = 'Conversion…';
+                                    btn.textContent = 'Chargement…';
                                     try {
                                       const data = await api.previewAutomationFile(f.id);
                                       setPreviewFile({...data, id: f.id});
@@ -624,7 +664,7 @@ function DocDetailModal({ doc, catType, catColor, canWrite, catId, onClose, onRe
                                       btn.textContent = prev;
                                     }
                                   }}>
-                                  Voir
+                                  {isKnownText ? 'Voir' : 'Voir (brut)'}
                                 </button>
                               )}
                               {canWrite && catType === 'procedure' && (
@@ -737,15 +777,60 @@ function FilePreviewModal({ file, catType, onClose }) {
   const codeRef = useRef(null);
 
   function detectLang(filename) {
-    const ext = filename.toLowerCase().split('.').pop();
+    const fn = filename.toLowerCase();
+    const ext = fn.includes('.') ? fn.slice(fn.lastIndexOf('.') + 1) : '';
     const map = {
-      yaml:'yaml', yml:'yaml', json:'json', xml:'xml', html:'html', htm:'html',
-      css:'css', js:'javascript', ts:'typescript', py:'python', sh:'bash',
-      sql:'sql', md:'markdown', ini:'ini', conf:'ini', cfg:'ini', log:'plaintext',
-      txt:'plaintext', csv:'plaintext', rb:'ruby', go:'go', java:'java',
-      c:'c', cpp:'cpp', h:'c', rs:'rust', php:'php',
+      // Shell / Scripts système
+      ps1:'powershell', psm1:'powershell', psd1:'powershell',
+      bat:'dos', cmd:'dos',
+      sh:'bash', bash:'bash', zsh:'bash', fish:'bash', ksh:'bash',
+      // Web
+      html:'xml', htm:'xml', xhtml:'xml', xml:'xml', xsl:'xml', svg:'xml',
+      css:'css', scss:'scss', sass:'scss', less:'less',
+      js:'javascript', mjs:'javascript', cjs:'javascript', jsx:'javascript',
+      ts:'typescript', tsx:'typescript',
+      json:'json', json5:'json', jsonc:'json',
+      yaml:'yaml', yml:'yaml',
+      toml:'ini', ini:'ini', cfg:'ini', conf:'ini', properties:'ini', env:'ini',
+      // Backend
+      php:'php', py:'python', pyw:'python', pyi:'python',
+      rb:'ruby', rake:'ruby',
+      java:'java', kt:'kotlin', kts:'kotlin', groovy:'groovy', scala:'scala',
+      go:'go', rs:'rust', swift:'swift', dart:'dart',
+      cs:'csharp', vb:'vbnet', vbs:'vbscript',
+      c:'c', h:'c', cpp:'cpp', cxx:'cpp', cc:'cpp', hpp:'cpp',
+      m:'objectivec', mm:'objectivec',
+      // DB
+      sql:'sql', mysql:'sql', pgsql:'pgsql', plsql:'sql',
+      // Markup / Docs
+      md:'markdown', markdown:'markdown', rst:'markdown',
+      tex:'latex', latex:'latex',
+      // Data
+      csv:'plaintext', tsv:'plaintext', diff:'diff', patch:'diff',
+      // Config / Infra
+      tf:'hcl', tfvars:'hcl', hcl:'hcl',
+      dockerfile:'dockerfile',
+      // Autres
+      lua:'lua', r:'r', jl:'julia',
+      pl:'perl', pm:'perl',
+      hs:'haskell', lhs:'haskell',
+      ex:'elixir', exs:'elixir',
+      erl:'erlang', hrl:'erlang',
+      coffee:'coffeescript',
+      lisp:'lisp', el:'lisp', scm:'scheme',
+      asm:'x86asm', s:'x86asm', nasm:'x86asm',
+      makefile:'makefile', mk:'makefile',
+      gradle:'gradle',
+      proto:'protobuf',
+      log:'plaintext', txt:'plaintext',
     };
-    return map[ext] || 'plaintext';
+    // Noms de fichiers sans extension
+    const nameMap = {
+      makefile:'makefile', gnumakefile:'makefile', 'cmakelists.txt':'cmake',
+      dockerfile:'dockerfile', rakefile:'ruby', vagrantfile:'ruby',
+      gemfile:'ruby', procfile:'plaintext',
+    };
+    return nameMap[fn] || nameMap[fn.split('/').pop()] || map[ext] || 'plaintext';
   }
 
   const wordContainerRef = useRef(null);
@@ -813,14 +898,36 @@ function FilePreviewModal({ file, catType, onClose }) {
       document.head.appendChild(link);
     }
     const script = document.createElement('script');
+    // Bundle UMD complet (tous langages) — highlight.min.js est le bundle commun, on utilise unpkg pour le bundle all
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js';
-    script.onload = () => setHlReady(true);
+    script.onload = () => {
+      // Charger les langages supplémentaires non inclus dans le bundle commun
+      const extraLangs = ['powershell','dos','vbnet','vbscript','kotlin','groovy','scala',
+        'pgsql','scss','less','hcl','dart','objectivec','swift','elixir','erlang','coffeescript'];
+      let loaded = 0;
+      const done = () => { loaded++; if (loaded >= extraLangs.length) setHlReady(true); };
+      extraLangs.forEach(lang => {
+        const ls = document.createElement('script');
+        ls.src = `https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/${lang}.min.js`;
+        ls.onload = done; ls.onerror = done; // on continue même si un lang échoue
+        document.head.appendChild(ls);
+      });
+    };
     document.head.appendChild(script);
   }, [file.type, catType]);
 
   useEffect(() => {
     if (!hlReady || !codeRef.current || file.type !== 'text') return;
-    if (window.hljs) window.hljs.highlightElement(codeRef.current);
+    if (!window.hljs) return;
+    const el = codeRef.current;
+    // Réinitialiser le contenu et les attributs hljs pour forcer un nouveau highlight
+    // (sans ça, hljs saute les éléments déjà highlightés)
+    el.removeAttribute('data-highlighted');
+    el.textContent = file.content || '';
+    // Forcer la classe de langue détectée
+    const lang = detectLang(file.filename);
+    el.className = lang !== 'plaintext' ? `language-${lang}` : 'language-plaintext';
+    window.hljs.highlightElement(el);
   }, [hlReady, file]);
 
   function handleCopy() {
@@ -856,7 +963,7 @@ function FilePreviewModal({ file, catType, onClose }) {
           </span>
         )}
       </div>
-    } onClose={onClose} width="860px"
+    } onClose={onClose} width="1100px"
       headerActions={isScript && file.type === 'text' ? (
         <button className="btn btn-sm" onClick={handleCopy}
           style={{ display:'flex', alignItems:'center', gap:5,
@@ -876,15 +983,13 @@ function FilePreviewModal({ file, catType, onClose }) {
       {file.type === 'text' && (
         <div style={{ position:'relative' }}>
           {isScript ? (
-            <pre style={{ margin:0, borderRadius:'var(--r)', overflow:'auto', maxHeight:520, fontSize:12 }}>
-              <code ref={codeRef} className={`language-${lang}`} style={{ fontFamily:'var(--mono)' }}>
-                {file.content}
-              </code>
+            <pre style={{ margin:0, borderRadius:'var(--r)', overflow:'auto', maxHeight:680, fontSize:12 }}>
+              <code ref={codeRef} className={`language-${lang}`} style={{ fontFamily:'var(--mono)' }} />
             </pre>
           ) : (
             <pre style={{
               margin:0, padding:'16px', background:'var(--surf2)', borderRadius:'var(--r)',
-              overflow:'auto', maxHeight:520, fontSize:12, fontFamily:'var(--font)',
+              overflow:'auto', maxHeight:680, fontSize:12, fontFamily:'var(--font)',
               lineHeight:1.7, color:'var(--txt)', whiteSpace:'pre-wrap', wordBreak:'break-word'
             }}>
               {file.content}
@@ -916,7 +1021,7 @@ function FilePreviewModal({ file, catType, onClose }) {
           {wordHtml && wordHtml !== '__error__' && wordHtml !== '__odt__' && (
             <div className="mammoth-doc" style={{
               padding:'32px 48px', background:'white', borderRadius:'var(--r)',
-              maxHeight:560, overflowY:'auto', fontSize:'11pt',
+              maxHeight:680, overflowY:'auto', fontSize:'11pt',
               boxShadow:'inset 0 0 0 1px #e0e0e0',
             }} dangerouslySetInnerHTML={{ __html: wordHtml }} />
           )}
@@ -929,9 +1034,14 @@ function FilePreviewModal({ file, catType, onClose }) {
         </>
       )}
 
-      {file.type === 'unsupported' && (
+      {(file.type === 'unsupported' || file.type === 'binary') && (
         <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--muted)', fontSize:13 }}>
-          {t('automatisation.preview_unsupported')}
+          {file.type === 'binary'
+            ? <><div style={{ fontSize:32, marginBottom:12 }}>🔒</div>
+                <div>Fichier binaire — aperçu non disponible.</div>
+                <div style={{ fontSize:11, marginTop:6 }}>Taille : {file.size ? (file.size >= 1024 ? (file.size/1024).toFixed(0)+' Ko' : file.size+' o') : '?'}</div></>
+            : t('automatisation.preview_unsupported')
+          }
         </div>
       )}
     </Modal>

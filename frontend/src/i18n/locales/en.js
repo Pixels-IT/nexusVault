@@ -4,7 +4,8 @@ export default {
   // ── nav ──
   'nav.dashboard': 'Dashboard',
   'nav.backups': 'Backups',
-  'nav.automatisation': 'Automation',
+  'nav.automatisation': 'Documents'
+  ,'nav.documents': 'Documents',
   'nav.activity': 'Activity Log',
   'nav.admin': 'Administration',
 
@@ -59,7 +60,7 @@ export default {
   'dash.title': 'Dashboard',
   'dash.subtitle': 'Overview of your environment',
   'dash.backups': 'Configuration Backups',
-  'dash.automation': 'Automation',
+  'dash.automation': 'Documents',
   'dash.activity': 'Activity Log',
   'dash.backups_total': 'Total backups',
   'dash.devices': 'Devices',
@@ -157,7 +158,7 @@ export default {
   'admin.my_account': 'My account',
   'admin.personalisation': 'Customization',
   'admin.devices': 'Devices',
-  'admin.automatisation_menu': 'Automation',
+  'admin.automatisation_menu': 'Documents',
   'admin.activity_menu': 'Activity Log',
   'admin.users': 'Users',
   'admin.security': 'Security',
@@ -289,11 +290,11 @@ export default {
   'activity_tags.in_use': 'This tag is used in notes and cannot be deleted.',
 
   // ── automatisation ──
-  'automatisation.title': 'Automation',
+  'automatisation.title': 'Documents',
   'automatisation.subtitle': 'Documents and files by category',
   'automatisation.home': 'Home',
   'automatisation.no_cats': 'No categories available',
-  'automatisation.no_cats_desc': 'Create categories in Admin → Automation → Categories',
+  'automatisation.no_cats_desc': 'Create categories in Admin → Documents → Categories',
   'automatisation.docs_count': '{n} document(s)',
   'automatisation.sub_cats': '{n} sub-category(ies)',
   'automatisation.docs_title': 'Documents',
@@ -459,7 +460,7 @@ export default {
   'activity.import_done': 'Import complete',
 
   // ── automatisation ──
-  'automatisation.admin_path': 'Admin → Automation → Categories',
+  'automatisation.admin_path': 'Admin → Documents → Categories',
   'automatisation.doc_name_ph': 'Ex: SSL wildcard certificate',
   'automatisation.doc_note_ph': 'Free notes about this document…',
   'automatisation.name_required': 'Name is required.',
@@ -637,7 +638,7 @@ export default {
   'ret.no_retention': '✅ No items in retention',
   'ret.restore': '↩ Restore',
   'ret.tab_activity': 'Activity tracking',
-  'ret.tab_automation': 'Automation',
+  'ret.tab_automation': 'Documents',
   'ret.tab_backup': 'Backup',
   'ret.title': 'Deleted item retention',
   'scripts.empty_doc': 'Empty document.',
@@ -699,5 +700,22 @@ export default {
   // ── common extra ──
   'common.option_on':  'Option enabled.',
   'common.option_off': 'Option disabled.',
+
+  'security.pwd_min_title': 'Minimum password length',
+  'security.pwd_min_label': 'Minimum number of characters',
+  'security.pwd_min_hint': 'Recommendations: CNIL ≥ 12, ANSSI ≥ 12 (complex) or 14 (simple), NIS2 ≥ 12.',
+  'security.pwd_min_saved': 'Minimum length saved.',
+  'security.pwd_min_chars': 'characters minimum',
+  'users.auth_type': 'Type',
+  'users.auth_local': 'Local',
+  'users.auth_oidc': 'OIDC',
+  'users.auth_ldap': 'LDAP',
+
+  'cron.db_backup_sqlite_title': 'SQLite automatic backup schedule',
+  'cron.vacuum_into_hint': 'Backup uses',
+  'cron.vacuum_into_desc': 'consistent without service interruption. Keep your password safe.',
+  'cron.vacuum_into_simple': 'consistent without service interruption.',
+  'cron.total_backup_size': 'used by SQLite backups',
+  'security.pwd_min_perm': 'Manage minimum password length',
 
 };

@@ -49,8 +49,8 @@ const EVENT_CATALOG = {
   },
   backup_schedule_result: {
     key:         'backup_schedule_result',
-    label:       'Résultat des sauvegardes automatiques',
-    description: 'Envoie un rapport après chaque exécution de planification : statut (succès/échec) pour chaque équipement.',
+    label:       'Résultat des sauvegardes automatiques des équipements',
+    description: 'Envoie un rapport après chaque exécution de planification de backup équipement : statut (succès/échec) par équipement.',
     options:     { notify_on_success: true, notify_on_failure: true },
   },
   document_deleted: {
@@ -105,6 +105,12 @@ const EVENT_CATALOG = {
     key:         'db_backup_restored',
     label:       'Restauration d\'une backup SQLite',
     description: 'Alerte quand un utilisateur restaure la base de données depuis un fichier de sauvegarde.',
+    options:     {},
+  },
+  db_backup_sqlite_alert: {
+    key:         'db_backup_sqlite_alert',
+    label:       'Alerte des sauvegardes SQLite',
+    description: 'Envoyée après chaque backup SQLite automatique : nom du fichier, date, taille, statut OK ou Échec.',
     options:     {},
   },
 };
@@ -351,12 +357,15 @@ function buildMessage(eventKey, p) {
         bodyText: p.text || '',
       };
 
-    case 'expiration_document':
+    case 'expiration_document': {
+      const daysLabel = p.daysLeft === 0 ? '⚠ Aujourd\'hui' : p.daysLeft === 1 ? '⚠ Demain' : `Dans ${p.daysLeft} jour${p.daysLeft > 1 ? 's' : ''}`;
+      const urgentColor = p.daysLeft <= 1 ? '#d63939' : p.daysLeft <= 2 ? '#f76707' : '#0e9f8e';
       return {
-        subject: `Document expirant bientôt — ${p.name || '?'}`,
-        body: `<p>Un document va expirer prochainement.</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b;width:140px">Document</td><td style="padding:6px 10px"><strong>${p.name || '?'}</strong></td></tr><tr style="background:#f8fafc"><td style="padding:6px 10px;color:#64748b">Expiration</td><td style="padding:6px 10px">${p.valid_until || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Catégorie</td><td style="padding:6px 10px">${p.category || '?'}</td></tr></table>`,
-        bodyText: `Document "${p.name}" expire le ${p.valid_until} (catégorie: ${p.category})`,
+        subject: `⏰ Document expirant bientôt — ${p.name || '?'} (${daysLabel})`,
+        body: `<p>Un document va expirer prochainement.</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b;width:140px">Document</td><td style="padding:6px 10px"><strong>${p.name || '?'}</strong></td></tr><tr style="background:#f8fafc"><td style="padding:6px 10px;color:#64748b">Expiration</td><td style="padding:6px 10px">${p.valid_until || '?'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Catégorie</td><td style="padding:6px 10px">${p.category || '?'}</td></tr><tr style="background:#f8fafc"><td style="padding:6px 10px;color:#64748b">Délai</td><td style="padding:6px 10px;font-weight:700;color:${urgentColor}">${daysLabel}</td></tr></table>`,
+        bodyText: `Document "${p.name || '?'}" expire le ${p.valid_until || '?'} — ${daysLabel} (catégorie: ${p.category || '?'})`,
       };
+    }
 
     case 'file_deleted':
       return {

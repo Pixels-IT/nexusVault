@@ -98,6 +98,13 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 
+
+// Helper : longueur minimale de mot de passe selon les paramètres
+function getPasswordMinLength(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='password_min_length'").get();
+  return row ? parseInt(row.value) : 14;
+}
+
 // Helper : heure locale formatée pour SQLite (respecte TZ du conteneur)
 function nowLocal() {
   const d = new Date();
@@ -166,9 +173,21 @@ function verifyIdTokenSignature(idToken, cfg) {
       algorithms: ['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'ES512'],
     };
     if (cfg.client_id) opts.audience = cfg.client_id;
-    if (cfg.issuer_url) opts.issuer = cfg.issuer_url.replace(/\/$/, '');
+    // Ne pas vérifier l'issuer via jwt.verify : l'issuer réel de l'id_token
+    // (ex: https://auth.domain.fr/realms/nexus) peut différer de issuer_url
+    // configuré (https://auth.domain.fr). On vérifie manuellement après décodage.
     jwt.verify(idToken, getKey, opts, (err, claims) => {
       if (err) return reject(err);
+      // Vérification manuelle de l'issuer : si issuer_url est configuré,
+      // on accepte si l'iss du token commence par issuer_url (préfixe)
+      // ou correspond exactement. Cela couvre Keycloak (/realms/...) et Authentik.
+      if (cfg.issuer_url && claims.iss) {
+        const cfgBase = cfg.issuer_url.replace(/\/$/, '');
+        const tokenIss = claims.iss.replace(/\/$/, '');
+        if (tokenIss !== cfgBase && !tokenIss.startsWith(cfgBase + '/')) {
+          return reject(new Error(`issuer mismatch: token="${tokenIss}", config="${cfgBase}"`));
+        }
+      }
       resolve(claims);
     });
   });
@@ -176,6 +195,20 @@ function verifyIdTokenSignature(idToken, cfg) {
 
 // ── HEALTH ────────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+// ── PROXY Docker Hub — évite les erreurs CORS du navigateur ──────────────────
+app.get('/api/docker-hub/tags', authMiddleware, (req, res) => {
+  const https = require('https');
+  const url = 'https://hub.docker.com/v2/repositories/pixelsia/nexusvault-frontend/tags?page_size=10&ordering=last_updated';
+  https.get(url, { headers: { Accept: 'application/json', 'User-Agent': 'NexusVault' } }, (r) => {
+    let data = '';
+    r.on('data', d => data += d);
+    r.on('end', () => {
+      try { res.json(JSON.parse(data)); }
+      catch { res.status(502).json({ error: 'Réponse Docker Hub invalide' }); }
+    });
+  }).on('error', (e) => res.status(502).json({ error: e.message }));
+});
 
 // ── WHITELIST MIDDLEWARE (sauf health) ─────────────────────────────────────────
 app.use((req, res, next) => {
@@ -337,8 +370,9 @@ app.post('/api/auth/change-password', authMiddleware, (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const ip = getClientIp(req);
   const db = getDb();
-  if (!newPassword || newPassword.length < 14)
-    return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 14 caractères' });
+  const _minPwd1 = getPasswordMinLength(db);
+  if (!newPassword || newPassword.length < _minPwd1)
+    return res.status(400).json({ error: `Le mot de passe doit contenir au moins ${_minPwd1} caractères` });
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!bcrypt.compareSync(currentPassword, user.password_hash)) {
     audit(db, { userId: req.user.id, username: req.user.username, action: 'CHANGEMENT_MDP_ÉCHEC', category: 'auth', severity: 'warn', detail: 'Mot de passe actuel incorrect', ip, success: 0 });
@@ -364,8 +398,9 @@ app.post('/api/auth/force-change-password', authMiddleware, (req, res) => {
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
   if (!user.must_change_password)
     return res.status(403).json({ error: 'Changement de mot de passe non requis' });
-  if (!new_password || new_password.length < 14)
-    return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 14 caractères' });
+  const _minPwd2 = getPasswordMinLength(db);
+  if (!new_password || new_password.length < _minPwd2)
+    return res.status(400).json({ error: `Le mot de passe doit contenir au moins ${_minPwd2} caractères` });
   if (bcrypt.compareSync(new_password, user.password_hash))
     return res.status(400).json({ error: 'Le nouveau mot de passe ne peut pas être identique à l\'ancien' });
   const hash = bcrypt.hashSync(new_password, 12);
@@ -435,8 +470,13 @@ app.get('/api/users/for-activity', authMiddleware, (req, res) => {
 });
 
 app.get('/api/users', authMiddleware, requireRole('admin'), (req, res) => {
-  const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at, locked_until, failed_attempts, totp_enabled FROM users ORDER BY id').all();
-  res.json(rows);
+  const rows = getDb().prepare('SELECT id, username, display_name, email, role, permissions, enabled, last_login_at, created_at, updated_at, locked_until, failed_attempts, totp_enabled, password_hash FROM users ORDER BY id').all();
+  // Déduire le type d'authentification et masquer le hash
+  res.json(rows.map(u => {
+    const auth_type = u.password_hash === '' || u.password_hash === null ? 'oidc' : 'local';
+    const { password_hash, ...safe } = u;
+    return { ...safe, auth_type };
+  }));
 });
 
 app.post('/api/users', authMiddleware, requireRole('admin'), async (req, res) => {
@@ -519,7 +559,8 @@ app.put('/api/users/:id', authMiddleware, requireRole('admin'), (req, res) => {
   const ip = getClientIp(req);
   const db = getDb();
   if (password) {
-    if (password.length < 14) return res.status(400).json({ error: 'Mot de passe: 14 caractères minimum' });
+    const _minPwd3 = getPasswordMinLength(getDb());
+  if (password.length < _minPwd3) return res.status(400).json({ error: `Mot de passe: ${_minPwd3} caractères minimum` });
     const hash = bcrypt.hashSync(password, 12);
     db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?`).run(hash, nowLocal(), req.params.id);
   }
@@ -671,6 +712,7 @@ app.post('/api/notifications/test/:eventKey', authMiddleware, requirePerm('secur
     db_backup_deleted:      { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), filename: 'nexusvault_db_20260519_020000.sqlite' },
     db_backup_downloaded:   { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), filename: 'nexusvault_db_20260519_020000.sqlite' },
     db_backup_restored:     { datetime: nowLocal(), username: req.user.username, ip: getClientIp(req), filename: 'nexusvault_db_20260519_020000.sqlite' },
+    db_backup_sqlite_alert: { datetime: nowLocal(), filename: 'nexusvault_db_20260520_020000.sqlite.enc', size: 172032, encrypted: true, status: 'OK' },
   };
   dispatch(req.params.eventKey, testPayloads[req.params.eventKey] || {}, getDb)
     .then(() => res.json({ success: true }))
@@ -1302,7 +1344,8 @@ app.post('/api/auth/forgot-password', resetRateLimit, (req, res) => {
 app.post('/api/auth/reset-password', resetRateLimit, (req, res) => {
   const { token, password } = req.body;
   if (!token || !password) return res.status(400).json({ error: 'Paramètres manquants' });
-  if (password.length < 14) return res.status(400).json({ error: '14 caractères minimum' });
+  const _minRst = getPasswordMinLength(getDb());
+  if (password.length < _minRst) return res.status(400).json({ error: `${_minRst} caractères minimum` });
   const db   = getDb();
   const now  = nowLocal();
   const row  = db.prepare("SELECT * FROM password_reset_tokens WHERE token=? AND used=0 AND expires_at > ?").get(token, now);
@@ -1544,9 +1587,11 @@ function checkPreviewCrons() {
   const hh = nowDate.getHours(), mm = nowDate.getMinutes();
   const todayStr = nowDate.toISOString().slice(0,10);
   const isAt0005 = (hh === 0 && mm === 5 && _lastCronDate !== todayStr);
+  // isOncePerDay : vrai une seule fois par jour (à 00h05 ou au premier appel de la journée)
+  const isOncePerDay = (_lastCronDate !== todayStr);
 
-  // Si c'est 00h05 et pas encore exécuté aujourd'hui, marquer comme exécuté
-  if (isAt0005) _lastCronDate = todayStr;
+  // Si c'est 00h05 ou premier appel de la journée, marquer comme exécuté
+  if (isOncePerDay) _lastCronDate = todayStr;
 
   // Récapitulatif des notes en brouillon passées (00h05 seulement)
   const overdueRow = db.prepare("SELECT * FROM notification_config WHERE event_key='preview_overdue' AND enabled=1").get();
@@ -1653,32 +1698,51 @@ function checkPreviewCrons() {
       dispatch('retention_recap', { html, text, count }, getDb).catch(() => {});
     }
   }
-  // expiration_document : catégories temporaires arrivant à expiration
-  // expiration_document : catégories temporaires — multi-seuils (00h05)
+  // expiration_document : documents de type temporaire arrivant à expiration
   const expiRow = db.prepare("SELECT * FROM notification_config WHERE event_key='expiration_document' AND enabled=1").get();
-  if (expiRow && isAt0005) {
+  if (expiRow && isOncePerDay) {
     let opts = {}; try { opts = JSON.parse(expiRow.options || '{}'); } catch {}
     const daysBefore = parseInt(opts.days_before) || 30;
-    // Seuils : daysBefore, puis 5j, 2j, 1j (si <= daysBefore)
-    const thresholds = [daysBefore, 5, 2, 1].filter((v,i,a) => v <= daysBefore && a.indexOf(v)===i).sort((a,b)=>b-a);
     const todayStr2 = nowDate.toISOString().slice(0,10);
-    const allExpiring = db.prepare("SELECT * FROM automation_categories WHERE type='temporary' AND valid_until IS NOT NULL AND valid_until >= ?").all(todayStr2);
-    const toNotify = allExpiring.filter(cat => {
-      const daysLeft = Math.ceil((new Date(cat.valid_until) - nowDate) / 86400000);
-      return thresholds.some(t => daysLeft === t);
-    });
-    if (toNotify.length > 0) {
-      const items = toNotify.map(cat => {
-        const name = decrypt(cat.label_enc || cat.name_enc || '');
-        const daysLeft = Math.ceil((new Date(cat.valid_until) - nowDate) / 86400000);
-        return { name, valid_until: cat.valid_until, daysLeft };
+    // Chercher les documents (et catégories temporaires) dont la date d'expiration
+    // est entre aujourd'hui et aujourd'hui + daysBefore jours
+    const maxDate = new Date(nowDate); maxDate.setDate(maxDate.getDate() + daysBefore);
+    const maxDateStr = maxDate.toISOString().slice(0,10);
+    // Documents avec valid_until
+    const expiringDocs = db.prepare(`
+      SELECT d.name, d.valid_until, c.name as cat_name
+      FROM automation_documents d
+      JOIN automation_categories c ON d.category_id = c.id
+      WHERE d.valid_until IS NOT NULL
+        AND d.valid_until >= ? AND d.valid_until <= ?
+      ORDER BY d.valid_until ASC
+    `).all(todayStr2, maxDateStr);
+    // Catégories temporaires avec valid_until
+    const expiringCats = db.prepare(`
+      SELECT name, valid_until, 'catégorie' as cat_name
+      FROM automation_categories
+      WHERE type='temporary' AND valid_until IS NOT NULL
+        AND valid_until >= ? AND valid_until <= ?
+      ORDER BY valid_until ASC
+    `).all(todayStr2, maxDateStr);
+    const allExpiring = [...expiringDocs, ...expiringCats];
+    if (allExpiring.length > 0) {
+      const items = allExpiring.map(item => {
+        // daysLeft = 0 si expire aujourd'hui, 1 si demain, etc.
+        const diff = new Date(item.valid_until) - nowDate;
+        const daysLeft = Math.max(0, Math.ceil(diff / 86400000));
+        return { name: item.name, category: item.cat_name, valid_until: item.valid_until, daysLeft };
       });
-      const html = `<p>⏰ ${items.length} catégorie(s) arrivant à expiration :</p>`
-        + `<table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Catégorie</th><th style="padding:6px 8px;text-align:left">Expiration</th><th style="padding:6px 8px;text-align:left">Jours restants</th></tr>`
-        + items.map(i => `<tr><td style="padding:6px 8px"><strong>${i.name}</strong></td><td style="padding:6px 8px">${i.valid_until}</td><td style="padding:6px 8px">${i.daysLeft} jour${i.daysLeft>1?'s':''}</td></tr>`).join('')
-        + '</table>';
-      const text = items.map(i => `${i.name} : expire le ${i.valid_until} (dans ${i.daysLeft} jour${i.daysLeft>1?'s':''})`).join('\n');
-      dispatch('expiration_document', { html, text, count: items.length, datetime: nowLocal() }, getDb).catch(() => {});
+      // Envoyer une notification par document (le template attend p.name, p.valid_until, p.category)
+      for (const item of items) {
+        dispatch('expiration_document', {
+          name: item.name,
+          valid_until: item.valid_until,
+          category: item.category,
+          daysLeft: item.daysLeft,
+          datetime: nowLocal(),
+        }, getDb).catch(() => {});
+      }
     }
   }
 }
@@ -2598,7 +2662,8 @@ app.get('/api/db-backups', authMiddleware, requirePerm('site_backup_access'), (r
         return { filename: f, size: stat.size, created_at: localDate, encrypted: f.endsWith('.enc') };
       })
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    res.json(files);
+    const total_size = files.reduce((s, f) => s + f.size, 0);
+    res.json({ files, total_size });
   } catch (e) { res.json([]); }
 });
 
@@ -2725,7 +2790,8 @@ app.put('/api/db-backups/config', authMiddleware, requirePerm('site_backup_acces
   const updates = { frequency, hour: String(hour), minute: String(minute), retention_count: String(rc) };
   if (changingPassword) {
     const pwd = req.body.backup_password || '';
-    if (pwd && pwd.length < 14) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 14 caractères.' });
+    const _minBkp = getPasswordMinLength(db);
+  if (pwd && pwd.length < _minBkp) return res.status(400).json({ error: `Le mot de passe de chiffrement doit faire au moins ${_minBkp} caractères.` });
     updates.backup_password = pwd;
   }
   for (const [k, v] of Object.entries(updates)) {
@@ -2764,11 +2830,20 @@ function scheduleDbBackup(db) {
         const cronCfg = Object.fromEntries(getDb().prepare('SELECT key, value FROM db_backup_config').all().map(r => [r.key, r.value]));
         const cronPwd = cronCfg.backup_password || '';
         const r = doDbBackup(getDb(), cronPwd);
+        const cronNow = nowLocal();
         logger.info(`[DB-BACKUP] Backup effectué : ${r.filename} (${r.size} octets${r.encrypted?' chiffré':''})`);
         audit(getDb(), { action: 'DB_BACKUP_AUTO', category: 'sécurité', severity: 'info',
           detail: `${r.filename} — ${r.size} octets`, success: 1 });
+        dispatch('db_backup_sqlite_alert', {
+          filename: r.filename, size: r.size, datetime: cronNow,
+          encrypted: r.encrypted, status: 'OK',
+        }, getDb).catch(() => {});
       } catch (e) {
         logger.error('[DB-BACKUP] Échec du backup automatique :', e.message);
+        dispatch('db_backup_sqlite_alert', {
+          filename: '—', size: 0, datetime: nowLocal(),
+          error: e.message, status: 'Échec',
+        }, getDb).catch(() => {});
       }
       scheduleDbBackup(getDb()); // replanifier
     }, ms);
@@ -2892,18 +2967,24 @@ app.get('/api/settings', authMiddleware, requireRole('admin'), (req, res) => {
   const rows = getDb().prepare("SELECT key, value FROM settings WHERE key != 'initialized'").all();
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
-  // Valeur par défaut : 30 minutes
   if (!obj.session_timeout_minutes) obj.session_timeout_minutes = '30';
+  if (!obj.password_min_length) obj.password_min_length = '14';
   res.json(obj);
 });
 
 app.put('/api/settings', authMiddleware, requireRole('admin'), (req, res) => {
   const db = getDb();
   const ip = getClientIp(req);
-  const allowed = ['session_timeout_minutes'];
+  const allowed = ['session_timeout_minutes', 'password_min_length'];
   for (const key of allowed) {
     if (req.body[key] !== undefined) {
-      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, String(req.body[key]));
+      let val = String(req.body[key]);
+      if (key === 'password_min_length') {
+        const n = parseInt(val);
+        if (isNaN(n) || n < 8 || n > 20) return res.status(400).json({ error: 'Longueur minimale invalide (8–20)' });
+        val = String(n);
+      }
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, val);
     }
   }
   audit(db, { userId: req.user.id, username: req.user.username, action: 'PARAMÈTRES_MODIFIÉS', category: 'admin', severity: 'info', detail: JSON.stringify(req.body), ip, success: 1 });
@@ -2912,8 +2993,13 @@ app.put('/api/settings', authMiddleware, requireRole('admin'), (req, res) => {
 
 // Route publique : timeout de session (le frontend en a besoin sans être admin)
 app.get('/api/settings/public', (req, res) => {
-  const row = getDb().prepare("SELECT value FROM settings WHERE key = 'session_timeout_minutes'").get();
-  res.json({ session_timeout_minutes: row ? parseInt(row.value) : 30 });
+  const db = getDb();
+  const timeout = db.prepare("SELECT value FROM settings WHERE key = 'session_timeout_minutes'").get();
+  const minPwd  = db.prepare("SELECT value FROM settings WHERE key = 'password_min_length'").get();
+  res.json({
+    session_timeout_minutes: timeout ? parseInt(timeout.value) : 30,
+    password_min_length: minPwd ? parseInt(minPwd.value) : 14,
+  });
 });
 
 
@@ -2965,11 +3051,25 @@ app.post('/api/activity/tags', authMiddleware, requirePerm('activity_tags'), (re
 });
 
 app.put('/api/activity/tags/:id', authMiddleware, requirePerm('activity_tags'), (req, res) => {
-  const { label, color } = req.body;
+  const { label, color, code } = req.body;
   const db = getDb(); const ip = getClientIp(req);
   const tag = db.prepare('SELECT code FROM activity_tags WHERE id=?').get(req.params.id);
+  if (!tag) return res.status(404).json({ error: 'Tag introuvable' });
+  const updates = [];
+  if (code && code !== tag.code) {
+    const newCode = code.toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 10);
+    if (!newCode) return res.status(400).json({ error: 'Code invalide' });
+    const exists = db.prepare('SELECT id FROM activity_tags WHERE code=? AND id!=?').get(newCode, req.params.id);
+    if (exists) return res.status(400).json({ error: 'Ce code existe déjà' });
+    // Mise à jour en cascade des entrées d'activité qui utilisent l'ancien code
+    db.prepare('UPDATE activity_entries SET tag_code=? WHERE tag_code=?').run(newCode, tag.code);
+    db.prepare('UPDATE activity_tags SET code=? WHERE id=?').run(newCode, req.params.id);
+    updates.push(`code: ${tag.code} → ${newCode}`);
+  }
   db.prepare('UPDATE activity_tags SET label=?, color=? WHERE id=?').run(label, color, req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_MODIFIÉ', category: 'suivi', severity: 'info', detail: `Tag [${tag?.code || req.params.id}] → libellé: "${label}", couleur: ${color}`, ip, success: 1 });
+  updates.push(`libellé: "${label}"`, `couleur: ${color}`);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'TAG_MODIFIÉ', category: 'suivi', severity: 'info',
+    detail: `Tag [${tag.code}] → ${updates.join(', ')}`, ip, success: 1 });
   res.json({ success: true });
 });
 
@@ -3501,7 +3601,7 @@ app.post('/api/automation/categories', authMiddleware, requirePerm('automatisati
   const db = getDb(); const ip = getClientIp(req);
   const r = db.prepare('INSERT INTO automation_categories (name, description, type, color, parent_id, valid_until) VALUES (?,?,?,?,?,?)')
     .run(name.trim(), description?.trim() || null, type || 'generic', color || '#066fd1', parent_id || null, valid_until || null);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_CRÉÉE', category: 'automatisation', severity: 'info',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_CRÉÉE', category: 'document', severity: 'info',
     detail: `"${name.trim()}" (${type || 'generic'})`, ip, success: 1 });
   res.json({ id: r.lastInsertRowid, success: true });
 });
@@ -3520,7 +3620,7 @@ app.put('/api/automation/categories/:id', authMiddleware, requirePerm('automatis
   const changes = [];
   if (existing.name !== name.trim()) changes.push(`nom: "${existing.name}" → "${name.trim()}"`);
   if (existing.type !== (type || 'generic')) changes.push(`type: ${existing.type} → ${type}`);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_MODIFIÉE', category: 'automatisation', severity: 'info',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_MODIFIÉE', category: 'document', severity: 'info',
     detail: `"${name.trim()}" (${type || 'generic'})${changes.length ? ' — ' + changes.join(', ') : ''}`, ip, success: 1 });
   res.json({ success: true });
 });
@@ -3533,7 +3633,7 @@ app.delete('/api/automation/categories/:id', authMiddleware, requirePerm('automa
   const children = db.prepare('SELECT COUNT(*) as c FROM automation_categories WHERE parent_id=?').get(req.params.id).c;
   if (children > 0) return res.status(409).json({ error: `Cette catégorie a ${children} sous-catégorie(s). Supprimez-les d'abord.` });
   db.prepare('DELETE FROM automation_categories WHERE id=?').run(req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_SUPPRIMÉE', category: 'automatisation', severity: 'warn',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'CAT_SUPPRIMÉE', category: 'document', severity: 'warn',
     detail: `"${cat.name}" (${cat.type})`, ip, success: 1 });
   res.json({ success: true });
 });
@@ -3544,7 +3644,7 @@ app.delete('/api/automation/categories/:id', authMiddleware, requirePerm('automa
 app.get('/api/automation/categories/:id/documents', authMiddleware, (req, res) => {
   const db = getDb();
   const docs = db.prepare(`
-    SELECT d.*, u.username as created_by_name,
+    SELECT d.*, COALESCE(u.display_name, u.username) as created_by_name,
       (SELECT COUNT(*) FROM automation_document_files f WHERE f.document_id = d.id) as file_count
     FROM automation_documents d
     LEFT JOIN users u ON d.created_by = u.id
@@ -3556,18 +3656,19 @@ app.get('/api/automation/categories/:id/documents', authMiddleware, (req, res) =
 app.get('/api/automation/documents/:id', authMiddleware, (req, res) => {
   const db = getDb(); const ip = getClientIp(req);
   const doc = db.prepare(`
-    SELECT d.*, u.username as created_by_name, c.type as category_type
+    SELECT d.*, COALESCE(u.display_name, u.username) as created_by_name, c.type as category_type
     FROM automation_documents d
     LEFT JOIN users u ON d.created_by = u.id
     LEFT JOIN automation_categories c ON d.category_id = c.id
     WHERE d.id = ?`).get(req.params.id);
   if (!doc) return res.status(404).json({ error: 'Introuvable' });
   const files = db.prepare(`
-    SELECT f.id, f.filename, f.mimetype, f.size_bytes, f.uploaded_at, u.username as uploaded_by_name
+    SELECT f.id, f.filename, f.mimetype, f.size_bytes, f.uploaded_at,
+           COALESCE(u.display_name, u.username) as uploaded_by_name
     FROM automation_document_files f
     LEFT JOIN users u ON f.uploaded_by = u.id
     WHERE f.document_id = ? ORDER BY f.uploaded_at ASC`).all(req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_CONSULTÉ', category: 'automatisation', severity: 'info',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_CONSULTÉ', category: 'document', severity: 'info',
     detail: `Document "${doc.name}"`, ip, success: 1, ref_id: doc.id });
   res.json({ ...doc, files });
 });
@@ -3580,7 +3681,7 @@ app.post('/api/automation/categories/:id/documents', authMiddleware, requirePerm
   const cat = db.prepare('SELECT * FROM automation_categories WHERE id=?').get(req.params.id);
   const r = db.prepare('INSERT INTO automation_documents (category_id, name, description, note, valid_until, doc_password, created_by) VALUES (?,?,?,?,?,?,?)')
     .run(req.params.id, name.trim(), description?.trim()||null, note?.trim()||null, valid_until||null, doc_password||null, req.user.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_CRÉÉ', category: 'automatisation', severity: 'info',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_CRÉÉ', category: 'document', severity: 'info',
     detail: `Document "${name.trim()}" dans catégorie "${cat?.name||req.params.id}"`, ip, success: 1, ref_id: r.lastInsertRowid });
   res.json({ id: r.lastInsertRowid, success: true });
 });
@@ -3594,7 +3695,7 @@ app.put('/api/automation/documents/:id', authMiddleware, requirePerm('automatisa
   if (!doc) return res.status(404).json({ error: 'Introuvable' });
   db.prepare('UPDATE automation_documents SET name=?, description=?, note=?, valid_until=?, doc_password=?, updated_at=? WHERE id=?')
     .run(name.trim(), description?.trim()||null, note?.trim()||null, valid_until||null, doc_password||doc.doc_password||null, nowLocal(), req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_MODIFIÉ', category: 'automatisation', severity: 'info',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_MODIFIÉ', category: 'document', severity: 'info',
     detail: `Document "${name.trim()}"`, ip, success: 1, ref_id: parseInt(req.params.id) });
   res.json({ success: true });
 });
@@ -3607,7 +3708,7 @@ app.delete('/api/automation/documents/:id', authMiddleware, requirePerm('automat
     const _docFull = db.prepare('SELECT * FROM automation_documents WHERE id=?').get(req.params.id);
     addToRetention(db, { item_type:'document', item_id:parseInt(req.params.id), item_data:_docFull, deleted_by:req.user.id, deleted_by_name:req.user.username, meta:{ label:_docFull?.name } });
   db.prepare('DELETE FROM automation_documents WHERE id=?').run(req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_SUPPRIMÉ', category: 'automatisation', severity: 'warn',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_SUPPRIMÉ', category: 'document', severity: 'warn',
     detail: `Document "${doc.name}"`, ip, success: 1 });
   let _catLabel = '?'; try { const _cr = db.prepare('SELECT name FROM automation_categories WHERE id=?').get(doc.category_id); if (_cr) _catLabel = _cr.name; } catch {}
   dispatch('document_deleted', { name: doc.name, category: _catLabel, username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(() => {});
@@ -3623,7 +3724,7 @@ app.post('/api/automation/documents/:id/files', authMiddleware, requirePerm('aut
   const buf = Buffer.from(data, 'base64');
   const r = db.prepare('INSERT INTO automation_document_files (document_id, filename, mimetype, size_bytes, data, uploaded_by) VALUES (?,?,?,?,?,?)')
     .run(req.params.id, filename, mimetype||'application/octet-stream', buf.length, buf, req.user.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_AJOUTÉ', category: 'automatisation', severity: 'info',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_AJOUTÉ', category: 'document', severity: 'info',
     detail: `"${filename}" → document "${doc.name}"`, ip, success: 1, ref_id: parseInt(req.params.id) });
   res.json({ id: r.lastInsertRowid, success: true });
 });
@@ -3633,7 +3734,7 @@ app.get('/api/automation/files/:id/download', authMiddleware, requirePerm('autom
   const db = getDb(); const ip = getClientIp(req);
   const row = db.prepare(`SELECT f.*, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Introuvable' });
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_TÉLÉCHARGÉ', category: 'automatisation', severity: 'info',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_TÉLÉCHARGÉ', category: 'document', severity: 'info',
     detail: `"${row.filename}" (doc: "${row.doc_name}")`, ip, success: 1, ref_id: row.document_id });
   res.setHeader('Content-Disposition', safeContentDisposition(row.filename));
   res.setHeader('Content-Type', row.mimetype || 'application/octet-stream');
@@ -3650,7 +3751,7 @@ app.delete('/api/automation/files/:id', authMiddleware, requirePerm('automatisat
   const _fileDoc = _fileFull ? db.prepare('SELECT name FROM automation_documents WHERE id=?').get(_fileFull.document_id) : null;
   addToRetention(db, { item_type:'doc_file', item_id:parseInt(req.params.id), item_data:{..._fileFull, data:_fileFull?.data ? Buffer.from(_fileFull.data).toString('base64') : null}, deleted_by:req.user.id, deleted_by_name:req.user.username, meta:{ label:_fileFull?.filename, doc_name:_fileDoc?.name } });
   db.prepare('DELETE FROM automation_document_files WHERE id=?').run(req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_SUPPRIMÉ', category: 'automatisation', severity: 'warn',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_SUPPRIMÉ', category: 'document', severity: 'warn',
     detail: `"${f.filename}" du document "${f.doc_name}"`, ip, success: 1, ref_id: f.document_id });
   dispatch('file_deleted', { filename: _fileFull?.filename || '?', doc_name: _fileDoc?.name || '?', username: req.user.username, ip, datetime: nowLocal() }, getDb).catch(() => {});
   res.json({ success: true });
@@ -3681,7 +3782,7 @@ app.post('/api/automation/files/:id/replace', authMiddleware, requirePerm('autom
 
   const detail = `Fichier "${oldFile.filename}" remplacé par "${filename}" dans "${oldFile.doc_name}"`;
   audit(db, { userId: req.user.id, username: req.user.username,
-    action: 'FICHIER_REMPLACÉ', category: 'automatisation', severity: 'info',
+    action: 'FICHIER_REMPLACÉ', category: 'document', severity: 'info',
     detail, ip, success: 1, ref_id: oldFile.doc_id });
 
   res.json({ success: true, newFileId });
@@ -3691,7 +3792,7 @@ app.post('/api/automation/files/:id/replace', authMiddleware, requirePerm('autom
 app.post('/api/automation/documents/:id/access-denied', authMiddleware, (req, res) => {
   const db = getDb(); const ip = getClientIp(req);
   const doc = db.prepare('SELECT name FROM automation_documents WHERE id=?').get(req.params.id);
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_ACCÈS_REFUSÉ', category: 'automatisation', severity: 'warn',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DOC_ACCÈS_REFUSÉ', category: 'document', severity: 'warn',
     detail: `Tentative d'accès refusée — document "${doc?.name||req.params.id}"`, ip, success: 0, ref_id: parseInt(req.params.id) });
   res.json({ success: true });
 });
@@ -3701,7 +3802,7 @@ app.post('/api/automation/files/:id/copy-audit', authMiddleware, (req, res) => {
   const db = getDb(); const ip = getClientIp(req);
   const row = db.prepare(`SELECT f.filename, d.name as doc_name FROM automation_document_files f LEFT JOIN automation_documents d ON f.document_id=d.id WHERE f.id=?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Introuvable' });
-  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_COPIÉ', category: 'automatisation', severity: 'info',
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'FICHIER_COPIÉ', category: 'document', severity: 'info',
     detail: `"${row.filename}" (doc: "${row.doc_name}") copié dans le presse-papier`, ip, success: 1 });
   res.json({ success: true });
 });
@@ -3720,7 +3821,7 @@ app.get('/api/automation/files/:id/preview', authMiddleware, async (req, res) =>
   if (!row) return res.status(404).json({ error: 'Introuvable' });
 
   audit(db, { userId: req.user.id, username: req.user.username,
-    action: 'FICHIER_PRÉVISUALISÉ', category: 'automatisation', severity: 'info',
+    action: 'FICHIER_PRÉVISUALISÉ', category: 'document', severity: 'info',
     detail: `"${row.filename}" (doc: "${row.doc_name}")`, ip, success: 1, ref_id: row.document_id });
 
   const buf = Buffer.from(row.data);
@@ -3799,17 +3900,63 @@ app.get('/api/automation/files/:id/preview', authMiddleware, async (req, res) =>
       filename: row.filename, mimetype: 'application/pdf' });
   }
 
-  // ── Texte / Code ─────────────────────────────────────────────────────────────
-  if (mime.startsWith('text/') || mime.includes('json') || mime.includes('yaml') ||
-      mime.includes('xml') || mime.includes('javascript') || mime.includes('python') ||
-      mime.includes('shell') || ['.txt','.md','.yaml','.yml','.json','.xml','.sh',
-      '.py','.js','.ts','.sql','.ini','.cfg','.conf','.toml','.html','.htm',
-      '.css','.rb','.go','.java','.c','.cpp','.h','.rs','.php'].some(e => fn.endsWith(e))) {
+  // ── Texte / Code — liste exhaustive synchronisée avec canPreview du frontend ──
+  const TEXT_EXTS = new Set([
+    '.sh','.bash','.zsh','.fish','.ksh','.csh','.tcsh','.ps1','.psm1','.psd1','.bat','.cmd',
+    '.html','.htm','.xhtml','.css','.scss','.sass','.less',
+    '.js','.mjs','.cjs','.jsx','.ts','.tsx','.vue','.svelte',
+    '.json','.json5','.jsonc','.jsonl',
+    '.xml','.xsl','.xslt','.xsd','.dtd','.rss','.atom','.svg','.wsdl',
+    '.jsp','.asp','.aspx','.php','.phtml',
+    '.yaml','.yml','.toml','.ini','.cfg','.conf','.config',
+    '.env','.properties','.prop','.reg','.inf',
+    '.tf','.tfvars','.hcl','.dockerfile',
+    '.htaccess','.gitignore','.gitattributes','.editorconfig',
+    '.py','.pyw','.pyi','.pyx','.pxd',
+    '.rb','.rbw','.rake','.gemspec',
+    '.java','.kt','.kts','.groovy','.scala','.clj','.cljs',
+    '.c','.h','.cpp','.cxx','.cc','.hpp','.hxx',
+    '.cs','.m','.mm','.swift','.go','.rs','.d','.nim',
+    '.vb','.vbs','.bas',
+    '.sql','.mysql','.pgsql','.plsql',
+    '.md','.markdown','.rst','.txt','.log','.err','.text',
+    '.tex','.latex','.bib',
+    '.csv','.tsv','.diff','.patch',
+    '.lua','.tcl','.r','.rmd','.jl',
+    '.pl','.pm','.pod','.perl',
+    '.awk','.sed',
+    '.dart','.ex','.exs','.erl','.hrl','.elm',
+    '.hs','.lhs','.f','.for','.f90','.f95',
+    '.asm','.s','.nasm',
+    '.lisp','.el','.scm','.ss','.rkt',
+    '.coffee','.nsi','.nsh','.au3','.ahk',
+    '.proto','.thrift','.gradle',
+  ]);
+  const isTextExt = TEXT_EXTS.has(path.extname(fn)) || TEXT_EXTS.has(fn); // noms sans extension (Makefile…)
+  const isTextMime = mime.startsWith('text/') || mime.includes('json') || mime.includes('yaml') ||
+    mime.includes('xml') || mime.includes('javascript') || mime.includes('python') || mime.includes('shell');
+
+  if (isTextExt || isTextMime) {
     return res.json({ type: 'text', content: buf.toString('utf8'),
-      filename: row.filename, mimetype: mime });
+      filename: row.filename, mimetype: mime || 'text/plain' });
   }
 
-  res.json({ type: 'unsupported', filename: row.filename });
+  // ── Fallback : tout fichier non reconnu est traité comme texte brut ──────────
+  // On tente un décodage UTF-8. Si le contenu est lisible, on l'affiche comme texte.
+  // Sinon on signale que c'est un fichier binaire non prévisualisable.
+  try {
+    const textContent = buf.toString('utf8');
+    // Heuristique : si > 10% des caractères sont des null bytes ou caractères de contrôle,
+    // c'est probablement du binaire
+    const controlCount = (textContent.match(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g) || []).length;
+    if (controlCount / textContent.length > 0.1) {
+      return res.json({ type: 'binary', filename: row.filename, size: buf.length });
+    }
+    return res.json({ type: 'text', content: textContent,
+      filename: row.filename, mimetype: 'text/plain' });
+  } catch {
+    return res.json({ type: 'binary', filename: row.filename, size: buf.length });
+  }
 });
 
 // Historique d'un document

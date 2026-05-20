@@ -4,7 +4,8 @@ export default {
   // ── nav ──
   'nav.dashboard': 'Tableau de bord',
   'nav.backups': 'Backups',
-  'nav.automatisation': 'Automatisation',
+  'nav.automatisation': 'Documents'
+  ,'nav.documents': 'Documents',
   'nav.activity': "Suivi d'activité",
   'nav.admin': 'Administration',
 
@@ -59,7 +60,7 @@ export default {
   'dash.title': 'Tableau de bord',
   'dash.subtitle': "Vue d'ensemble de votre environnement",
   'dash.backups': 'Sauvegardes de configuration',
-  'dash.automation': 'Automatisation',
+  'dash.automation': 'Documents',
   'dash.activity': "Suivi d'activité",
   'dash.backups_total': 'Sauvegardes totales',
   'dash.devices': 'Équipements',
@@ -157,7 +158,7 @@ export default {
   'admin.my_account': 'Mon compte',
   'admin.personalisation': 'Personnalisation',
   'admin.devices': 'Appareils',
-  'admin.automatisation_menu': 'Automatisation',
+  'admin.automatisation_menu': 'Documents',
   'admin.activity_menu': "Suivi d'activité",
   'admin.users': 'Utilisateurs',
   'admin.security': 'Sécurité',
@@ -289,11 +290,11 @@ export default {
   'activity_tags.in_use': 'Ce tag est utilisé dans des notes et ne peut pas être supprimé.',
 
   // ── automatisation ──
-  'automatisation.title': 'Automatisation',
+  'automatisation.title': 'Documents',
   'automatisation.subtitle': 'Documents et fichiers par catégorie',
   'automatisation.home': 'Accueil',
   'automatisation.no_cats': 'Aucune catégorie disponible',
-  'automatisation.no_cats_desc': 'Créez des catégories dans Admin → Automatisation → Catégories',
+  'automatisation.no_cats_desc': 'Créez des catégories dans Admin → Documents → Catégories',
   'automatisation.docs_count': '{n} document(s)',
   'automatisation.sub_cats': '{n} sous-catégorie(s)',
   'automatisation.docs_title': 'Documents',
@@ -459,7 +460,7 @@ export default {
   'activity.import_done': '✓ Import terminé',
 
   // ── automatisation ──
-  'automatisation.admin_path': 'Admin → Automatisation → Catégories',
+  'automatisation.admin_path': 'Admin → Documents → Catégories',
   'automatisation.doc_name_ph': 'Ex: Certificat SSL wildcard',
   'automatisation.doc_note_ph': 'Notes libres sur ce document…',
   'automatisation.name_required': 'Le nom est obligatoire.',
@@ -526,7 +527,7 @@ export default {
   'auth.sso_login': 'Connexion SSO / OIDC',
 
   // ── cron ──
-  'cron.backup_schedules': 'Planifications de sauvegardes',
+  'cron.backup_schedules': 'Planifications de sauvegardes des équipements',
   'cron.add_schedule':   'Nouvelle planification',
   'cron.no_schedules':   'Aucune planification configurée.',
   'cron.select_devices': 'Sélectionner les équipements',
@@ -637,7 +638,7 @@ export default {
   'ret.no_retention': '✅ Aucun élément en rétention',
   'ret.restore': '↩ Restaurer',
   'ret.tab_activity': 'Suivi d\'activité',
-  'ret.tab_automation': 'Automatisation',
+  'ret.tab_automation': 'Documents',
   'ret.tab_backup': 'Backup',
   'ret.title': 'Rétention des documents/fichiers supprimés',
   'scripts.empty_doc': 'Document vide.',
@@ -699,5 +700,24 @@ export default {
   // ── common extra ──
   'common.option_on':  'Option activée.',
   'common.option_off': 'Option désactivée.',
+
+  // ── Longueur minimale des mots de passe ──
+  'security.pwd_min_title': 'Longueur minimale des mots de passe',
+  'security.pwd_min_label': 'Nombre minimum de caractères',
+  'security.pwd_min_hint': 'Recommandations : CNIL ≥ 12, ANSSI ≥ 12 (complexe) ou 14 (simple), NIS2 ≥ 12.',
+  'security.pwd_min_saved': 'Longueur minimale enregistrée.',
+  'security.pwd_min_chars': 'caractères minimum',
+  // ── Type de authentification (Users) ──
+  'users.auth_type': 'Type',
+  'users.auth_local': 'Local',
+  'users.auth_oidc': 'OIDC',
+  'users.auth_ldap': 'LDAP',
+
+  'cron.db_backup_sqlite_title': 'Planification des sauvegardes automatiques SQLite',
+  'cron.vacuum_into_hint': 'Le backup utilise',
+  'cron.vacuum_into_desc': 'cohérent sans interruption de service. Conservez votre mot de passe en lieu sûr.',
+  'cron.vacuum_into_simple': 'cohérent sans interruption de service.',
+  'cron.total_backup_size': 'utilisés par les sauvegardes SQLite',
+  'security.pwd_min_perm': 'Gérer la longueur minimale des mots de passe',
 
 };

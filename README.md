@@ -27,7 +27,7 @@ En cas de compromission, les attaquants ont tout sous la main !
 - **Groupement optionnel** des sites par pays (option activable dans Appareils → Options)
 - **Export CSV.gz** des backups
 
-### Automatisation
+### Documents
 - **Catégories hiérarchiques** avec niveaux imbriqués, types : Générique, Temporaire, Procédure, Script, Sécurisé
 - **Catégories colorées** avec date de validité (type Temporaire) et alertes d'expiration
 - **Documents** : création, édition, historique complet des modifications
@@ -55,12 +55,23 @@ En cas de compromission, les attaquants ont tout sous la main !
   - Tentatives de connexion échouées (seuil configurable)
   - Compte verrouillé par brute-force
   - Téléchargement de configuration
-  - Résultat des sauvegardes automatiques (rapport succès/échec par équipement)
+  - Résultat des sauvegardes automatiques des équipements (rapport succès/échec par équipement)
+  - Alerte des sauvegardes SQLite : résultat (OK/Échec), nom du fichier, taille, date
   - Expiration de documents temporaires
   - Suppression d'un document / fichier de document / suivi / fichier de suivi / sauvegarde
   - Récapitulatif des notes en preview (00h05, fréquence quotidienne/hebdo/mensuelle)
   - Récapitulatif des fichiers en rétention (00h05, fréquence quotidienne/hebdo/mensuelle)
 - **Journal des notifications** : historique des envois avec statut succès/erreur
+
+### Sécurité renforcée
+- **Chiffrement AES-256-GCM authentifié** pour les données sensibles en base (migration automatique depuis CBC)
+- **Dérivation de clé par scrypt** avec sel d'installation (résistant au brute-force)
+- **Vérification JWKS des id_token OIDC** : signature cryptographique RSA/ECDSA via le point JWKS du fournisseur
+- **Nonce OIDC de bout en bout** : protection contre le rejeu de tokens
+- **Validation du state anti-CSRF** stricte avec `crypto.getRandomValues`
+- **Rate limiting par IP** sur les routes d'authentification (login, reset, OIDC)
+- **Vérification TOFU des clés d'hôte SSH** : protection contre le MITM sur les équipements réseau
+- **Longueur minimale des mots de passe configurable** (8–20 car.) avec recommandations CNIL/ANSSI/NIS2 — s'applique aux comptes locaux, documents sécurisés et sauvegardes chiffrées
 
 ### Rétention des éléments supprimés
 - **Corbeille configurable** pour les backups, documents, fichiers de documents et suivis d'activité
@@ -73,7 +84,7 @@ En cas de compromission, les attaquants ont tout sous la main !
 
 ### Tableau de bord
 - **Section Backups** : total backups, équipements, sites, modèles
-- **Section Automatisation** : total documents, 3 derniers ajoutés, top 3 catégories avec code couleur, prochaines expirations
+- **Section Documents** : total documents, 3 derniers ajoutés, top 3 catégories avec code couleur, prochaines expirations
 - **Section Suivi** : notes totales, activité du mois courant, top 3 tags par année (N et N-1)
 
 ### Journal d'audit
@@ -272,6 +283,8 @@ Chaque valeur sensible est individuellement chiffrée avec un IV aléatoire avan
 | Journal d'audit | ✓ | ✗ | ✗ |
 | Accès sécurité | ✓ | ✗ | ✗ |
 | Accès à la rétention | ✓ | ✗ | ✗ |
+| Backup SQLite (sauvegarde/restauration) | ✓ | ✗ | ✗ |
+| Gérer la longueur min. des mots de passe | ✓ | ✗ | ✗ |
 | Suivi d'activité (écriture) | ✓ | ✓ | ✓ |
 | Suivi d'activité (lecture) | ✓ | ✓ | ✗ |
 | Automatisation (lecture) | ✓ | ✓ | ✓ |
@@ -296,7 +309,23 @@ Les lignes ignorées lors de la comparaison : timestamps, dates de dernier login
 
 ---
 
-## Sauvegarde des données
+## Sauvegarde des données SQLite intégrée
+
+NexusVault inclut un système de sauvegarde automatique de la base SQLite, configurable depuis **Admin → Planificateur** :
+
+- **Planification cron** : quotidienne, hebdomadaire ou mensuelle, à l'heure et aux minutes configurées
+- **Chiffrement AES-256-GCM** optionnel avec mot de passe (≥ 14 car. par défaut, configurable)
+- **Rétention configurable** : 1 à 30 fichiers conservés (les plus anciens sont purgés automatiquement)
+- **Sauvegarde manuelle** depuis Admin → Sécurité → Général → Sauvegarde des données
+- **Téléchargement et restauration** depuis l'interface (le fichier `.sqlite.enc` est restauré après déchiffrement)
+- **Notification** : alerte envoyée après chaque backup automatique (succès ou échec)
+- **Droit d'accès dédié** `site_backup_access`
+
+> La méthode `VACUUM INTO` garantit un backup cohérent sans interruption de service.
+
+---
+
+## Sauvegarde des données (volume Docker)
 
 ```bash
 # Identifier le volume

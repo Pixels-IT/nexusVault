@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useI18n } from '../contexts/I18nContext.jsx';
+import { APP_VERSION } from '../version.js';
+import { usePasswordMin, invalidatePasswordMin } from '../hooks/usePasswordMin.js';
 import { Modal, Alert, ConfirmModal, Spinner } from '../components/UI.jsx';
 import PersonnalisationPage from './Personnalisation.jsx';
 import { usePerms, invalidatePermsCache } from '../hooks/usePerms.js';
@@ -493,6 +495,7 @@ function AutomationOptionsTab() {
 function AccountTab({ forcePasswordChange }) {
   const { t } = useI18n();
   const { user, logout } = useAuth();
+  const passwordMin = usePasswordMin();
   const [data, setData] = useState({ username: '', display_name: '', email: '' });
   const [pwData, setPwData] = useState({ cur: '', nw: '', confirm: '' });
   const [msg, setMsg] = useState('');
@@ -511,7 +514,7 @@ function AccountTab({ forcePasswordChange }) {
 
   async function savePassword(e) {
     e.preventDefault(); setPwErr(''); setPwMsg('');
-    if (pwData.nw.length < 14) return setPwErr('14 caractères minimum');
+    if (pwData.nw.length < passwordMin) return setPwErr(`${passwordMin} ${t('security.pwd_min_chars') || 'caractères minimum'}`);
     if (pwData.nw !== pwData.confirm) return setPwErr('Les mots de passe ne correspondent pas');
     try {
       await api.changePassword(pwData.cur, pwData.nw);
@@ -568,11 +571,11 @@ function AccountTab({ forcePasswordChange }) {
               <input className="form-control" type="password" value={pwData.cur} onChange={e => setPwData(d => ({ ...d, cur: e.target.value }))} />
             </div>
             <div className="form-group">
-              <label className="form-label">Nouveau mot de passe <span style={{ color: 'var(--err)' }}>— 14 car. min.</span></label>
+              <label className="form-label">Nouveau mot de passe <span style={{ color: 'var(--err)' }}>— {passwordMin} {t('security.pwd_min_chars') || 'car. min.'}</span></label>
               <input className="form-control" type="password" value={pwData.nw} onChange={e => setPwData(d => ({ ...d, nw: e.target.value }))} />
               {pwData.nw.length > 0 && (
                 <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-                  {[{ ok: pwData.nw.length >= 14, l: '14+' }, { ok: /[A-Z]/.test(pwData.nw), l: 'MAJ' }, { ok: /[0-9]/.test(pwData.nw), l: '123' }, { ok: /[^A-Za-z0-9]/.test(pwData.nw), l: '!@#' }].map(({ ok, l }) => (
+                  {[{ ok: pwData.nw.length >= passwordMin, l: `${passwordMin}+` }, { ok: /[A-Z]/.test(pwData.nw), l: 'MAJ' }, { ok: /[0-9]/.test(pwData.nw), l: '123' }, { ok: /[^A-Za-z0-9]/.test(pwData.nw), l: '!@#' }].map(({ ok, l }) => (
                     <span key={l} style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 600, background: ok ? 'var(--ok-s)' : 'var(--surf2)', color: ok ? 'var(--ok)' : 'var(--muted)' }}>{l}</span>
                   ))}
                 </div>
@@ -626,8 +629,8 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
     if (!data.username.trim()) return setError(`${t('auth.username')} requis`);
     if (!data.email.trim()) return setError(`${t('account.email')} obligatoire`);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email.trim())) return setError('Email invalide (ex: nom@domaine.com)');
-    if (!isNew && data.password && data.password.length < 14)
-      return setError('Mot de passe : 14 caractères minimum');
+    if (!isNew && data.password && data.password.length < passwordMin)
+      return setError(`Mot de passe : ${passwordMin} ${t('security.pwd_min_chars') || 'caractères minimum'}`);
     setLoading(true);
     try {
       if (isNew) {
@@ -769,6 +772,7 @@ function UserModal({ user, onClose, onSave, isLastAdmin = false }) {
 
 function UsersTab() {
   const { t } = useI18n();
+  const passwordMin = usePasswordMin();
   const [users, setUsers] = useState([]);
   const [adminCount, setAdminCount] = useState(2); // nb admins actifs
   const [modal, setModal] = useState(null);
@@ -800,6 +804,7 @@ function UsersTab() {
       <table>
         <thead>
           <tr style={{ borderBottom:'1px solid var(--brd)', background:'var(--surf2)' }}>
+            <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600, width:'70px' }}>{t('users.auth_type') || 'Type'}</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('users.username')}</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>{t('auto_cat.col_name')}</th>
             <th style={{ padding:'7px 8px', textAlign:'center', fontSize:11, color:'var(--muted)', fontWeight:600 }}>E-mail</th>
@@ -813,6 +818,14 @@ function UsersTab() {
         <tbody>
           {users.map(u => (
             <tr key={u.id}>
+              <td style={{ padding:'9px 4px', textAlign:'center' }}>
+                {u.auth_type === 'oidc'
+                  ? <span className="badge" style={{ background:'#dbeafe', color:'#1d4ed8', fontSize:10 }}>{t('users.auth_oidc')||'OIDC'}</span>
+                  : u.auth_type === 'ldap'
+                  ? <span className="badge" style={{ background:'#fef3c7', color:'#92400e', fontSize:10 }}>{t('users.auth_ldap')||'LDAP'}</span>
+                  : <span className="badge" style={{ background:'var(--surf2)', color:'var(--muted)', fontSize:10 }}>{t('users.auth_local')||'Local'}</span>
+                }
+              </td>
               <td style={{ padding:'9px 8px', textAlign:'center', fontWeight:600, fontSize:13 }}>{u.username}</td>
               <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{u.display_name}</td>
               <td style={{ padding:'9px 8px', textAlign:'center', fontSize:12 }}>{u.email || <span style={{color:'var(--muted)'}}>—</span>}</td>
@@ -874,7 +887,7 @@ const PERM_DEFS = [
     ],
   },
   {
-    section: 'Automatisation',
+    section: 'Documents',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
     perms: [
       { key: 'automatisation_read',  label: 'Consulter les scripts' },
@@ -902,7 +915,7 @@ const PERM_DEFS = [
     section: 'Menu Configuration Scripts',
     icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
     perms: [
-      { key: 'automatisation',         label: "Consulter (menu Admin → Scripts)" },
+      { key: 'document',               label: "Consulter (menu Admin → Documents)" },
       { key: 'automatisation_options', label: "Accès à l'onglet Options" },
     ],
   },
@@ -921,6 +934,7 @@ const PERM_DEFS = [
       { key: 'audit_access',      label: "Accès au journal d'audit" },
       { key: 'audit_archive',     label: "Accès aux archives d'audit" },
       { key: 'security_access',   label: "Accès à Sécurité" },
+      { key: 'pwd_min_access',    label: "Gérer la longueur minimale des mots de passe" },
       { key: 'retention_access',  label: "Accès à la rétention" },
       { key: 'site_backup_access', label: "Accès au backup du site" },
     ],
@@ -1059,6 +1073,98 @@ function RolePermissionsCard() {
 }
 
 // ── ONGLET SYSTÈME ─────────────────────────────────────────────────────────────
+// ── DOCKER HUB UPDATE CARD ────────────────────────────────────────────────────
+function DockerUpdateCard({ currentVersion }) {
+  const [status, setStatus]   = useState('loading'); // loading | uptodate | outdated | error
+  const [latestTag, setLatest] = useState('');
+  const [checking, setChecking] = useState(false);
+
+  async function check() {
+    setChecking(true); setStatus('loading');
+    try {
+      // Proxy backend — évite les erreurs CORS (Docker Hub bloque les appels directs du navigateur)
+      const token = localStorage.getItem('dp_token');
+      const res = await fetch('/api/docker-hub/tags', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`Docker Hub HTTP ${res.status}`);
+      const data = await res.json();
+      // Filtrer les tags de version (format YYYY-MM-DD-bNNN), exclure "latest"
+      const versionTags = (data.results || [])
+        .map(t => t.name)
+        .filter(n => /^\d{4}-\d{2}-\d{2}-b\d+$/.test(n))
+        .sort((a, b) => {
+          // Trier par numéro de build (bNNN)
+          const ba = parseInt(a.match(/b(\d+)$/)?.[1] || 0);
+          const bb = parseInt(b.match(/b(\d+)$/)?.[1] || 0);
+          return bb - ba;
+        });
+      if (!versionTags.length) throw new Error('Aucun tag de version trouvé');
+      const latest = versionTags[0];
+      setLatest(latest);
+      // Comparer par numéro de build
+      const currentBuild = parseInt(currentVersion.match(/b(\d+)$/)?.[1] || 0);
+      const latestBuild  = parseInt(latest.match(/b(\d+)$/)?.[1] || 0);
+      setStatus(currentBuild >= latestBuild ? 'uptodate' : 'outdated');
+    } catch (e) {
+      setStatus('error');
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  useEffect(() => { check(); }, []);
+
+  const colors = {
+    loading:  { bg: 'var(--surf2)', border: 'var(--brd)',  text: 'var(--muted)', label: 'Vérification…' },
+    uptodate: { bg: '#14532d22',   border: 'var(--ok)',    text: 'var(--ok)',    label: '✓ À jour' },
+    outdated: { bg: '#7f1d1d22',   border: 'var(--err)',   text: 'var(--err)',   label: '↑ Mise à jour disponible' },
+    error:    { bg: 'var(--surf2)', border: 'var(--muted)', text: 'var(--muted)', label: 'Impossible de vérifier' },
+  };
+  const s = colors[status] || colors.loading;
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:16,height:16}}>
+            <path d="M21 2H3v16h5v4l4-4h5l4-4V2zM11 11V7M16 11V7M6 11V7"/>
+          </svg>
+          Mise à jour de NexusVault
+        </div>
+      </div>
+      <div style={{padding:16, display:'flex', flexDirection:'column', gap:10, alignItems:'center'}}>
+        <div style={{ fontSize:11, color:'var(--muted)', textAlign:'center' }}>
+          Version actuelle : <span style={{ fontFamily:'var(--mono)', fontWeight:600 }}>{currentVersion}</span>
+        </div>
+        {status !== 'loading' && latestTag && (
+          <div style={{ fontSize:11, color:'var(--muted)', textAlign:'center' }}>
+            Dernière version : <span style={{ fontFamily:'var(--mono)', fontWeight:600 }}>{latestTag}</span>
+          </div>
+        )}
+        <button onClick={check} disabled={checking}
+          style={{
+            padding:'8px 18px', borderRadius:'var(--r)', border:`1.5px solid ${s.border}`,
+            background: s.bg, color: s.text, fontWeight:700, fontSize:13, cursor: checking ? 'wait' : 'pointer',
+            display:'flex', alignItems:'center', gap:6, transition:'all .2s',
+          }}>
+          {checking
+            ? <><span style={{display:'inline-block',animation:'spin 1s linear infinite'}}>⟳</span> Vérification…</>
+            : s.label
+          }
+        </button>
+        {status === 'outdated' && (
+          <a href="https://hub.docker.com/r/pixelsia/nexusvault-frontend/tags"
+            target="_blank" rel="noopener noreferrer"
+            style={{ fontSize:11, color:'var(--acc)', textDecoration:'none' }}>
+            Voir sur Docker Hub →
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SecuritySystemTab() {
   const { t } = useI18n();
   const [data, setData] = useState(null);
@@ -1204,8 +1310,8 @@ function SecuritySystemTab() {
         </div>
       </div>
 
-      {/* Cron + Whitelist */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+      {/* Cron + Whitelist + Mise à jour */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
         <div className="card">
           <div className="card-header">
             <div className="card-title">
@@ -1232,6 +1338,7 @@ function SecuritySystemTab() {
               <span style={{fontSize:11,color:'var(--warn)',alignSelf:'center'}}>{t('sys.whitelist_open')}</span>}
           </div>
         </div>
+        <DockerUpdateCard currentVersion={APP_VERSION} />
       </div>
 
     </div>
@@ -1444,6 +1551,9 @@ function SecurityGeneralTab() {
         <WhitelistCard />
       </div>
 
+      {/* Card longueur minimale des mots de passe */}
+      <PwdMinCard />
+
       {/* Sauvegarde des données */}
       <DbBackupCard />
 
@@ -1451,6 +1561,74 @@ function SecurityGeneralTab() {
   );
 }
 
+
+// ── CARD LONGUEUR MINIMALE MDP ─────────────────────────────────────────────────
+function PwdMinCard() {
+  const { t } = useI18n();
+  const { can, isAdmin } = usePerms();
+  const currentMin = usePasswordMin(); // hook avant tout early return
+  if (!isAdmin && !can('pwd_min_access')) return null;
+  const [value, setValue]   = useState(String(currentMin));
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg]       = useState('');
+
+  useEffect(() => { setValue(String(currentMin)); }, [currentMin]);
+
+  async function save() {
+    setSaving(true); setMsg('');
+    try {
+      await api.updateSettings({ password_min_length: parseInt(value) });
+      invalidatePasswordMin();
+      setMsg(t('security.pwd_min_saved') || 'Longueur minimale enregistrée.');
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:15, height:15 }}>
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          {t('security.pwd_min_title') || 'Longueur minimale des mots de passe'}
+        </div>
+      </div>
+      <div style={{ padding:16 }}>
+        {msg && <div className={`alert alert-${msg.startsWith('Err') ? 'err' : 'ok'}`} style={{ marginBottom:12, fontSize:12 }}>{msg}</div>}
+        <div style={{ display:'flex', alignItems:'center', gap:16, flexWrap:'wrap' }}>
+          <div className="form-group" style={{ margin:0, minWidth:200 }}>
+            <label className="form-label">{t('security.pwd_min_label') || 'Nombre minimum de caractères'}</label>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <select className="form-control" style={{ width:120 }} value={value} onChange={e => setValue(e.target.value)}>
+                {Array.from({length:13},(_,i)=>i+8).map(n => (
+                  <option key={n} value={n}>
+                    {n} {t('security.pwd_min_chars') || 'caractères'}
+                    {n === 12 ? ' ✓ CNIL/ANSSI' : ''}
+                    {n === 14 ? ' ✓ ANSSI renforcé' : ''}
+                    {n === 16 ? ' ✓ NIS2 renforcé' : ''}
+                  </option>
+                ))}
+              </select>
+              <button className="btn btn-primary" onClick={save} disabled={saving}>
+                {saving ? '…' : t('auto_cat.save') || 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+          <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.7, flex:1 }}>
+            <div>📋 <strong>CNIL</strong> : ≥ 12 caractères avec complexité</div>
+            <div>🛡️ <strong>ANSSI</strong> : ≥ 12 (complexe) ou ≥ 14 (simple)</div>
+            <div>🌐 <strong>NIS2</strong> : ≥ 12, recommande ≥ 16 pour les systèmes critiques</div>
+            <div>🔐 <strong>NIST SP 800-63B</strong> : ≥ 8, privilégier la longueur à la complexité</div>
+          </div>
+        </div>
+        <div style={{ fontSize:11, color:'var(--muted)', marginTop:10, lineHeight:1.5 }}>
+          {t('security.pwd_min_hint') || 'Cette valeur s\'applique aux mots de passe des comptes locaux, aux documents sécurisés et aux sauvegardes chiffrées.'}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── WHITELIST CARD (extraite pour layout 50/50) ──────────────────────────────
 function WhitelistCard() {
@@ -1484,7 +1662,7 @@ function WhitelistCard() {
       </div>
       <div style={{ padding: 16 }}>
         <div className="alert alert-warn" style={{ marginBottom: 14, justifyContent: 'center', textAlign: 'center', fontSize: 12 }}>
-          {t('security.whitelist_desc') || "Liste vide = tout accès autorisé. Dès qu'une règle est active, seules "}les adresses listées peuvent accéder.
+          {t('security.whitelist_desc') || "Liste vide = tout accès autorisé à l'application. Dès qu'une règle est active, seules les adresses listées peuvent accéder à l'application."}
         </div>
         {wlError && <div className="alert alert-err">{wlError}</div>}
         <form onSubmit={addRule} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -1540,11 +1718,10 @@ const DB_BACKUP_MINUTES = [0,5,10,15,20,25,30,35,40,45,50,55];
 function DbBackupCard() {
   const { t } = useI18n();
   const { can } = usePerms();
-  if (!can('site_backup_access')) return null;
-
+  const passwordMin = usePasswordMin();
+  // États — tous les hooks avant le return conditionnel
   const [files, setFiles]             = useState([]);
   const [loading, setLoading]         = useState(true);
-  const [showModal, setShowModal]     = useState(false);
   const [triggering, setTriggering]   = useState(false);
   const [triggerMsg, setTriggerMsg]   = useState('');
   const [downloading, setDownloading] = useState(null);
@@ -1556,15 +1733,17 @@ function DbBackupCard() {
   const [hasPassword, setHasPassword]           = useState(false); // la config a un mdp de chiffrement
   const [showTriggerPwd, setShowTriggerPwd]     = useState(false); // modal mdp avant sauvegarde manuelle
   const [triggerPwdInput, setTriggerPwdInput]   = useState('');
+  const [totalSize, setTotalSize] = useState(0);
   const fileInputRef = useRef(null);
 
   const load = () => {
     setLoading(true);
     Promise.all([
-      api.dbBackups().catch(() => []),
+      api.dbBackups().catch(() => ({ files: [], total_size: 0 })),
       api.dbBackupConfig().catch(() => ({})),
-    ]).then(([f, cfg]) => {
-      setFiles(f);
+    ]).then(([res, cfg]) => {
+      setFiles(Array.isArray(res) ? res : (res.files || []));
+      setTotalSize(Array.isArray(res) ? 0 : (res.total_size || 0));
       setHasPassword(!!cfg.has_password);
     }).finally(() => setLoading(false));
   };
@@ -1640,6 +1819,8 @@ function DbBackupCard() {
 
   const fmtSize = b => b >= 1048576 ? (b/1048576).toFixed(1)+' Mo' : b >= 1024 ? (b/1024).toFixed(0)+' Ko' : b+' o';
 
+  if (!can('site_backup_access')) return null;
+
   return (
     <div className="card">
       <input ref={fileInputRef} type="file" accept=".sqlite,.sqlite.enc" style={{ display:'none' }} onChange={handleRestoreFile} />
@@ -1665,14 +1846,7 @@ function DbBackupCard() {
             </svg>
             {triggering ? 'Sauvegarde…' : 'Sauvegarder'}
           </button>
-          <button className="btn" onClick={() => setShowModal(true)}
-            style={{ display:'flex', alignItems:'center', gap:6, borderColor:'var(--acc)', color:'var(--acc)' }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:14, height:14 }}>
-              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/>
-              <line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/>
-            </svg>
-            Planification
-          </button>
+
         </div>
       </div>
       <div style={{ padding:16 }}>
@@ -1725,7 +1899,7 @@ function DbBackupCard() {
             )
         }
       </div>
-      {showModal && <DbBackupScheduleModal onClose={() => setShowModal(false)} />}
+
       {/* Mini-modal mot de passe avant sauvegarde manuelle */}
       {showTriggerPwd && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1300 }}
@@ -1742,18 +1916,18 @@ function DbBackupCard() {
               Entrez le mot de passe pour chiffrer cette sauvegarde.
             </p>
             <input className="form-control" type="password" autoFocus
-              placeholder="Mot de passe (min. 14 caractères)"
+              placeholder={`Mot de passe (min. ${passwordMin} caractères)`}
               value={triggerPwdInput}
               onChange={e => setTriggerPwdInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && triggerPwdInput.length >= 14 && triggerNow(triggerPwdInput)}
+              onKeyDown={e => e.key === 'Enter' && triggerPwdInput.length >= passwordMin && triggerNow(triggerPwdInput)}
               style={{ marginBottom:12 }} />
-            {triggerPwdInput.length > 0 && triggerPwdInput.length < 14 && (
+            {triggerPwdInput.length > 0 && triggerPwdInput.length < passwordMin && (
               <div style={{ fontSize:11, color:'var(--err)', marginBottom:8 }}>
-                Minimum 14 caractères ({triggerPwdInput.length}/14)
+                {t('security.pwd_min_chars')||'Minimum'} {passwordMin} ({triggerPwdInput.length}/{passwordMin})
               </div>
             )}
             <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-              <button className="btn btn-primary" disabled={triggerPwdInput.length < 14 || triggering}
+              <button className="btn btn-primary" disabled={triggerPwdInput.length < passwordMin || triggering}
                 onClick={() => triggerNow(triggerPwdInput)}>
                 {triggering ? 'Sauvegarde…' : 'Sauvegarder'}
               </button>
@@ -1784,27 +1958,39 @@ function DbBackupCard() {
 function RestoreModal({ file, isEnc, onConfirm, onCancel }) {
   const [pwd, setPwd]         = useState('');
   const [showPwd, setShowPwd] = useState(false);
-  const isValid = !isEnc || pwd.length >= 14;
+  const passwordMin = usePasswordMin();
+  const isValid = !isEnc || pwd.length >= passwordMin;
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1300 }}
       onClick={onCancel}>
-      <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', padding:24, width:420, boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}
+      <div style={{ background:'var(--surf)', borderRadius:'var(--rl)', padding:24, width:460, maxWidth:'calc(100vw - 32px)', boxShadow:'0 8px 40px rgba(0,0,0,.5)' }}
         onClick={e => e.stopPropagation()}>
+
         {/* Titre */}
-        <div style={{ fontWeight:700, fontSize:15, marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:18, height:18, color:'var(--err)' }}>
+        <div style={{ fontWeight:700, fontSize:15, marginBottom:16, display:'flex', alignItems:'center', gap:8 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:18, height:18, color:'var(--err)', flexShrink:0 }}>
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
             <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
           Restaurer la base de données
         </div>
-        {/* Avertissement */}
-        <div className="alert alert-err" style={{ fontSize:12, marginBottom:16 }}>
-          <strong>Action irréversible.</strong> La base actuelle sera remplacée par{' '}
-          <span style={{ fontFamily:'var(--mono)', fontSize:11 }}>{file.name}</span>.
-          Une sauvegarde de sécurité sera créée automatiquement avant l'écrasement.
+
+        {/* Avertissement structuré */}
+        <div style={{ background:'rgba(var(--err-rgb,220,53,69),0.1)', border:'1px solid var(--err)', borderRadius:'var(--r)', padding:'12px 14px', marginBottom:16, fontSize:13 }}>
+          <div style={{ fontWeight:700, color:'var(--err)', marginBottom:6 }}>⚠ Action irréversible</div>
+          <div style={{ color:'var(--fg)', lineHeight:1.6 }}>
+            La base de données actuelle sera remplacée par&nbsp;:
+          </div>
+          <div style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--acc)', wordBreak:'break-all',
+            background:'var(--surf2)', padding:'4px 8px', borderRadius:4, marginTop:6 }}>
+            {file.name}
+          </div>
+          <div style={{ color:'var(--muted)', fontSize:12, marginTop:8, lineHeight:1.5 }}>
+            Une sauvegarde de sécurité de l'état actuel sera créée automatiquement avant l'écrasement.
+          </div>
         </div>
+
         {/* Mot de passe — uniquement si fichier chiffré */}
         {isEnc && (
           <div className="form-group" style={{ margin:'0 0 16px' }}>
@@ -1812,7 +1998,7 @@ function RestoreModal({ file, isEnc, onConfirm, onCancel }) {
             <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
               <input className="form-control" type={showPwd ? 'text' : 'password'}
                 autoFocus
-                placeholder="Mot de passe (min. 14 caractères)"
+                placeholder={`Mot de passe (min. ${passwordMin} caractères)`}
                 value={pwd}
                 onChange={e => setPwd(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && isValid && onConfirm(pwd)}
@@ -1825,21 +2011,22 @@ function RestoreModal({ file, isEnc, onConfirm, onCancel }) {
                 }
               </button>
             </div>
-            {pwd.length > 0 && pwd.length < 14 && (
+            {pwd.length > 0 && pwd.length < passwordMin && (
               <div style={{ fontSize:11, color:'var(--err)', marginTop:4 }}>
-                Minimum 14 caractères ({pwd.length}/14)
+                {t('security.pwd_min_chars')||'Minimum'} {passwordMin} ({pwd.length}/{passwordMin})
               </div>
             )}
           </div>
         )}
+
         {/* Boutons */}
         <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-          <button className="btn" style={{ borderColor:'var(--err)', color:'var(--err)' }}
+          <button className="btn" onClick={onCancel}>Annuler</button>
+          <button className="btn" style={{ background:'var(--err)', color:'#fff', borderColor:'var(--err)', fontWeight:600 }}
             disabled={!isValid}
             onClick={() => onConfirm(isEnc ? pwd : undefined)}>
             Restaurer
           </button>
-          <button className="btn" onClick={onCancel}>Annuler</button>
         </div>
       </div>
     </div>
@@ -1848,6 +2035,7 @@ function RestoreModal({ file, isEnc, onConfirm, onCancel }) {
 
 function DbBackupScheduleModal({ onClose }) {
   const [cfg, setCfg]         = useState({ frequency:'daily', hour:'2', minute:'0', retention_count:'7' });
+  const passwordMin = usePasswordMin();
   const [hasPassword, setHasPassword] = useState(false); // un mdp est configuré côté serveur
   const [newPassword, setNewPassword] = useState('');    // nouveau mdp saisi (vide = garder l'ancien)
   const [saving, setSaving]   = useState(false);
@@ -1859,13 +2047,17 @@ function DbBackupScheduleModal({ onClose }) {
       setCfg({ frequency: d.frequency||'daily', hour: d.hour||'2', minute: d.minute||'0', retention_count: d.retention_count||'7' });
       setHasPassword(!!d.has_password);
     }).catch(() => {});
+    api.dbBackups().then(res => {
+      const ts = Array.isArray(res) ? res.reduce((s,f) => s+f.size, 0) : (res.total_size || 0);
+      setTotalSize(ts);
+    }).catch(() => {});
   }, []);
 
   async function save() {
     // Mot de passe : si l'utilisateur a saisi quelque chose, on valide et on l'envoie
     // Sinon on envoie undefined pour que le backend garde l'ancien
-    if (newPassword && newPassword.length < 14) {
-      setMsg('Erreur : le mot de passe doit faire au moins 14 caractères.');
+    if (newPassword && newPassword.length < passwordMin) {
+      setMsg(`Erreur : le mot de passe doit faire au moins ${passwordMin} caractères.`);
       return;
     }
     setSaving(true); setMsg('');
@@ -1908,7 +2100,7 @@ function DbBackupScheduleModal({ onClose }) {
               <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/>
               <line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/>
             </svg>
-            Planification des sauvegardes automatiques
+            {t('cron.db_backup_sqlite_title') || 'Planification des sauvegardes automatiques SQLite'}
           </div>
           <button className="btn btn-sm" onClick={onClose}>✕</button>
         </div>
@@ -1971,7 +2163,7 @@ function DbBackupScheduleModal({ onClose }) {
               <input className="form-control" type={showPwd ? 'text' : 'password'}
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                placeholder={hasPassword ? '••••••••••••••  (laisser vide pour conserver)' : 'Laisser vide = pas de chiffrement (min. 14 car.)'}
+                placeholder={hasPassword ? '••••••••••••••  (laisser vide pour conserver)' : `Laisser vide = pas de chiffrement (min. ${passwordMin} car.)`}
                 style={{ paddingRight:36 }} />
               <button type="button" onClick={() => setShowPwd(v => !v)}
                 style={{ position:'absolute', right:8, background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:0 }}>
@@ -1981,9 +2173,9 @@ function DbBackupScheduleModal({ onClose }) {
                 }
               </button>
             </div>
-            {newPassword.length > 0 && newPassword.length < 14 && (
+            {newPassword.length > 0 && newPassword.length < passwordMin && (
               <div style={{ fontSize:11, color:'var(--err)', marginTop:4 }}>
-                Minimum 14 caractères ({newPassword.length}/14)
+                {passwordMin} {t('security.pwd_min_chars')||'caractères'} ({newPassword.length}/{passwordMin})
               </div>
             )}
             <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, lineHeight:1.5 }}>
@@ -1994,7 +2186,7 @@ function DbBackupScheduleModal({ onClose }) {
           </div>
 
           <div style={{ fontSize:11, color:'var(--muted)', background:'var(--surf2)', padding:'8px 12px', borderRadius:'var(--r)' }}>
-            Le backup utilise <code>VACUUM INTO</code> — cohérent sans interruption de service.
+            {t('cron.vacuum_into_hint') || 'Le backup utilise'} <code>VACUUM INTO</code> — {t('cron.vacuum_into_simple') || 'cohérent sans interruption de service.'}
           </div>
         </div>
         <div style={{ padding:'12px 20px', borderTop:'1px solid var(--brd)', display:'flex', justifyContent:'flex-end', gap:8 }}>
@@ -2189,10 +2381,12 @@ function RetentionModal({ onClose }) {
                           </span>
                         : <span style={{ color: 'var(--muted)' }}>—</span>}
                     </td>
-                    <td style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap', display: 'flex', gap: 6 }}>
-                      <button className="btn btn-sm" onClick={() => restore(item.id)}
-                        style={{ borderColor: 'var(--ok)', color: 'var(--ok)', fontSize: 11 }}>{t('ret.restore')}</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => setConfirmDel(item)} style={{ fontSize: 11 }}>✕</button>
+                    <td style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <button className="btn btn-sm" onClick={() => restore(item.id)}
+                          style={{ borderColor: 'var(--ok)', color: 'var(--ok)', fontSize: 11 }}>{t('ret.restore')}</button>
+                        <button className="btn btn-sm btn-danger" onClick={() => setConfirmDel(item)} style={{ fontSize: 11 }}>✕</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -3005,6 +3199,20 @@ function SecurityOidcTab() {
                 {t('security.oidc_no_local_warn') || 'Local login disabled: login page will redirect to SSO automatically.'}
               </div>
             )}
+                        {/* Aperçu du bouton OIDC — centré, dans la card */}
+            {cfg.enabled && cfg.provider_name && (
+              <div style={{ borderTop:'1px solid var(--brd)', padding:'14px 0 4px', textAlign:'center', marginBottom:10 }}>
+                <div style={{ fontSize:11, color:'var(--muted)', marginBottom:10 }}>
+                  {t('perso.login_btn_preview')||'Aperçu'} — {t('security.oidc_btn_desc')||'Ce bouton apparaîtra sur la page de connexion.'}
+                </div>
+                <div style={{ display:'flex', justifyContent:'center' }}>
+                  <button type="button" className="btn" style={{ display:'flex', alignItems:'center', gap:8, border:'1px solid var(--brd)', background:'var(--surf2)', pointerEvents:'none' }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:16, height:16 }}><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
+                    {t('security.oidc_sso_prefix')||'Se connecter avec'} {cfg.provider_name}
+                  </button>
+                </div>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button type="submit" className="btn btn-primary" disabled={saving}>
                 {saving ? (t('common.saving') || 'Saving…') : (t('auto_cat.save') || 'Save')}
@@ -3014,23 +3222,7 @@ function SecurityOidcTab() {
         </div>
       </div>
 
-      {/* Bouton de connexion OIDC (aperçu) */}
-      {cfg.enabled && cfg.provider_name && (
-        <div className="card">
-          <div className="card-header"><div className="card-title">{t('perso.login_btn_preview') || 'Login button preview'}</div></div>
-          <div style={{ padding: 16 }}>
-            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-              {t('security.oidc_btn_desc') || 'This button will appear on the login page below the usual form.'}
-            </p>
-            <button className="btn" style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--brd)', background: 'var(--surf2)' }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
-                <circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/>
-              </svg>
-              Se connecter avec {cfg.provider_name}
-            </button>
-          </div>
-        </div>
-      )}
+
       <LdapCard />
     </div>
   );
@@ -3146,9 +3338,177 @@ function SecurityCronTab() {
         </div>
       </div>
 
+      {/* ── Planification sauvegardes SQLite ── */}
+      <DbBackupSQLiteCard />
+
       {/* ── Planification sauvegardes automatiques ── */}
       <BackupScheduleCard />
 
+    </div>
+  );
+}
+
+// ── CARD PLANIFICATION SAUVEGARDES SQLite ─────────────────────────────────────
+function DbBackupSQLiteCard() {
+  const { t } = useI18n();
+  const { can } = usePerms();
+  const passwordMin = usePasswordMin();
+  // TOUS les hooks avant le return conditionnel
+  const [totalSize, setTotalSize] = useState(0);
+  const [cfg, setCfg]             = useState({ frequency:'daily', hour:'2', minute:'0', retention_count:'7' });
+  const [hasPassword, setHasPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [showPwd, setShowPwd]     = useState(false);
+  const [saving, setSaving]       = useState(false);
+  const [msg, setMsg]             = useState('');
+  if (!can('site_backup_access')) return null;
+
+  useEffect(() => {
+    api.dbBackupConfig().then(d => {
+      setCfg({ frequency: d.frequency||'daily', hour: d.hour||'2', minute: d.minute||'0', retention_count: d.retention_count||'7' });
+      setHasPassword(!!d.has_password);
+    }).catch(() => {});
+    api.dbBackups().then(res => {
+      const ts = Array.isArray(res) ? res.reduce((s,f) => s+f.size, 0) : (res.total_size || 0);
+      setTotalSize(ts);
+    }).catch(() => {});
+  }, []);
+
+  async function save() {
+    if (newPassword && newPassword.length < passwordMin) { setMsg(`Erreur : le mot de passe doit faire au moins ${passwordMin} caractères.`); return; }
+    setSaving(true); setMsg('');
+    try {
+      const payload = { ...cfg };
+      if (newPassword) { payload.backup_password = newPassword; }
+      await api.dbBackupSaveConfig(payload);
+      if (newPassword) { setHasPassword(true); setNewPassword(''); }
+      setMsg('Planification enregistrée.');
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function removePassword() {
+    if (!window.confirm('Supprimer le mot de passe de chiffrement ?\nLes prochaines sauvegardes ne seront plus chiffrées.')) return;
+    setSaving(true); setMsg('');
+    try {
+      await api.dbBackupSaveConfig({ ...cfg, backup_password: '' });
+      setHasPassword(false); setNewPassword('');
+      setMsg('Mot de passe supprimé. Les prochaines sauvegardes ne seront plus chiffrées.');
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:16, height:16 }}>
+            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+          {t('cron.db_backup_sqlite_title') || 'Planification des sauvegardes automatiques SQLite'}
+        </div>
+      </div>
+      <div style={{ padding:20 }}>
+        {msg && <div className={`alert alert-${msg.startsWith('Err') ? 'err' : 'ok'}`} style={{ marginBottom:14, fontSize:12 }}>{msg}</div>}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
+          {/* Colonne gauche : fréquence + horaire + rétention */}
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div className="form-group" style={{ margin:0 }}>
+              <label className="form-label">Fréquence</label>
+              <select className="form-control" value={cfg.frequency} onChange={e => setCfg(c => ({...c, frequency: e.target.value}))}>
+                <option value="daily">Quotidien</option>
+                <option value="weekly">Hebdomadaire</option>
+                <option value="monthly">Mensuel</option>
+              </select>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div className="form-group" style={{ margin:0 }}>
+                <label className="form-label">Heure</label>
+                <select className="form-control" value={cfg.hour} onChange={e => setCfg(c => ({...c, hour: e.target.value}))}>
+                  {Array.from({length:24},(_,i)=>i).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}h</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ margin:0 }}>
+                <label className="form-label">Minutes</label>
+                <select className="form-control" value={cfg.minute} onChange={e => setCfg(c => ({...c, minute: e.target.value}))}>
+                  {[0,5,10,15,20,25,30,35,40,45,50,55].map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="form-group" style={{ margin:0 }}>
+              <label className="form-label">Nombre de sauvegardes à conserver</label>
+              <select className="form-control" value={cfg.retention_count} onChange={e => setCfg(c => ({...c, retention_count: e.target.value}))}>
+                {[1,2,3,5,7,10,14,21,30].map(n => <option key={n} value={n}>{n} sauvegarde{n>1?'s':''}</option>)}
+              </select>
+            </div>
+          </div>
+          {/* Colonne droite : mot de passe */}
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div className="form-group" style={{ margin:0 }}>
+              <label className="form-label" style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  Mot de passe de chiffrement
+                  {hasPassword && (
+                    <span style={{ fontSize:11, color:'var(--ok)', fontWeight:600 }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:11, height:11, verticalAlign:'middle', marginRight:3 }}>
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                      </svg>
+                      Actif
+                    </span>
+                  )}
+                </span>
+                {hasPassword && (
+                  <button type="button" className="btn btn-sm" onClick={removePassword}
+                    style={{ fontSize:11, color:'var(--err)', borderColor:'var(--err)', padding:'1px 8px' }}>
+                    Supprimer
+                  </button>
+                )}
+              </label>
+              <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+                <input className="form-control" type={showPwd ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  placeholder={hasPassword ? '••••••••••••••  (laisser vide pour conserver)' : `Laisser vide = pas de chiffrement (min. ${passwordMin} car.)`}
+                  style={{ paddingRight:36 }} />
+                <button type="button" onClick={() => setShowPwd(v => !v)}
+                  style={{ position:'absolute', right:8, background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:0 }}>
+                  {showPwd
+                    ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:15,height:15}}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  }
+                </button>
+              </div>
+              {newPassword.length > 0 && newPassword.length < passwordMin && (
+                <div style={{ fontSize:11, color:'var(--err)', marginTop:4 }}>{passwordMin} {t('security.pwd_min_chars')||'caractères'} ({newPassword.length}/{passwordMin})</div>
+              )}
+              <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, lineHeight:1.5 }}>
+                {hasPassword
+                  ? 'Un mot de passe est actif. Laissez vide pour le conserver, saisissez-en un nouveau pour le remplacer.'
+                  : 'Si renseigné, les fichiers de backup seront chiffrés en AES-256-GCM.'}
+              </div>
+            </div>
+            <div style={{ fontSize:11, color:'var(--muted)', background:'var(--surf2)', padding:'8px 12px', borderRadius:'var(--r)', lineHeight:1.5 }}>
+              {t('cron.vacuum_into_hint') || 'Le backup utilise'} <code>VACUUM INTO</code> — {t('cron.vacuum_into_desc') || 'cohérent sans interruption de service. Conservez votre mot de passe en lieu sûr.'}
+              {totalSize > 0 && (
+                <div style={{ marginTop:8, display:'flex', alignItems:'center', gap:6 }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:12, height:12, color:'var(--acc)' }}>
+                    <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                  </svg>
+                  <span style={{ fontWeight:600, color:'var(--acc)' }}>
+                    {totalSize >= 1048576 ? (totalSize/1048576).toFixed(1)+' Mo' : totalSize >= 1024 ? (totalSize/1024).toFixed(0)+' Ko' : totalSize+' o'}
+                  </span>
+                  <span style={{ color:'var(--muted)' }}>{t('cron.total_backup_size') || 'utilisés par les sauvegardes'}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ display:'flex', justifyContent:'flex-end', marginTop:16 }}>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3214,7 +3574,7 @@ function BackupScheduleCard() {
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
             <polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
           </svg>
-          {t('cron.backup_schedules') || 'Sauvegarde automatique des équipements'}
+          {t('cron.backup_schedules') || 'Planifications de sauvegardes des équipements'}
         </div>
         <button className="btn btn-sm" onClick={createSchedule}
           style={{ display: 'flex', alignItems: 'center', gap: 5, borderColor: 'var(--ok)', color: 'var(--ok)' }}>
@@ -3974,10 +4334,11 @@ function ActivityTagsTab() {
   function closeModal() { setShowModal(false); setEditTag(null); setError(''); }
 
   async function submit(e) {
-    e.preventDefault(); setError('');
+    if (e?.preventDefault) e.preventDefault();
+    setError('');
     if (!form.code || !form.label) return setError('Code et libellé requis');
     try {
-      if (editTag) { await api.updateTag(editTag.id, { label: form.label, color: form.color }); }
+      if (editTag) { await api.updateTag(editTag.id, { code: form.code, label: form.label, color: form.color }); }
       else         { await api.createTag(form); }
       closeModal(); load();
     } catch(ex) { setError(ex.message); }
@@ -4051,7 +4412,7 @@ function ActivityTagsTab() {
           footer={
             <div style={{ display:'flex', gap:8 }}>
               <button className="btn" onClick={closeModal}>{t('auto_cat.cancel')}</button>
-              <button className="btn btn-primary" onClick={()=>document.getElementById('tag-form').requestSubmit()}>
+              <button className="btn btn-primary" onClick={submit}>
                 {editTag ? 'Enregistrer' : 'Créer'}
               </button>
             </div>
@@ -4060,11 +4421,11 @@ function ActivityTagsTab() {
             <div className="form-group" style={{margin:0}}>
               <label className="form-label">Code *</label>
               <input className="form-control" value={form.code} maxLength={10}
-                disabled={!!editTag}
                 placeholder="Ex: SECU, NET, ADM…"
                 onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g,'')}))}
                 style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:600 }} />
-              <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>{t('activity_tags.code_hint') || 'Uppercase and digits only, max 10 characters.'}</div>
+              {editTag && <div style={{ fontSize:11, color:'var(--warn)', marginTop:3 }}>⚠ Modifier le code mettra à jour toutes les entrées d'activité associées.</div>}
+              {!editTag && <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>{t('activity_tags.code_hint') || 'Uppercase and digits only, max 10 characters.'}</div>}
             </div>
             <div className="form-group" style={{margin:0}}>
               <label className="form-label">{t('activity_tags.label_req') || 'Label *'}</label>
@@ -4225,8 +4586,9 @@ const CAT_COLORS = {
   config:         { bg: 'var(--ok-s)', color: 'var(--ok)' },     // vert
   sécurité:       { bg: 'var(--err-s)', color: 'var(--err)' },   // rouge
   suivi:          { bg: '#e0f7f4', color: '#0e9f8e' },   // teal
-  automatisation: { bg: '#fdf4ff', color: '#9333ea' },   // violet
+  automatisation: { bg: '#fdf4ff', color: '#9333ea' },   // violet (alias legacy)
   automation:     { bg: '#fdf4ff', color: '#9333ea' },   // alias
+  document:       { bg: '#fdf4ff', color: '#9333ea' },   // nouveau nom
 };
 
 function AuditTab() {
@@ -4283,7 +4645,7 @@ function AuditTab() {
             <option value="">{t('audit.category')}</option>
             <option value="admin">Admin</option>
             <option value="auth">Auth</option>
-            <option value="automatisation">Automatisation</option>
+            <option value="document">Documents</option>
             <option value="backup">Backup</option>
             <option value="config">Config</option>
             <option value="suivi">Suivi</option>
@@ -4495,7 +4857,7 @@ export default function Admin({ forcePasswordChange = false }) {
     { key: '__sep1__',      sep: true },
     { key: '__label_config__', sectionLabel: t('admin.section_config') },
     { key: 'appareils',     label: t('admin.devices'),         icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg> },
-    { key: 'automatisation', label: t('admin.automatisation_menu'),          icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
+    { key: 'document', label: t('admin.automatisation_menu'),          icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> },
     { key: 'activity', label: t('admin.activity_menu'), icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg> },
     { key: '__sep2__',      sep: true },
     { key: '__label_admin__', sectionLabel: t('admin.section_admin') },
@@ -4601,7 +4963,7 @@ export default function Admin({ forcePasswordChange = false }) {
           {active === 'appareils' && <AppareilsTab />}
           {active === 'users' && isAdmin && <UsersTab />}
           {active === 'security' && (isAdmin || can('security_access')) && <SecurityTab />}
-          {active === 'automatisation' && (isAdmin || can('automatisation')) && <ScriptsAdminTab />}
+          {(active === 'document' || active === 'automatisation') && (isAdmin || can('automatisation')) && <ScriptsAdminTab />}
           {active === 'activity' && (isAdmin || can('activity')) && <ActivityMenuTab />}
           {active === 'audit' && (isAdmin || can('audit_access')) && <AuditTab />}
         </div>

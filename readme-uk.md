@@ -27,7 +27,7 @@ If compromised, attackers have everything at their fingertips!
 - **Optional site grouping by country** (enable in Devices → Options)
 - **CSV.gz backup export**
 
-### Automation
+### Documents
 - **Hierarchical categories** with nested levels, types: Generic, Temporary, Procedure, Script, Secured
 - **Coloured categories** with expiry date (Temporary type) and expiration alerts
 - **Documents**: creation, editing, full change history
@@ -73,7 +73,7 @@ If compromised, attackers have everything at their fingertips!
 
 ### Dashboard
 - **Backups section**: total backups, equipment, sites, models
-- **Automation section**: total documents, 3 latest added, top 3 categories with colour codes, upcoming expirations
+- **Documents section**: total documents, 3 latest added, top 3 categories with colour codes, upcoming expirations
 - **Activity section**: total notes, current month activity, top 3 tags by year (N and N-1)
 
 ### Audit Log
@@ -272,6 +272,8 @@ Each sensitive value is individually encrypted with a random IV before being wri
 | Audit log | ✓ | ✗ | ✗ |
 | Security access | ✓ | ✗ | ✗ |
 | Retention access | ✓ | ✗ | ✗ |
+| SQLite backup (backup/restore) | ✓ | ✗ | ✗ |
+| Manage minimum password length | ✓ | ✗ | ✗ |
 | Activity tracking (write) | ✓ | ✓ | ✓ |
 | Activity tracking (read) | ✓ | ✓ | ✗ |
 | Automation (read) | ✓ | ✓ | ✓ |
