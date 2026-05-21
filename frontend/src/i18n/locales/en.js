@@ -718,4 +718,8 @@ export default {
   'cron.total_backup_size': 'used by SQLite backups',
   'security.pwd_min_perm': 'Manage minimum password length',
 
+  'auto_opts.timeline_title': 'Timeline',
+  'auto_opts.timeline_show': 'Show expiry timeline in Temporary category',
+  'auto_opts.timeline_desc': 'When enabled, a horizontal timeline displays document expiry dates below the breadcrumb.',
+
 };

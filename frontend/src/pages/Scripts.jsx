@@ -71,7 +71,11 @@ export default function Scripts() {
     }
   }
 
-  if (!can('automatisation_read')) return <AccessDenied page={t('automatisation.title')} />;
+  const [showTimeline, setShowTimeline] = useState(true);
+
+  useEffect(() => {
+    api.getFeatureFlags().then(f => setShowTimeline(f.show_expiry_timeline !== false)).catch(()=>{});
+  }, []);
 
   return (
     <main>
@@ -97,6 +101,11 @@ export default function Scripts() {
           </span>
         ))}
       </div>
+
+      {/* Timeline d'expiration — catégories temporaires uniquement */}
+      {showTimeline && leafCat?.type === 'temporary' && docs.length > 0 && (
+        <ExpiryTimeline docs={docs} onOpenDoc={doc => api.automationDocument(doc.id).then(setDetailDoc)} />
+      )}
 
       {/* Tuiles catégories */}
       {visibleCats.length > 0 && (
@@ -289,6 +298,216 @@ export default function Scripts() {
           onCancel={()=>setConfirmDel(null)} />
       )}
     </main>
+  );
+}
+
+// ── EXPIRY TIMELINE ──────────────────────────────────────────────────────────
+function ExpiryTimeline({ docs, onOpenDoc }) {
+  const items = docs
+    .filter(d => d.valid_until)
+    .map(d => ({ ...d, date: new Date(d.valid_until + 'T00:00:00') }))
+    .sort((a, b) => a.date - b.date);
+
+  if (items.length === 0) return null;
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  function fmt(d) {
+    return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  }
+  function dotCol(item) {
+    const dl = Math.ceil((item.date - today) / 86400000);
+    if (item.date < today || dl <= 3)  return '#ef4444';
+    if (dl <= 7)   return '#f97316';
+    if (dl <= 30)  return '#eab308';
+    if (dl <= 90)  return '#22c55e';
+    return '#3b82f6';
+  }
+
+  // ── Clustering ────────────────────────────────────────────────────────────
+  const totalSpan = Math.max(items[items.length-1].date - today, 86400000);
+  const GAP_RATIO = 0.25;
+  const clusters = [];
+  let cur = [items[0]];
+  for (let i = 1; i < items.length; i++) {
+    if (items[i].date - items[i-1].date > totalSpan * GAP_RATIO) { clusters.push(cur); cur = []; }
+    cur.push(items[i]);
+  }
+  clusters.push(cur);
+
+  // ── Layout : PAD% de marge symétrique ────────────────────────────────────
+  // Premier élément à PAD%, dernier à (100-PAD)% exactement.
+  const PAD    = 4;
+  const CUT_W  = 3;
+  const nCuts  = clusters.length - 1;
+  const INNER  = (100 - 2*PAD) - nCuts * CUT_W;
+
+  const clDurs = clusters.map(cl => Math.max(
+    cl[cl.length-1].date - cl[0].date,
+    86400000 * Math.max(5, cl.length * 2)
+  ));
+  const durTotal = clDurs.reduce((a, b) => a + b, 0);
+
+  let ox = PAD;
+  const clLayout = clusters.map((cl, ci) => {
+    const minW = Math.max(4, cl.length * 6);
+    const w    = Math.max(minW, (clDurs[ci] / durTotal) * INNER);
+    const x    = ox;
+    ox += w + (ci < nCuts ? CUT_W : 0);
+    return { x, w };
+  });
+
+  // Renormaliser : dernier cluster finit exactement à 100-PAD%
+  const actualEnd = clLayout[clLayout.length-1].x + clLayout[clLayout.length-1].w;
+  const target    = 100 - PAD;
+  const scale     = (target - PAD) / (actualEnd - PAD);
+  let ox2 = PAD;
+  clLayout.forEach((cl, ci) => {
+    cl.x = ox2; cl.w = cl.w * scale;
+    ox2 += cl.w + (ci < nCuts ? CUT_W : 0);
+  });
+
+  // ── Conversion date → % ───────────────────────────────────────────────────
+  // Pour un cluster d'1 élément :
+  //   - 1er cluster → position = cl.x (début de la zone = PAD%)
+  //   - dernier cluster → position = cl.x + cl.w (fin de la zone = 100-PAD%)
+  //   - cluster intermédiaire → centré
+  function toPct(item, ci) {
+    const cl  = clLayout[ci];
+    const dur = clDurs[ci];
+    const off = item.date - clusters[ci][0].date;
+    if (clusters[ci].length > 1) {
+      return cl.x + (off / dur) * cl.w;
+    }
+    // Cluster d'1 seul élément
+    if (ci === 0)                      return cl.x;           // 1er → début
+    if (ci === clusters.length - 1)    return cl.x + cl.w;   // dernier → fin
+    return cl.x + cl.w / 2;                                   // intermédiaire → centre
+  }
+
+  // ── Anti-chevauchement par cluster ────────────────────────────────────────
+  const MIN_D = 7;
+  const placements = [];
+  clusters.forEach((cl, ci) => {
+    const usedA = [], usedB = [];
+    cl.forEach(item => {
+      const pct = toPct(item, ci);
+      const okA = !usedA.some(p => Math.abs(p - pct) < MIN_D);
+      const okB = !usedB.some(p => Math.abs(p - pct) < MIN_D);
+      let side;
+      if (okA && okB) side = usedB.length <= usedA.length ? 'below' : 'above';
+      else if (okA)   side = 'above';
+      else if (okB)   side = 'below';
+      else            side = usedB.length <= usedA.length ? 'below' : 'above';
+      (side === 'above' ? usedA : usedB).push(pct);
+      placements.push({ pct, side, item });
+    });
+  });
+
+  // "Aujourd'hui" : décaler si trop proche du 1er point
+  const originPct  = clLayout[0].x;
+  const firstPct   = placements.length > 0 ? placements[0].pct : originPct;
+  const todayLeft  = Math.abs(firstPct - originPct) < MIN_D;
+
+  // ── Dimensions ────────────────────────────────────────────────────────────
+  const DOT = 8, STEM = 14, LSIZE = 9;
+  const LINE_Y  = STEM + DOT/2 + 2;
+  const TOTAL_H = LINE_Y + DOT/2 + STEM + LSIZE + 8;
+
+  return (
+    <div style={{ margin:'0 0 14px 0', position:'relative' }}>
+      <div style={{ position:'relative', height:TOTAL_H }}>
+
+        {/* Ligne dégradée unique */}
+        <div style={{
+          position:'absolute', top:LINE_Y-1, left:0, right:0, height:2,
+          background:'linear-gradient(to right,#ef4444 0%,#f97316 15%,#eab308 35%,#22c55e 60%,#3b82f6 100%)',
+          borderRadius:2,
+        }} />
+
+        {/* Coupures // */}
+        {clLayout.slice(0,-1).map((cl, ci) => {
+          const cx = cl.x + cl.w + CUT_W / 2;
+          return (
+            <div key={`cut-${ci}`} style={{
+              position:'absolute', top:LINE_Y-9,
+              left:`${cx}%`, transform:'translateX(-50%)',
+              fontSize:11, color:'var(--muted)', fontWeight:900,
+              userSelect:'none', letterSpacing:1, zIndex:3,
+              background:'var(--bg,#0d1117)', padding:'0 3px',
+            }}>//</div>
+          );
+        })}
+
+        {/* Label "Aujourd'hui" */}
+        <div style={{
+          position:'absolute', top:LINE_Y + DOT/2 + 3,
+          left:`${originPct}%`,
+          transform: todayLeft ? 'translateX(-100%)' : 'translateX(-50%)',
+          paddingRight: todayLeft ? 4 : 0,
+          fontSize:9, color:'var(--acc)', fontWeight:700,
+          whiteSpace:'nowrap', lineHeight:1, pointerEvents:'none',
+        }}>
+          {fmt(today)}
+        </div>
+
+        {/* Points + labels */}
+        {placements.map(({ pct, side, item }, i) => {
+          const c   = dotCol(item);
+          const dl  = Math.ceil((item.date - today) / 86400000);
+          const exp = item.date < today;
+          const dlLabel = exp ? '⚠ EXPIRÉ'
+            : dl === 0 ? "Expire aujourd'hui"
+            : dl === 1 ? 'Expire demain'
+            : `Expire dans ${dl} jour${dl>1?'s':''}`;
+          const tip     = `${item.name} — ${dlLabel}`;
+          const dotTop  = LINE_Y - DOT/2;
+          const stemTop = side==='above' ? dotTop - STEM   : dotTop + DOT;
+          const lblTop  = side==='above' ? stemTop - LSIZE : stemTop + STEM + 1;
+
+          return (
+            <div key={i}
+              onClick={() => onOpenDoc && onOpenDoc(item)}
+              style={{
+                position:'absolute', left:`${pct}%`,
+                transform:'translateX(-50%)', cursor: onOpenDoc ? 'pointer' : 'default',
+                top:0, width:0,
+              }}>
+              {/* Zone de hover large : couvre dot + label */}
+              <div title={tip} style={{
+                position:'absolute',
+                left: side==='above' ? -30 : -30,
+                top: side==='above' ? lblTop - 2 : dotTop,
+                width: 60, height: Math.abs(lblTop - dotTop) + LSIZE + DOT + 4,
+                zIndex:10, cursor: onOpenDoc ? 'pointer' : 'default',
+              }} />
+              <div style={{
+                position:'absolute', left:'50%', marginLeft:-0.5,
+                top:stemTop, width:1, height:STEM, background:c,
+                pointerEvents:'none',
+              }} />
+              <div style={{
+                position:'absolute', top:dotTop, left:`calc(-${DOT/2}px)`,
+                width:DOT, height:DOT, borderRadius:'50%',
+                background:c, border:'2px solid var(--bg,#0d1117)',
+                boxShadow:`0 0 0 1.5px ${c}`, zIndex:2,
+                transition:'transform 0.05s',
+                pointerEvents:'none',
+              }} />
+              <div style={{
+                position:'absolute', top:lblTop, left:'50%',
+                transform:'translateX(-50%)',
+                fontSize:LSIZE, fontWeight:700, color:c,
+                whiteSpace:'nowrap', lineHeight:1, pointerEvents:'none',
+              }}>
+                {fmt(item.date)}
+              </div>
+            </div>
+          );
+        })}
+
+      </div>
+    </div>
   );
 }
 

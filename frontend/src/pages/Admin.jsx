@@ -354,6 +354,7 @@ function AutomationOptionsTab() {
   const { t } = useI18n();
   const [colorMode, setColorMode] = useState('same');
   const [securedPwd, setSecuredPwd] = useState('');
+  const [showTimeline, setShowTimeline] = useState(true);
   const [saving, setSaving]       = useState(false);
   const [msg, setMsg]             = useState('');
 
@@ -361,6 +362,7 @@ function AutomationOptionsTab() {
     api.getFeatureFlags().then(f => {
       setColorMode(f.automation_cat_color_mode || 'same');
       setSecuredPwd(f.automation_secured_password || '');
+      setShowTimeline(f.show_expiry_timeline !== false); // true par défaut
     }).catch(()=>{});
   }, []);
 
@@ -372,6 +374,12 @@ function AutomationOptionsTab() {
       setMsg(t('security.saved')); setTimeout(()=>setMsg(''),3000);
     } catch(e) { setMsg('Erreur : '+e.message); }
     finally { setSaving(false); }
+  }
+
+  async function saveTimeline(val) {
+    setShowTimeline(val);
+    try { await api.setFeatureFlags({ show_expiry_timeline: val }); }
+    catch(e) { setMsg('Erreur : '+e.message); }
   }
 
   async function saveSecuredPwd() {
@@ -449,43 +457,68 @@ function AutomationOptionsTab() {
         </div>
       </div>
 
-      {/* Card types de catégories */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
-              <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-            </svg>
-            {t('auto_opts.types_title') || 'Category types'}
+      {/* Card types de catégories + Card Timeline — 2 colonnes */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        {/* Card types */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
+              {t('auto_opts.types_title') || 'Category types'}
+            </div>
+          </div>
+          <div style={{ padding:'14px 18px' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead>
+                <tr style={{ borderBottom:'1px solid var(--brd)' }}>
+                  <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>{t('auto_cat.col_type')}</th>
+                  <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>{t('auto_cat.col_desc')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {CAT_TYPES.map((ct, i) => (
+                  <tr key={ct.value} style={{ borderBottom:'1px solid var(--brd)', background: i%2?'var(--surf2)':'transparent' }}>
+                    <td style={{ padding:'10px 10px', whiteSpace:'nowrap' }}>
+                      <span style={{ fontWeight:600, color:({generic:'#64748b',temporary:'var(--warn)',procedure:'#0891b2',script:'#16a34a',secured:'var(--err)'})[ct.value] || 'var(--muted)' }}>
+                        {ct.label}
+                      </span>
+                    </td>
+                    <td style={{ padding:'10px 10px', color:'var(--muted)', fontSize:12 }}>
+                      {ct.value === 'generic'   && t('auto_opts.type_generic')}
+                      {ct.value === 'temporary' && t('auto_opts.type_temporary')}
+                      {ct.value === 'procedure' && t('auto_opts.type_procedure')}
+                      {ct.value === 'script'    && t('auto_opts.type_script')}
+                      {ct.value === 'secured'   && t('auto_opts.type_secured')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-        <div style={{ padding:'14px 18px' }}>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-            <thead>
-              <tr style={{ borderBottom:'1px solid var(--brd)' }}>
-                <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>{t('auto_cat.col_type')}</th>
-                <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--muted)', fontSize:11 }}>{t('auto_cat.col_desc')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {CAT_TYPES.map((ct, i) => (
-                <tr key={ct.value} style={{ borderBottom:'1px solid var(--brd)', background: i%2?'var(--surf2)':'transparent' }}>
-                  <td style={{ padding:'10px 10px', whiteSpace:'nowrap' }}>
-                    <span style={{ fontWeight:600, color:({generic:'#64748b',temporary:'var(--warn)',procedure:'#0891b2',script:'#16a34a',secured:'var(--err)'})[ct.value] || 'var(--muted)' }}>
-                      {ct.label}
-                    </span>
-                  </td>
-                  <td style={{ padding:'10px 10px', color:'var(--muted)', fontSize:12 }}>
-                    {ct.value === 'generic'   && t('auto_opts.type_generic')}
-                    {ct.value === 'temporary' && t('auto_opts.type_temporary')}
-                    {ct.value === 'procedure' && t('auto_opts.type_procedure')}
-                    {ct.value === 'script'    && t('auto_opts.type_script')}
-                    {ct.value === 'secured'   && t('auto_opts.type_secured')}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        {/* Card Timeline */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <line x1="2" y1="12" x2="22" y2="12"/><polyline points="18 8 22 12 18 16"/>
+              </svg>
+              {t('auto_opts.timeline_title') || 'Timeline'}
+            </div>
+          </div>
+          <div style={{ padding:'16px 18px', display:'flex', flexDirection:'column', gap:12 }}>
+            <label style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer', fontSize:13 }}>
+              <input type="checkbox" checked={showTimeline} onChange={e => saveTimeline(e.target.checked)}
+                style={{ width:15, height:15, cursor:'pointer' }} />
+              <span>{t('auto_opts.timeline_show') || 'Afficher la timeline d\'expiration dans la catégorie Temporaire'}</span>
+            </label>
+            <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>
+              {t('auto_opts.timeline_desc') || 'Quand activée, une timeline horizontale affiche les dates d\'expiration des documents sous le fil d\'Ariane.'}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2415,7 +2448,76 @@ function RetentionModal({ onClose }) {
 
 // ── ONGLET NOTIFICATIONS ──────────────────────────────────────────────────────
 // Modals de configuration des canaux
-function SmtpModal({ onClose, onSaved, onValidated, onReset }) {
+// ── RECIPIENTS MODAL ─────────────────────────────────────────────────────────
+function RecipientsModal({ onClose }) {
+  const { t } = useI18n();
+  const [mode, setMode]       = useState('admins_only'); // admins_only | admins_and_extra | extra_only
+  const [emails, setEmails]   = useState('');
+  const [saving, setSaving]   = useState(false);
+  const [msg, setMsg]         = useState('');
+
+  useEffect(() => {
+    api.getSettings().then(s => {
+      setMode(s.notif_recipients_mode || 'admins_only');
+      setEmails(s.notif_extra_emails || '');
+    }).catch(() => {});
+  }, []);
+
+  async function save() {
+    setSaving(true); setMsg('');
+    try {
+      await api.updateSettings({ notif_recipients_mode: mode, notif_extra_emails: emails });
+      setMsg('Destinataires enregistrés.');
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal title="Destinataires des notifications" onClose={onClose}
+      footer={
+        <div style={{ display:'flex', gap:8 }}>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? '…' : 'Enregistrer'}</button>
+          <button className="btn" onClick={onClose}>Fermer</button>
+        </div>
+      }>
+      {msg && <div className={`alert alert-${msg.startsWith('Err') ? 'err' : 'ok'}`} style={{ marginBottom:12, fontSize:12 }}>{msg}</div>}
+
+      <div className="form-group" style={{ marginBottom:14 }}>
+        <label className="form-label">Mode d'envoi</label>
+        {[
+          { val:'admins_only',      label:'Administrateurs uniquement', desc:'Les notifications sont envoyées aux admins ayant un email configuré.' },
+          { val:'admins_and_extra', label:'Administrateurs + destinataires supplémentaires', desc:'Les admins ET les adresses ci-dessous reçoivent les notifications.' },
+          { val:'extra_only',       label:'Destinataires supplémentaires uniquement', desc:'Seules les adresses ci-dessous reçoivent les notifications.' },
+        ].map(opt => (
+          <label key={opt.val} style={{ display:'flex', alignItems:'flex-start', gap:10, cursor:'pointer', marginBottom:10 }}>
+            <input type="radio" name="recip_mode" value={opt.val} checked={mode === opt.val}
+              onChange={() => setMode(opt.val)} style={{ marginTop:2, flexShrink:0 }} />
+            <div>
+              <div style={{ fontWeight:600, fontSize:13 }}>{opt.label}</div>
+              <div style={{ fontSize:12, color:'var(--muted)', marginTop:2 }}>{opt.desc}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      {mode !== 'admins_only' && (
+        <div className="form-group" style={{ margin:0 }}>
+          <label className="form-label">Adresses email supplémentaires</label>
+          <textarea className="form-control" rows={4}
+            value={emails}
+            onChange={e => setEmails(e.target.value)}
+            placeholder={"contact@example.com\nautredestinataire@example.com"}
+            style={{ fontFamily:'var(--mono)', fontSize:12, resize:'vertical' }} />
+          <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>
+            Une adresse par ligne (ou séparées par des virgules).
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function SmtpModal({ onClose, onSaved, onValidated, onReset, onOpenRecipients }) {
   const { t } = useI18n();
   const [s, setS] = useState({ host:'', port:'587', secure:false, user:'', pass:'', from:'' });
   const [loading, setLoading]     = useState(true);
@@ -2454,8 +2556,18 @@ function SmtpModal({ onClose, onSaved, onValidated, onReset }) {
     <Modal title="Configuration SMTP" onClose={onClose}
       footer={
         <div style={{display:'flex',justifyContent:'space-between',width:'100%',alignItems:'center'}}>
-          <button className="btn" onClick={() => setConfirmReset(true)}
-            style={{color:'var(--err)',borderColor:'var(--err)',fontSize:12}}>⊘ Reset</button>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <button className="btn" onClick={() => setConfirmReset(true)}
+              style={{color:'var(--err)',borderColor:'var(--err)',fontSize:12}}>⊘ Reset</button>
+            <button className="btn" onClick={onOpenRecipients}
+              style={{color:'var(--ok)',borderColor:'var(--ok)',fontSize:12,display:'flex',alignItems:'center',gap:5}}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}>
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+              Destinataires
+            </button>
+          </div>
           <div style={{display:'flex',gap:8}}>
             {awaitCode
               ? <button className="btn btn-primary" onClick={validate} disabled={codeInput.length < 4}>Valider le code</button>
@@ -2750,12 +2862,8 @@ function SecurityNotifTab() {
       {/* Info + boutons configuration canaux */}
       <div className="card">
         <div style={{ padding: '14px 18px' }}>
-          {/* Message style alerte comme OIDC */}
-          <div className="alert alert-warn" style={{ marginBottom: 16, fontSize: 12, justifyContent: 'center', textAlign: 'center' }}>
-            {t('security.notif_admin_only') || 'Notifications are sent to administrators only!'}
-          </div>
-          {/* Boutons canaux */}
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+          {/* Boutons canaux — centrés */}
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
             {/* SMTP */}
             <button className="btn" onClick={() => setModal('smtp')}
               style={{ display:'flex', alignItems:'center', gap:8, borderColor:'#ca8a04', color:'#ca8a04' }}>
@@ -2893,7 +3001,8 @@ function SecurityNotifTab() {
       </div>
 
       {/* Modals de configuration */}
-      {modal === 'smtp'     && <SmtpModal     onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('email')}    onReset={() => onChannelReset('email')} />}
+      {modal === 'recipients' && <RecipientsModal onClose={() => setModal(null)} />}
+      {modal === 'smtp'     && <SmtpModal     onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('email')}    onReset={() => onChannelReset('email')} onOpenRecipients={() => setModal('recipients')} />}
       {modal === 'telegram' && <TelegramModal onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('telegram')} onReset={() => onChannelReset('telegram')} />}
       {modal === 'slack'    && <SlackModal    onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('slack')}    onReset={() => onChannelReset('slack')} />}
     </div>

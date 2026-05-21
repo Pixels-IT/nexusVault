@@ -1604,9 +1604,8 @@ function checkPreviewCrons() {
       (freq === 'monthly' && nowDate.getDate() === (parseInt(opts.day_of_month) || 1))
     );
     if (shouldSendOverdue) {
-      // Notes brouillon PASSÉES uniquement
       const overdue = db.prepare(
-        "SELECT e.*, u.username FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.is_preview=1 AND (e.year < ? OR (e.year = ? AND e.month < ?)) ORDER BY e.year DESC, e.month DESC"
+        "SELECT e.*, COALESCE(u.display_name, u.username) as display_name FROM activity_entries e JOIN users u ON e.user_id=u.id WHERE e.is_preview=1 AND (e.year < ? OR (e.year = ? AND e.month < ?)) ORDER BY e.year DESC, e.month DESC"
       ).all(curYear, curYear, curMonth);
       if (overdue.length > 0) {
         const grouped = {};
@@ -1616,13 +1615,15 @@ function checkPreviewCrons() {
           grouped[key].push(e);
         });
         const MONTHS_FR2 = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-        let html = `<p>⚠️ ${overdue.length} note(s) en brouillon sur des périodes passées :</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Période</th><th style="padding:6px 8px;text-align:left">Utilisateur</th><th style="padding:6px 8px;text-align:left">Tag</th></tr>`;
+        let html = `<p>⚠️ ${overdue.length} note(s) en brouillon sur des périodes passées :</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr style="background:#f1f5f9"><th style="padding:6px 8px;text-align:left">Période</th><th style="padding:6px 8px;text-align:left">Utilisateur</th><th style="padding:6px 8px;text-align:left">Tag</th><th style="padding:6px 8px;text-align:left">Note</th></tr>`;
         let text = `${overdue.length} note(s) en brouillon passées :\n`;
         Object.entries(grouped).sort().reverse().forEach(([period, entries]) => {
           const [y, m] = period.split('-');
           entries.forEach(e => {
-            html += `<tr><td style="padding:6px 8px">${MONTHS_FR2[parseInt(m)-1]} ${y}</td><td style="padding:6px 8px">${e.username}</td><td style="padding:6px 8px">[${e.tag_code}]</td></tr>`;
-            text += `  - ${MONTHS_FR2[parseInt(m)-1]} ${y} / ${e.username} / [${e.tag_code}]\n`;
+            const raw = (e.content || '').replace(/<[^>]+>/g, '').trim();
+            const preview = raw.length > 120 ? raw.slice(0, 120) + '…' : (raw || '—');
+            html += `<tr><td style="padding:6px 8px;white-space:nowrap">${MONTHS_FR2[parseInt(m)-1]} ${y}</td><td style="padding:6px 8px">${e.display_name}</td><td style="padding:6px 8px"><strong>[${e.tag_code}]</strong></td><td style="padding:6px 8px;color:#475569;font-size:12px">${preview}</td></tr>`;
+            text += `  - ${MONTHS_FR2[parseInt(m)-1]} ${y} / ${e.display_name} / [${e.tag_code}] : ${preview}\n`;
           });
         });
         html += '</table>';
@@ -2969,13 +2970,15 @@ app.get('/api/settings', authMiddleware, requireRole('admin'), (req, res) => {
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.session_timeout_minutes) obj.session_timeout_minutes = '30';
   if (!obj.password_min_length) obj.password_min_length = '14';
+  if (!obj.notif_recipients_mode) obj.notif_recipients_mode = 'admins_only';
+  if (!obj.notif_extra_emails) obj.notif_extra_emails = '';
   res.json(obj);
 });
 
 app.put('/api/settings', authMiddleware, requireRole('admin'), (req, res) => {
   const db = getDb();
   const ip = getClientIp(req);
-  const allowed = ['session_timeout_minutes', 'password_min_length'];
+  const allowed = ['session_timeout_minutes', 'password_min_length', 'notif_recipients_mode', 'notif_extra_emails'];
   for (const key of allowed) {
     if (req.body[key] !== undefined) {
       let val = String(req.body[key]);

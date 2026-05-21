@@ -720,4 +720,8 @@ export default {
   'cron.total_backup_size': 'utilisés par les sauvegardes SQLite',
   'security.pwd_min_perm': 'Gérer la longueur minimale des mots de passe',
 
+  'auto_opts.timeline_title': 'Timeline',
+  'auto_opts.timeline_show': "Afficher la timeline d'expiration dans la catégorie Temporaire",
+  'auto_opts.timeline_desc': "Quand activée, une timeline horizontale affiche les dates d'expiration des documents sous le fil d'Ariane.",
+
 };

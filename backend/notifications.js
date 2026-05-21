@@ -189,11 +189,24 @@ async function sendViaChannel(channel, { subject, body, bodyText }, getDb) {
         auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
       });
       const from = smtpFrom;
-      // Récupérer les emails des admins
+      // Récupérer les destinataires selon la configuration
       const _emailDb = getDb();
-      const admins = _emailDb.prepare("SELECT email FROM users WHERE role='admin' AND enabled=1 AND email IS NOT NULL AND email != ''").all();
-      if (!admins.length) throw new Error('Aucun admin avec email configuré');
-      const to = admins.map(a => a.email).join(', ');
+      const recipientsMode  = (_emailDb.prepare("SELECT value FROM settings WHERE key='notif_recipients_mode'").get()?.value) || 'admins_only';
+      const extraEmailsRaw  = (_emailDb.prepare("SELECT value FROM settings WHERE key='notif_extra_emails'").get()?.value) || '';
+      const extraEmails     = extraEmailsRaw.split(/[\n,;]+/).map(e => e.trim()).filter(e => e.includes('@'));
+      let toEmails = [];
+      if (recipientsMode !== 'extra_only') {
+        // Inclure les admins (mode 'admins_only' ou 'admins_and_extra')
+        const admins = _emailDb.prepare("SELECT email FROM users WHERE role='admin' AND enabled=1 AND email IS NOT NULL AND email != ''").all();
+        toEmails.push(...admins.map(a => a.email));
+      }
+      if (recipientsMode !== 'admins_only') {
+        // Inclure les destinataires supplémentaires
+        toEmails.push(...extraEmails);
+      }
+      toEmails = [...new Set(toEmails)]; // dédupliquer
+      if (!toEmails.length) throw new Error('Aucun destinataire configuré pour les notifications email');
+      const to = toEmails.join(', ');
       await transport.sendMail({
         from, to,
         subject: `[NexusVault] ${subject}`,
