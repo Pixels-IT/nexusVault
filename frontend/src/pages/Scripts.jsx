@@ -303,8 +303,9 @@ export default function Scripts() {
 
 // ── EXPIRY TIMELINE ──────────────────────────────────────────────────────────
 function ExpiryTimeline({ docs, onOpenDoc }) {
+  const _today0 = new Date(); _today0.setHours(0,0,0,0);
   const items = docs
-    .filter(d => d.valid_until)
+    .filter(d => d.valid_until && new Date(d.valid_until + 'T00:00:00') >= _today0)
     .map(d => ({ ...d, date: new Date(d.valid_until + 'T00:00:00') }))
     .sort((a, b) => a.date - b.date);
 
@@ -416,6 +417,18 @@ function ExpiryTimeline({ docs, onOpenDoc }) {
 
   return (
     <div style={{ margin:'0 0 14px 0', position:'relative' }}>
+      {/* Tooltip global partagé par tous les points */}
+      <div id="tl-tip-global" style={{
+        position:'fixed', zIndex:9999,
+        background:'#fff', color:'#1e293b',
+        fontSize:11, padding:'5px 9px', borderRadius:5,
+        whiteSpace:'nowrap', pointerEvents:'none',
+        opacity:0, transition:'opacity 0.3s',
+        transform:'translate(-50%, -100%)',
+        marginTop:-6,
+        boxShadow:'0 2px 8px rgba(0,0,0,.18)',
+        border:'1px solid #e2e8f0',
+      }} />
       <div style={{ position:'relative', height:TOTAL_H }}>
 
         {/* Ligne dégradée unique */}
@@ -474,13 +487,20 @@ function ExpiryTimeline({ docs, onOpenDoc }) {
                 top:0, width:0,
               }}>
               {/* Zone de hover large : couvre dot + label */}
-              <div title={tip} style={{
+              {/* Tooltip custom — s'affiche en 0.3s au lieu du délai natif du navigateur */}
+              <div style={{
                 position:'absolute',
                 left: side==='above' ? -30 : -30,
                 top: side==='above' ? lblTop - 2 : dotTop,
                 width: 60, height: Math.abs(lblTop - dotTop) + LSIZE + DOT + 4,
                 zIndex:10, cursor: onOpenDoc ? 'pointer' : 'default',
-              }} />
+              }}
+                onMouseEnter={e => {
+                  const t = document.getElementById('tl-tip-global');
+                  if (t) { const r = e.currentTarget.getBoundingClientRect(); t.style.left=(r.left+r.width/2)+'px'; t.style.top=(r.top-8)+'px'; t.textContent=tip; t.style.opacity='1'; }
+                }}
+                onMouseLeave={() => { const t = document.getElementById('tl-tip-global'); if(t) t.style.opacity='0'; }}
+              />
               <div style={{
                 position:'absolute', left:'50%', marginLeft:-0.5,
                 top:stemTop, width:1, height:STEM, background:c,

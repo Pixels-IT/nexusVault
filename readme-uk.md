@@ -88,6 +88,7 @@ If compromised, attackers have everything at their fingertips!
 - **IP / CIDR whitelist**: restrict access to specific IPs or network ranges (`192.168.1.0/24`). Without rules, access is open to everyone
 - **Configurable brute-force protection**: number of attempts and lockout duration
 - **Configurable session timeout** with visual countdown and automatic audit
+- **Authentication type** displayed in the user list (Local / OIDC / LDAP)
 - **TOTP authentication** (Google Authenticator, Authy…) mandatory or optional
 - **Manual account unlock** from the Admin interface
 - **OIDC / SSO authentication** configurable from the Admin interface
@@ -369,4 +370,4 @@ Display: `●●●●●` (orange background) in the list, actual text visible 
 
 ---
 
-*Current version: see `frontend/src/version.js` or the interface footer.*
+*Current version: `2026-05-21-b388` — see `frontend/src/version.js` or the interface footer.*

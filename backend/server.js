@@ -997,6 +997,8 @@ app.post('/api/oidc/exchange', oidcRateLimit, (req, res) => {
       }, JWT_SECRET, { expiresIn: '8h', algorithm: JWT_ALG });
 
       const ip = getClientIp(req);
+      // Mettre à jour last_login_at (comme pour la connexion locale)
+      db.prepare('UPDATE users SET failed_attempts=0, locked_until=NULL, last_login_at=? WHERE id=?').run(nowLocal(), user.id);
       audit(db, { userId: user.id, username: user.username, action: 'CONNEXION_RÉUSSIE', category: 'auth', severity: 'info', detail: `Via OIDC (${cfg.provider_name || 'SSO'})`, ip, success: 1 });
       res.json({ token });
     } catch (e) {

@@ -38,4 +38,5 @@ export default {
   'auto_opts.timeline_show': 'Show expiry timeline in Temporary category',
   'auto_opts.timeline_desc': 'When enabled, a horizontal timeline displays document expiry dates below the breadcrumb.',
 
+  'config.models_title': 'Equipment Models',
 };

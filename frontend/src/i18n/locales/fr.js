@@ -724,4 +724,5 @@ export default {
   'auto_opts.timeline_show': "Afficher la timeline d'expiration dans la catégorie Temporaire",
   'auto_opts.timeline_desc': "Quand activée, une timeline horizontale affiche les dates d'expiration des documents sous le fil d'Ariane.",
 
+  'config.models_title': 'Modèles d\'équipements',
 };

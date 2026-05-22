@@ -1617,6 +1617,20 @@ function PwdMinCard() {
     finally { setSaving(false); }
   }
 
+  const n = parseInt(value) || 8;
+  // Niveau de sécurité visuel
+  const level = n >= 16 ? { label: 'Élevé', color: 'var(--ok)' }
+    : n >= 12 ? { label: 'Bon', color: '#22c55e' }
+    : n >= 10 ? { label: 'Moyen', color: 'var(--warn)' }
+    : { label: 'Faible', color: 'var(--err)' };
+
+  const recs = [
+    { org: 'CNIL',          icon: '📋', color: '#3b82f6', min: 12, note: '≥ 12 avec complexité' },
+    { org: 'ANSSI',         icon: '🛡️', color: '#6366f1', min: 12, note: '≥ 12 (complexe) ou ≥ 14 (simple)' },
+    { org: 'NIS2',          icon: '🌐', color: '#0891b2', min: 12, note: '≥ 12, recommande ≥ 16 critiques' },
+    { org: 'NIST SP 800-63B', icon: '🔐', color: '#64748b', min: 8, note: '≥ 8, privilégier la longueur' },
+  ];
+
   return (
     <div className="card">
       <div className="card-header">
@@ -1627,36 +1641,69 @@ function PwdMinCard() {
           {t('security.pwd_min_title') || 'Longueur minimale des mots de passe'}
         </div>
       </div>
-      <div style={{ padding:16 }}>
-        {msg && <div className={`alert alert-${msg.startsWith('Err') ? 'err' : 'ok'}`} style={{ marginBottom:12, fontSize:12 }}>{msg}</div>}
-        <div style={{ display:'flex', alignItems:'center', gap:16, flexWrap:'wrap' }}>
-          <div className="form-group" style={{ margin:0, minWidth:200 }}>
-            <label className="form-label">{t('security.pwd_min_label') || 'Nombre minimum de caractères'}</label>
-            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-              <select className="form-control" style={{ width:120 }} value={value} onChange={e => setValue(e.target.value)}>
-                {Array.from({length:13},(_,i)=>i+8).map(n => (
-                  <option key={n} value={n}>
-                    {n} {t('security.pwd_min_chars') || 'caractères'}
-                    {n === 12 ? ' ✓ CNIL/ANSSI' : ''}
-                    {n === 14 ? ' ✓ ANSSI renforcé' : ''}
-                    {n === 16 ? ' ✓ NIS2 renforcé' : ''}
-                  </option>
-                ))}
-              </select>
-              <button className="btn btn-primary" onClick={save} disabled={saving}>
-                {saving ? '…' : t('auto_cat.save') || 'Enregistrer'}
-              </button>
+      <div style={{ padding:'16px 20px' }}>
+        {msg && <div className={`alert alert-${msg.startsWith('Err') ? 'err' : 'ok'}`} style={{ marginBottom:14, fontSize:12 }}>{msg}</div>}
+
+        {/* Contrôle principal */}
+        <div style={{ display:'flex', alignItems:'center', gap:16, marginBottom:18 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:6 }}>
+              <label style={{ fontSize:12, color:'var(--muted)', fontWeight:600 }}>
+                {t('security.pwd_min_label') || 'Nombre minimum de caractères'}
+              </label>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span style={{ fontSize:28, fontWeight:900, color:level.color, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>
+                  {n}
+                </span>
+                <span style={{ fontSize:11, color:'var(--muted)' }}>car.</span>
+                <span style={{ fontSize:10, fontWeight:700, color:level.color,
+                  background:`${level.color}22`, border:`1px solid ${level.color}44`,
+                  borderRadius:4, padding:'1px 6px' }}>
+                  {level.label}
+                </span>
+              </div>
+            </div>
+            {/* Slider */}
+            <input type="range" min="8" max="20" step="1" value={value}
+              onChange={e => setValue(e.target.value)}
+              style={{ width:'100%', accentColor:level.color, cursor:'pointer', height:4 }} />
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--muted)', marginTop:2 }}>
+              <span>8</span><span>10</span><span>12</span><span>14</span><span>16</span><span>18</span><span>20</span>
             </div>
           </div>
-          <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.7, flex:1 }}>
-            <div>📋 <strong>CNIL</strong> : ≥ 12 caractères avec complexité</div>
-            <div>🛡️ <strong>ANSSI</strong> : ≥ 12 (complexe) ou ≥ 14 (simple)</div>
-            <div>🌐 <strong>NIS2</strong> : ≥ 12, recommande ≥ 16 pour les systèmes critiques</div>
-            <div>🔐 <strong>NIST SP 800-63B</strong> : ≥ 8, privilégier la longueur à la complexité</div>
-          </div>
+          <button className="btn btn-primary" onClick={save} disabled={saving}
+            style={{ flexShrink:0, minWidth:100 }}>
+            {saving ? '…' : t('auto_cat.save') || 'Enregistrer'}
+          </button>
         </div>
-        <div style={{ fontSize:11, color:'var(--muted)', marginTop:10, lineHeight:1.5 }}>
-          {t('security.pwd_min_hint') || 'Cette valeur s\'applique aux mots de passe des comptes locaux, aux documents sécurisés et aux sauvegardes chiffrées.'}
+
+        {/* Recommandations en grille */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          {recs.map(r => {
+            const active = n >= r.min;
+            return (
+              <div key={r.org} style={{
+                display:'flex', alignItems:'center', gap:10,
+                padding:'8px 12px', borderRadius:'var(--r)',
+                background: active ? `${r.color}12` : 'var(--surf2)',
+                border: `1px solid ${active ? r.color + '44' : 'var(--brd)'}`,
+                transition:'all .2s',
+              }}>
+                <span style={{ fontSize:18, flexShrink:0 }}>{r.icon}</span>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color: active ? r.color : 'var(--muted)' }}>
+                    {r.org}
+                    {active && <span style={{ marginLeft:5, fontSize:10 }}>✓</span>}
+                  </div>
+                  <div style={{ fontSize:10, color:'var(--muted)', lineHeight:1.4, marginTop:1 }}>{r.note}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ fontSize:10, color:'var(--muted)', marginTop:10, lineHeight:1.5 }}>
+          {t('security.pwd_min_hint') || 'S\'applique aux comptes locaux, documents sécurisés et sauvegardes chiffrées.'}
         </div>
       </div>
     </div>

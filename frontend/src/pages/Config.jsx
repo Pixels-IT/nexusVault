@@ -191,7 +191,7 @@ function ModelModal({model, onClose, onSave }) {
       {error && <Alert type="err">{error}</Alert>}
       <div className="form-row">
         <div className="form-group"><label className="form-label">{t('config.manufacturer')} *</label><input className="form-control" value={data.vendor} onChange={set('vendor')} placeholder="Cisco, HP…" autoFocus /></div>
-        <div className="form-group"><label className="form-label">{t('config.model')} + ' *'</label><input className="form-control" value={data.model} onChange={set('model')} placeholder="Catalyst 9300" /></div>
+        <div className="form-group"><label className="form-label">{t('config.model')} *</label><input className="form-control" value={data.model} onChange={set('model')} placeholder="Catalyst 9300" /></div>
       </div>
       <div className="form-row">
         <div className="form-group"><label className="form-label">Type</label>
@@ -241,7 +241,7 @@ function ModelsTab() {
       <div className="card-header">
         <div className="card-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>
-          t('config.model')s d'équipements
+          {t('config.models_title') || 'Modèles d\'équipements'}
         </div>
         {can('config_write') && (
           <button className="btn btn-sm" onClick={() => setModal({})}
@@ -311,7 +311,7 @@ function DeviceModal({device, sites, models, onClose, onSave }) {
   }
 
   return (
-    <Modal title={device ? 'Modifier l\'équipement' : 'Ajouter un équipement'} onClose={onClose}
+    <Modal title={device?.id ? 'Modifier l\'équipement' : 'Ajouter un équipement'} onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>{t('config.cancel')}</button><button className="btn btn-primary" onClick={submit}>{t('config.save')}</button></>}>
       {error && <Alert type="err">{error}</Alert>}
       <div className="form-group"><label className="form-label">{t('config.name')} *</label><input className="form-control" value={data.name} onChange={set('name')} placeholder="sw-paris-core-01" autoFocus /></div>
@@ -331,7 +331,7 @@ function DeviceModal({device, sites, models, onClose, onSave }) {
             })()}
           </select>
         </div>
-        <div className="form-group"><label className="form-label">{t('config.model')} + ' *'</label>
+        <div className="form-group"><label className="form-label">{t('config.model')} *</label>
           <select className="form-control" value={data.model_id} onChange={set('model_id')}>
             {models.map(m => <option key={m.id} value={m.id}>{m.vendor} {m.model}</option>)}
           </select>
@@ -366,15 +366,18 @@ function DevicesTab() {
   }, []);
 
   async function duplicateDevice(device) {
-    // Crée une copie avec IP vidée et nom suffixé "-copy" — ouvre le modal pour édition
+    // Copie nom, modèle et IP — l'utilisateur ajuste avant de sauvegarder
+    // Filtrer les valeurs "[erreur déchiffrement]" qui indiquent un problème de clé
+    const safePort = device.ssh_port && !device.ssh_port.includes('erreur') ? device.ssh_port : '22';
+    const safeUser = device.ssh_user && !device.ssh_user.includes('erreur') ? device.ssh_user : '';
     const copy = {
       name: device.name + '-copy',
       site_id: device.site_id,
       model_id: device.model_id,
-      ip: '',          // IP intentionnellement vide : l'utilisateur doit en saisir une nouvelle
-      ssh_port: device.ssh_port || '22',
-      ssh_user: device.ssh_user || '',
-      ssh_password: '', // on ne copie pas le mot de passe
+      ip: device.ip || '',
+      ssh_port: safePort,
+      ssh_user: safeUser,
+      ssh_password: '', // on ne copie pas le mot de passe SSH
       enabled: 1,
     };
     setModal(copy); // ouvre le modal d'édition pré-rempli
@@ -423,7 +426,7 @@ function DevicesTab() {
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                   </svg>
-                  t('config.duplicate')
+                  {t('config.duplicate') || 'Dupliquer'}
                 </button>
                 <button className="btn btn-sm btn-danger" onClick={() => setConfirm(d)}>Suppr.</button>
               </td>
@@ -432,7 +435,7 @@ function DevicesTab() {
           {devices.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>{t('config.no_devices')}</td></tr>}
         </tbody>
       </table>
-      {modal !== null && <DeviceModal device={modal.id ? modal : null} sites={sites} models={models} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
+      {modal !== null && <DeviceModal device={modal} sites={sites} models={models} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
       {confirm && <ConfirmModal message={`Supprimer l'équipement "${confirm.name}" ?`} onConfirm={async () => {
         try {
           await api.deleteDevice(confirm.id); setConfirm(null); load();

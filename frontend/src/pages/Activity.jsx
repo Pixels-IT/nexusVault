@@ -1023,7 +1023,7 @@ function ExportModal({ tags, userId, targetUserName, onClose }) {
         return { svgPie: `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${slices}</svg>`, svgLegend: `<svg width="120" height="${14 + data.length*17}" viewBox="0 0 120 ${14+data.length*17}">${legend}</svg>` };
       }
 
-      const who = targetUserName || user?.displayName || user?.username || '';
+      const who = targetUserName || user?.display_name || user?.displayName || user?.username || '';
       const modeLabel = mode === 'month' ? `${MONTHS[month-1]} ${year}` : mode === 'year' ? `Année ${year}` : mode === 'all' ? t('activity.all_years') : `Tag ${filterTag || 'tous'}`;
       const exportDate = new Date().toLocaleDateString('fr-FR', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
 
@@ -1142,17 +1142,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;fo
 .meta-bar{background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:10px 32px;display:flex;gap:24px;font-size:11px;color:#64748b}
 .meta-item{display:flex;align-items:center;gap:5px}
 .meta-dot{width:6px;height:6px;border-radius:50%;background:#2196f3;display:inline-block}
-.chart-block{padding:24px 32px;border-bottom:1px solid #e2e8f0;background:#fafcff}
+.chart-block{padding:24px 32px;border-bottom:1px solid #e2e8f0;background:#fafcff;page-break-inside:avoid}
 .chart-title{font-size:13px;font-weight:700;color:#1e293b;margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .chart-title::before{content:"";display:inline-block;width:4px;height:16px;background:#2196f3;border-radius:2px}
 .chart-inner{display:flex;align-items:center;gap:24px}
 .pie-wrap{flex-shrink:0}
 .legend-wrap{flex-shrink:0}
-.stat-pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-.pill{display:flex;align-items:center;gap:8px;padding:5px 12px;border-radius:20px;font-size:10px}
-.pill-tag{font-weight:700;font-family:monospace}
-.pill-val{color:#475569}
-.pill-pct{font-weight:700}
+.stat-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;page-break-inside:avoid}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:16px;font-size:9px;white-space:nowrap}
+.pill-tag{font-weight:700;font-family:monospace;font-size:8.5px}
+.pill-val{color:#475569;font-size:8.5px}
+.pill-pct{font-weight:700;font-size:8.5px}
+.chart-section{page-break-inside:avoid}
+.stat-section{page-break-inside:avoid}
 .table-section{padding:16px 32px}
 .table-title{font-size:13px;font-weight:700;color:#1e293b;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .table-title::before{content:"";display:inline-block;width:4px;height:16px;background:#10b981;border-radius:2px}
@@ -1252,7 +1254,7 @@ ${statPillsHtml}
       {mode === 'tag' && (
         <div className="form-group">
           <label className="form-label">Tag</label>
-          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', justifyContent:'center' }}>
             {tags.map(tag => {
               const hex = tag.color; const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
               const sel = filterTag === tag.code;
@@ -1278,7 +1280,7 @@ ${statPillsHtml}
           <span style={{ fontSize:12, fontWeight:600 }}>{t('activity.include_chart')}</span>
         </label>
         {showChart && (
-          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', justifyContent:'center' }}>
             {CHART_TYPES.map(ct => (
               <button key={ct.value} onClick={()=>setChartType(ct.value)} style={{
                 padding:'4px 10px', fontSize:11, borderRadius:4, cursor:'pointer',

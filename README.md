@@ -32,9 +32,12 @@ En cas de compromission, les attaquants ont tout sous la main !
 - **Catégories colorées** avec date de validité (type Temporaire) et alertes d'expiration
 - **Documents** : création, édition, historique complet des modifications
 - **Fichiers joints** par document : upload multiple, téléchargement, suppression, **remplacement** d'un fichier (historisé en audit)
-- **Aperçu intégré** : PDF natif (iframe), Word/ODT (LibreOffice → PDF), scripts (coloration syntaxique via highlight.js — yaml, json, python, bash, sql…)
+- **Aperçu intégré** : PDF natif (iframe), Word/ODT (LibreOffice → PDF), scripts (coloration syntaxique via highlight.js — 90+ langages dont PowerShell, DOS/Batch, HCL, Kotlin, Dart…). Modal agrandi (1100px) pour une meilleure lisibilité
+- **Fichiers sans extension** : traitement automatique en texte brut, détection binaire intelligente
 - **Documents sécurisés** : protection par mot de passe global ou par document
 - **Documents temporaires** : date de validité avec alertes d'expiration sur le tableau de bord
+- **Timeline d'expiration** : dans les catégories Temporaires, une timeline horizontale SVG affiche les dates d'expiration proportionnellement. Coupures `//` pour les grands intervalles, anti-chevauchement automatique, dégradé rouge→orange→jaune→vert→bleu, clic sur un point pour ouvrir le document
+- **Catégories avec description** : la description est affichée en italique sous le nom, les compteurs (sous-catégories/documents) restent visibles en bas à gauche de la tuile
 - **Copie en un clic** du contenu des scripts dans le presse-papier avec audit
 - **Audit complet** de chaque accès, modification, visualisation, copie, remplacement et tentative échouée
 
@@ -59,8 +62,10 @@ En cas de compromission, les attaquants ont tout sous la main !
   - Alerte des sauvegardes SQLite : résultat (OK/Échec), nom du fichier, taille, date
   - Expiration de documents temporaires
   - Suppression d'un document / fichier de document / suivi / fichier de suivi / sauvegarde
-  - Récapitulatif des notes en preview (00h05, fréquence quotidienne/hebdo/mensuelle)
+  - Récapitulatif des notes en preview (00h05, fréquence quotidienne/hebdo/mensuelle) — avec aperçu du contenu de la note (120 caractères)
+  - Expiration de documents : une notification par document expirant, avec délai coloré (rouge/orange/vert)
   - Récapitulatif des fichiers en rétention (00h05, fréquence quotidienne/hebdo/mensuelle)
+- **Destinataires configurables** : 3 modes — Admins uniquement / Admins + supplémentaires / Supplémentaires uniquement. Adresses email additionnelles saisies librement depuis le modal SMTP
 - **Journal des notifications** : historique des envois avec statut succès/erreur
 
 ### Sécurité renforcée
@@ -99,11 +104,12 @@ En cas de compromission, les attaquants ont tout sous la main !
 - **Liste blanche IP / CIDR** : restreindre l'accès à des IP ou plages réseau spécifiques (`192.168.1.0/24`). Sans règle, l'accès est ouvert à tous
 - **Protection brute-force configurable** : nombre de tentatives et durée de verrouillage
 - **Timeout de session configurable** avec décompte visuel et audit automatique
+- **Type d'authentification** affiché dans la liste des utilisateurs (Local / OIDC / LDAP)
 - **Authentification TOTP** (Google Authenticator, Authy…) obligatoire ou optionnelle
 - **Déverrouillage manuel des comptes** depuis l'interface Admin
 - **Authentification OIDC / SSO** configurable depuis l'interface Admin
 - **Changement de mot de passe obligatoire** à la première connexion (minimum 14 caractères)
-- **Onglet Système** : surveillance en temps réel — uptime, mémoire Node.js, taille DB SQLite table par table, activité 24h, état du planificateur, statut whitelist
+- **Onglet Système** : surveillance en temps réel — uptime, mémoire Node.js, taille DB SQLite table par table, activité 24h, état du planificateur, statut whitelist, vérification mise à jour Docker Hub
 - **Mode sombre / clair**
 - **Multilangues i18n (11 langues)** : `fr`, `en`, `de`, `es`, `it`, `ja`, `nl`, `pl`, `pt`, `ru`, `zh`
 - **Chiffrement AES-256** de toutes les données sensibles en base SQLite
@@ -113,7 +119,11 @@ En cas de compromission, les attaquants ont tout sous la main !
 - **URL de l'application configurable**
 - **Planificateur d'archivage** (1er du mois, heure configurable)
 - **Logo PDF personnalisable** (hauteur max 120px)
-- **Administration de l'automatisation** : catégories, types, couleurs, mot de passe global documents sécurisés
+- **Administration Documents** : catégories, types, couleurs, mot de passe global documents sécurisés, option d'affichage de la timeline
+- **Onglet Planificateur** : carte de planification SQLite avec mot de passe de chiffrement, en plus des planifications équipements
+- **Card Docker Hub** : vérification automatique de la mise à jour NexusVault (comparaison numéro de build via proxy backend)
+- **URL de l'application** et **logo PDF** configurables
+- **Renommage Automatisation → Documents** dans l'interface, la navbar et les menus (clés techniques inchangées)
 
 ---
 
@@ -218,7 +228,8 @@ nexusvault/
         │   └── I18nContext.jsx  # Provider i18n, sélecteur de langue
         ├── hooks/
         │   ├── useSessionTimeout.js
-        │   └── usePerms.js
+        │   ├── usePerms.js
+        │   └── usePasswordMin.js  # Longueur min. MDP — cache partagé entre composants
         ├── components/
         │   ├── Navbar.jsx
         │   ├── LangSwitcher.jsx # Sélecteur de langue (11 langues)
@@ -232,7 +243,7 @@ nexusvault/
             ├── Backups.jsx      # Backups réseau, arborescence sites, comparaison
             ├── Activity.jsx     # Suivi d'activité, tags, export PDF
             ├── Config.jsx       # Appareils : Pays, Sites (hiérarchie), Modèles, Équipements
-            ├── Scripts.jsx      # Automatisation : catégories, documents, fichiers
+            ├── Scripts.jsx      # Documents : catégories, documents, fichiers, timeline expiration
             └── Admin.jsx        # Administration complète
 ```
 
@@ -284,11 +295,12 @@ Chaque valeur sensible est individuellement chiffrée avec un IV aléatoire avan
 | Accès sécurité | ✓ | ✗ | ✗ |
 | Accès à la rétention | ✓ | ✗ | ✗ |
 | Backup SQLite (sauvegarde/restauration) | ✓ | ✗ | ✗ |
-| Gérer la longueur min. des mots de passe | ✓ | ✗ | ✗ |
+| Longueur minimale des mots de passe | ✓ | ✗ | ✗ |
 | Suivi d'activité (écriture) | ✓ | ✓ | ✓ |
 | Suivi d'activité (lecture) | ✓ | ✓ | ✗ |
 | Automatisation (lecture) | ✓ | ✓ | ✓ |
-| Automatisation (écriture) | ✓ | ✓ | ✗ |
+| Documents (lecture) | ✓ | ✓ | ✓ |
+| Documents (écriture) | ✓ | ✓ | ✗ |
 
 > Les permissions sont entièrement configurables par utilisateur depuis Administration → Droits d'accès.
 
@@ -396,4 +408,4 @@ Affichage : `●●●●●` (fond orange) sur la liste, texte réel visible en
 
 ---
 
-*Version courante : consultez `frontend/src/version.js` ou le pied de page de l'interface.*
+*Version courante : `2026-05-21-b388` — consultez `frontend/src/version.js` ou le pied de page de l'interface.*
