@@ -1595,9 +1595,9 @@ function checkPreviewCrons() {
   // Si c'est 00h05 ou premier appel de la journée, marquer comme exécuté
   if (isOncePerDay) _lastCronDate = todayStr;
 
-  // Récapitulatif des notes en brouillon passées (00h05 seulement)
+  // Récapitulatif des notes en brouillon passées (une fois par jour)
   const overdueRow = db.prepare("SELECT * FROM notification_config WHERE event_key='preview_overdue' AND enabled=1").get();
-  if (overdueRow && isAt0005) {
+  if (overdueRow && isOncePerDay) {
     let opts = {}; try { opts = JSON.parse(overdueRow.options || '{}'); } catch {}
     const freq = opts.frequency || 'weekly';
     const shouldSendOverdue = (
@@ -1633,9 +1633,9 @@ function checkPreviewCrons() {
       }
     }
   }
-  // preview_recap : récapitulatif périodique (00h05 seulement)
+  // preview_recap : récapitulatif périodique (une fois par jour)
   const recapRow = db.prepare("SELECT * FROM notification_config WHERE event_key='preview_recap' AND enabled=1").get();
-  if (recapRow && isAt0005) {
+  if (recapRow && isOncePerDay) {
     let opts = {};
     try { opts = JSON.parse(recapRow.options || '{}'); } catch {}
     const freq = opts.frequency || 'weekly';
@@ -1662,7 +1662,7 @@ function checkPreviewCrons() {
 
   // retention_recap : récapitulatif des éléments en rétention (00h05 seulement)
   const retRecapRow = db.prepare("SELECT * FROM notification_config WHERE event_key='retention_recap' AND enabled=1").get();
-  if (retRecapRow && isAt0005) {
+  if (retRecapRow && isOncePerDay) {
     let opts = {}; try { opts = JSON.parse(retRecapRow.options || '{}'); } catch {}
     const freq = opts.frequency || 'weekly';
     const shouldSend = (

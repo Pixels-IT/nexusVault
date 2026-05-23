@@ -1029,7 +1029,7 @@ function RolePermissionsCard() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15 }}>
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
           </svg>
-          t('security.rights') par rôle
+          {t('security.rights')} par rôle
         </div>
         <button className="btn btn-primary" onClick={save} disabled={saving}>
           {saving ? 'Enregistrement…' : 'Enregistrer'}
@@ -2964,86 +2964,84 @@ function SecurityNotifTab() {
             </tr>
           </thead>
           <tbody>
-            {configs.map((cfg, idx) => (
-              <tr key={cfg.event_key} style={{ borderBottom: '1px solid var(--brd)', background: idx % 2 === 0 ? 'transparent' : 'var(--surf2)' }}>
-                {/* Nom de l'événement */}
-                <td style={{ padding: '10px 16px' }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--txt)' }}>{cfg.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{cfg.description}</div>
-                </td>
-                {/* Coches par canal */}
-                {channelList.map(ch => {
-                  const active = cfg.channels.includes(ch);
-                  // validated[ch] prime sur catalog.available — il est mis à jour immédiatement
-                  // lors d'un reset, alors que catalog nécessite un rechargement async.
-                  const available = validated[ch];
-                  return (
-                    <td key={ch} style={{ padding: '10px 8px', textAlign: 'center', width: 56 }}>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', cursor: available ? 'pointer' : 'not-allowed' }}
-                        title={!available ? `Configurer ${CHAN_CONFIG[ch].label} d'abord` : ''}>
-                        <input type="checkbox" checked={active} disabled={!available}
-                          onChange={() => available && toggleChannel(cfg, ch)}
-                          style={{ width: 15, height: 15, cursor: available ? 'pointer' : 'not-allowed',
-                            accentColor: CHAN_CONFIG[ch].color }} />
-                      </label>
-                    </td>
-                  );
-                })}
-                {/* Options */}
-                <td style={{ padding: '10px 16px' }}>
-                  {(cfg.event_key === 'preview_recap' || cfg.event_key === 'preview_overdue' || cfg.event_key === 'retention_recap') && (
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <select className="form-control" style={{ padding: '2px 6px', fontSize: 11, height: 26 }}
-                        value={cfg.options?.frequency || 'weekly'}
-                        onChange={e => saveCfg(cfg.event_key, { options: { ...cfg.options, frequency: e.target.value } })}>
-                        {FREQ_OPT.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-                      </select>
-                      {cfg.options?.frequency === 'weekly' && (
-                        <select className="form-control" style={{ padding: '2px 6px', fontSize: 11, height: 26 }}
-                          value={cfg.options?.day_of_week ?? 1}
-                          onChange={e => saveCfg(cfg.event_key, { options: { ...cfg.options, day_of_week: parseInt(e.target.value) } })}>
-                          {DAYS_FR.map((d, i) => <option key={i} value={i}>{d}</option>)}
+            {(() => {
+              const GROUPS = [
+                { label: 'Sécurité',        icon: '🔐', keys: ['login_failed_threshold','account_locked','db_backup_created','db_backup_deleted','db_backup_downloaded','db_backup_restored','db_backup_sqlite_alert'] },
+                { label: 'Équipements',     icon: '🖧',  keys: ['backup_download','backup_deleted','backup_schedule_result'] },
+                { label: 'Documents',       icon: '📄', keys: ['expiration_document','retention_recap'] },
+                { label: "Suivi d'activité", icon: '📝', keys: ['preview_overdue','preview_recap','activity_deleted','activity_file_deleted'] },
+              ];
+              const grouped = {}; GROUPS.forEach(g => { grouped[g.label] = []; }); grouped['__other__'] = [];
+              configs.forEach(cfg => { const g = GROUPS.find(g => g.keys.includes(cfg.event_key)); if (g) grouped[g.label].push(cfg); else grouped['__other__'].push(cfg); });
+
+              const sep = (label, icon) => (
+                <tr key={`sep-${label}`}>
+                  <td colSpan={channelList.length + 2} style={{ padding: '5px 16px', background:'var(--surf2)', borderTop:'1px solid var(--brd)', borderBottom:'1px solid var(--brd)' }}>
+                    <span style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>{icon} {label}</span>
+                  </td>
+                </tr>
+              );
+
+              const row = (cfg, idx) => (
+                <tr key={cfg.event_key} style={{ borderBottom:'1px solid var(--brd)', background: idx%2===0?'transparent':'var(--surf2)' }}>
+                  <td style={{ padding:'10px 16px' }}>
+                    <div style={{ fontSize:13, fontWeight:500, color:'var(--txt)' }}>{cfg.label}</div>
+                    <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{cfg.description}</div>
+                  </td>
+                  {channelList.map(ch => {
+                    const active = cfg.channels.includes(ch); const available = validated[ch];
+                    return (
+                      <td key={ch} style={{ padding:'10px 8px', textAlign:'center', width:56 }}>
+                        <label style={{ display:'inline-flex', alignItems:'center', cursor:available?'pointer':'not-allowed' }}
+                          title={!available?`Configurer ${CHAN_CONFIG[ch].label} d'abord`:''}>
+                          <input type="checkbox" checked={active} disabled={!available} onChange={() => available && toggleChannel(cfg, ch)}
+                            style={{ width:15, height:15, cursor:available?'pointer':'not-allowed', accentColor:CHAN_CONFIG[ch].color }} />
+                        </label>
+                      </td>
+                    );
+                  })}
+                  <td style={{ padding:'10px 16px' }}>
+                    {(cfg.event_key==='preview_recap'||cfg.event_key==='preview_overdue'||cfg.event_key==='retention_recap') && (
+                      <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+                        <select className="form-control" style={{ padding:'2px 6px', fontSize:11, height:26 }} value={cfg.options?.frequency||'weekly'}
+                          onChange={e => saveCfg(cfg.event_key, { options:{...cfg.options, frequency:e.target.value} })}>
+                          {FREQ_OPT.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
                         </select>
-                      )}
-                      {cfg.options?.frequency === 'monthly' && (
-                        <select className="form-control" style={{ padding: '2px 6px', fontSize: 11, height: 26 }}
-                          value={cfg.options?.day_of_month ?? 1}
-                          onChange={e => saveCfg(cfg.event_key, { options: { ...cfg.options, day_of_month: parseInt(e.target.value) } })}>
-                          {Array.from({length:28},(_,i)=><option key={i+1} value={i+1}>Jour {i+1}</option>)}
-                        </select>
-                      )}
-                    </div>
-                  )}
-                  {cfg.event_key === 'expiration_document' && (
-                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <select className="form-control" style={{ padding:'2px 6px', fontSize:11, height:26 }}
-                        value={cfg.options?.days_before ?? 30}
-                        onChange={e => saveCfg(cfg.event_key, { options: { ...cfg.options, days_before: parseInt(e.target.value) } })}>
-                        {[30,15,10,5,2,1].map(d => <option key={d} value={d}>{d} jour{d>1?'s':''} avant</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {cfg.event_key === 'login_failed_threshold' && (
-                    <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-                        <input type="number" className="form-control" style={{width:50,padding:'2px 6px',fontSize:11,height:26}}
-                          min={1} max={10} value={cfg.options?.threshold ?? 3}
-                          onChange={e => saveCfg(cfg.event_key, { options:{...cfg.options, threshold:parseInt(e.target.value)} })}/>
-                        <span style={{fontSize:11,color:'var(--muted)'}}>tentatives sur</span>
-                        <select className="form-control" style={{padding:'2px 4px',fontSize:11,height:26,width:'auto'}}
-                          value={cfg.options?.window_min ?? 10}
-                          onChange={e => saveCfg(cfg.event_key, { options:{...cfg.options, window_min:parseInt(e.target.value)} })}>
-                          <option value={5}>5 min</option>
-                          <option value={10}>10 min</option>
-                          <option value={15}>15 min</option>
+                        {cfg.options?.frequency==='weekly' && (
+                          <select className="form-control" style={{ padding:'2px 6px', fontSize:11, height:26 }} value={cfg.options?.day_of_week??1}
+                            onChange={e => saveCfg(cfg.event_key, { options:{...cfg.options, day_of_week:parseInt(e.target.value)} })}>
+                            {DAYS_FR.map((d,i) => <option key={i} value={i}>{d}</option>)}
+                          </select>
+                        )}
+                        {cfg.options?.frequency==='monthly' && (
+                          <select className="form-control" style={{ padding:'2px 6px', fontSize:11, height:26 }} value={cfg.options?.day_of_month??1}
+                            onChange={e => saveCfg(cfg.event_key, { options:{...cfg.options, day_of_month:parseInt(e.target.value)} })}>
+                            {Array.from({length:28},(_,i) => <option key={i+1} value={i+1}>Jour {i+1}</option>)}
+                          </select>
+                        )}
+                      </div>
+                    )}
+                    {cfg.event_key==='expiration_document' && (
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <select className="form-control" style={{ padding:'2px 6px', fontSize:11, height:26 }} value={cfg.options?.days_before??30}
+                          onChange={e => saveCfg(cfg.event_key, { options:{...cfg.options, days_before:parseInt(e.target.value)} })}>
+                          {[1,2,3,5,7,10,14,21,30,60,90].map(d => <option key={d} value={d}>{d} j avant</option>)}
                         </select>
                       </div>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
+                    )}
+                  </td>
+                </tr>
+              );
+
+              const result = []; let idx = 0;
+              GROUPS.forEach(g => {
+                const items = grouped[g.label]; if (!items.length) return;
+                result.push(sep(g.label, g.icon));
+                items.forEach(cfg => result.push(row(cfg, idx++)));
+              });
+              if (grouped['__other__'].length) { result.push(sep('Autres', '•')); grouped['__other__'].forEach(cfg => result.push(row(cfg, idx++))); }
+              return result;
+            })()}
         </table>
       </div>
 
