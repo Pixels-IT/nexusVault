@@ -2960,7 +2960,7 @@ function SecurityNotifTab() {
                   {CHAN_CONFIG[ch].label}
                 </th>
               ))}
-              <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', fontWeight: 600, width: 200 }}>Options</th>
+              <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', fontWeight: 600, minWidth: 240 }}>Options</th>
             </tr>
           </thead>
           <tbody>
@@ -2968,16 +2968,25 @@ function SecurityNotifTab() {
               const GROUPS = [
                 { label: 'Sécurité',        icon: '🔐', keys: ['login_failed_threshold','account_locked','db_backup_created','db_backup_deleted','db_backup_downloaded','db_backup_restored','db_backup_sqlite_alert'] },
                 { label: 'Équipements',     icon: '🖧',  keys: ['backup_download','backup_deleted','backup_schedule_result'] },
-                { label: 'Documents',       icon: '📄', keys: ['expiration_document','retention_recap'] },
+                { label: 'Documents',       icon: '📄', keys: ['expiration_document','document_deleted','file_deleted','retention_recap'] },
                 { label: "Suivi d'activité", icon: '📝', keys: ['preview_overdue','preview_recap','activity_deleted','activity_file_deleted'] },
               ];
               const grouped = {}; GROUPS.forEach(g => { grouped[g.label] = []; }); grouped['__other__'] = [];
               configs.forEach(cfg => { const g = GROUPS.find(g => g.keys.includes(cfg.event_key)); if (g) grouped[g.label].push(cfg); else grouped['__other__'].push(cfg); });
 
+              const ICONS = {
+                'Sécurité':         <svg viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" style={{width:12,height:12,verticalAlign:'middle',marginRight:4}}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+                'Équipements':      <svg viewBox="0 0 24 24" fill="none" stroke="#0891b2" strokeWidth="2" style={{width:12,height:12,verticalAlign:'middle',marginRight:4}}><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>,
+                'Documents':        <svg viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" style={{width:12,height:12,verticalAlign:'middle',marginRight:4}}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+                "Suivi d'activité": <svg viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" style={{width:12,height:12,verticalAlign:'middle',marginRight:4}}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+              };
+              const LABEL_COLORS = { 'Sécurité':'#6366f1', 'Équipements':'#0891b2', 'Documents':'#16a34a', "Suivi d'activité":'#d97706' };
               const sep = (label, icon) => (
                 <tr key={`sep-${label}`}>
                   <td colSpan={channelList.length + 2} style={{ padding: '5px 16px', background:'var(--surf2)', borderTop:'1px solid var(--brd)', borderBottom:'1px solid var(--brd)' }}>
-                    <span style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.08em' }}>{icon} {label}</span>
+                    <span style={{ fontSize:10, fontWeight:700, color: LABEL_COLORS[label] || 'var(--muted)', textTransform:'uppercase', letterSpacing:'0.08em', display:'inline-flex', alignItems:'center' }}>
+                      {ICONS[label] || <span style={{marginRight:4}}>{icon}</span>}{label}
+                    </span>
                   </td>
                 </tr>
               );
@@ -3039,9 +3048,9 @@ function SecurityNotifTab() {
                 result.push(sep(g.label, g.icon));
                 items.forEach(cfg => result.push(row(cfg, idx++)));
               });
-              if (grouped['__other__'].length) { result.push(sep('Autres', '•')); grouped['__other__'].forEach(cfg => result.push(row(cfg, idx++))); }
               return result;
             })()}
+          </tbody>
         </table>
       </div>
 
