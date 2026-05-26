@@ -1,8 +1,10 @@
 FROM node:24-alpine
 
 # Outils de compilation + su-exec pour drop privileges + wget pour healthcheck + LibreOffice pour aperçu docs
+# samba-client pour l'export SMB/CIFS, rsync pour l'export rSync, nfs-utils pour NFS
 RUN apk add --no-cache python3 make g++ su-exec wget binutils busybox \
-    libreoffice font-noto font-noto-cjk ttf-dejavu ttf-liberation
+    libreoffice font-noto font-noto-cjk ttf-dejavu ttf-liberation \
+    samba-client rsync nfs-utils
 
 # Créer utilisateur non-root avec mot de passe root complexe
 RUN addgroup -S app-nexus && adduser -S -G app-nexus app-nexus && \

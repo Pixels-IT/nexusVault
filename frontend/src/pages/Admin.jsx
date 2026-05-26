@@ -1814,6 +1814,14 @@ function DbBackupCard() {
   const [showTriggerPwd, setShowTriggerPwd]     = useState(false); // modal mdp avant sauvegarde manuelle
   const [triggerPwdInput, setTriggerPwdInput]   = useState('');
   const [totalSize, setTotalSize] = useState(0);
+  const [showExport, setShowExport] = useState(false);
+  const [exportCount, setExportCount] = useState(0);
+
+  useEffect(() => {
+    api.dbExportConfig().then(cfg => {
+      setExportCount(Object.values(cfg).filter(v => v?.enabled).length);
+    }).catch(() => {});
+  }, []);
   const fileInputRef = useRef(null);
 
   const load = () => {
@@ -1926,6 +1934,24 @@ function DbBackupCard() {
             </svg>
             {triggering ? 'Sauvegarde…' : 'Sauvegarder'}
           </button>
+          <button className="btn" onClick={() => setShowExport(true)}
+            style={{ display:'flex', alignItems:'center', gap:6, borderColor:'var(--ok)', color:'var(--ok)', position:'relative' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:14, height:14 }}>
+              <polyline points="8 17 12 21 16 17"/><line x1="12" y1="3" x2="12" y2="21"/>
+            </svg>
+            Export
+            {exportCount > 0 && (
+              <span style={{
+                display:'inline-flex', alignItems:'center', justifyContent:'center',
+                background:'var(--ok)', color:'#fff',
+                borderRadius:10, fontSize:10, fontWeight:700,
+                minWidth:16, height:16, padding:'0 4px', lineHeight:1,
+                marginLeft:2,
+              }}>
+                {exportCount}
+              </span>
+            )}
+          </button>
 
         </div>
       </div>
@@ -2030,6 +2056,7 @@ function DbBackupCard() {
           onConfirm={() => deleteBackup(confirmDel)}
           onCancel={() => setConfirmDel(null)} />
       )}
+      {showExport && <DbExportModal onClose={() => { setShowExport(false); api.dbExportConfig().then(cfg => setExportCount(Object.values(cfg).filter(v=>v?.enabled).length)).catch(()=>{}); }} />}
     </div>
   );
 }
@@ -2113,10 +2140,197 @@ function RestoreModal({ file, isEnc, onConfirm, onCancel }) {
   );
 }
 
+// ── MODAL EXPORT DISTANT ──────────────────────────────────────────────────────
+function DbExportModal({ onClose }) {
+  const { t } = useI18n();
+  const TYPES = ['sftp','s3','smb','rsync','nfs','ftp'];
+  const TYPE_LABELS = { sftp:'SFTP', s3:'S3 / S3-compatible', smb:'SMB / CIFS', rsync:'rSync', nfs:'NFS', ftp:'FTP / FTPS' };
+  const [activeTab, setActiveTab] = useState('sftp');
+  const [configs, setConfigs]     = useState({});
+  const [saving, setSaving]       = useState(false);
+  const [testing, setTesting]     = useState(false);
+  const [msg, setMsg]             = useState('');
+
+  useEffect(() => {
+    api.dbExportConfig().then(setConfigs).catch(() => {});
+  }, []);
+
+  function get(type, field, def='') { return configs[type]?.[field] ?? def; }
+  function set(type, field, val) {
+    setConfigs(prev => ({ ...prev, [type]: { ...prev[type], [field]: val } }));
+  }
+  function toggleEnabled(type) {
+    setConfigs(prev => ({ ...prev, [type]: { ...prev[type], enabled: !prev[type]?.enabled } }));
+  }
+
+  async function save() {
+    setSaving(true); setMsg('');
+    try {
+      await Promise.all(TYPES.map(type => api.dbExportSaveConfig(type, configs[type] || {})));
+      setMsg('Configuration enregistrée.');
+    } catch (e) { setMsg('Erreur : ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function test() {
+    setTesting(true); setMsg('');
+    try {
+      const result = await api.dbExportTest(activeTab, configs[activeTab] || {});
+      setMsg('✅ ' + (result.message || 'Test réussi'));
+    } catch (e) { setMsg('❌ Erreur : ' + e.message); }
+    finally { setTesting(false); }
+  }
+
+  // Formulaire par type
+  function renderForm(type) {
+    const inp = (field, label, opts={}) => (
+      <div className="form-group" style={{ margin:'0 0 10px 0' }}>
+        <label className="form-label" style={{ fontSize:11 }}>{label}</label>
+        <input className="form-control" type={opts.type||'text'} value={get(type, field)}
+          onChange={e => set(type, field, e.target.value)}
+          placeholder={opts.placeholder||''}
+          autoComplete="off" />
+      </div>
+    );
+    const sel = (field, label, options) => (
+      <div className="form-group" style={{ margin:'0 0 10px 0' }}>
+        <label className="form-label" style={{ fontSize:11 }}>{label}</label>
+        <select className="form-control" value={get(type, field, options[0].v)}
+          onChange={e => set(type, field, e.target.value)}>
+          {options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+        </select>
+      </div>
+    );
+    const retentionField = (
+      <div className="form-group" style={{ margin:'0 0 10px 0' }}>
+        <label className="form-label" style={{ fontSize:11 }}>Sauvegardes à conserver sur le serveur distant</label>
+        <select className="form-control" value={get(type, 'retention', 5)} onChange={e => set(type, 'retention', parseInt(e.target.value))}>
+          <option value={0}>{t('export.retention_unlimited') || 'Illimité'}</option>
+          {[1,2,3,5,7,10,14,21,30].map(n => <option key={n} value={n}>{n} fichier{n>1?'s':''}</option>)}
+        </select>
+      </div>
+    );
+
+    const grid2 = (left, right) => (
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+        <div>{left}</div><div>{right}</div>
+      </div>
+    );
+
+    switch (type) {
+      case 'sftp': return (<>
+        {grid2(inp('host',t('export.host') || 'Hôte / IP', {placeholder:'192.168.1.10'}), inp('port',t('export.port') || 'Port', {placeholder:'22'}))}
+        {grid2(inp('username',t('export.username') || 'Utilisateur'), sel('auth_type',t('export.auth') || 'Authentification', [{v:'password',l:t('export.password') || 'Mot de passe'},{v:'key',l:t('export.ssh_key_auth') || 'Clé privée SSH'}]))}
+        {get(type,'auth_type') === 'key'
+          ? <div className="form-group" style={{margin:'0 0 10px'}}><label className="form-label" style={{fontSize:11}}>Clé privée (contenu PEM)</label><textarea className="form-control" rows={4} value={get(type,'private_key')} onChange={e => set(type,'private_key',e.target.value)} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" style={{fontFamily:'var(--mono)',fontSize:11,resize:'vertical'}} /></div>
+          : inp('password',t('export.password') || 'Mot de passe', {type:'password'})
+        }
+        {inp('remote_path',t('export.remote_path') || 'Chemin distant', {placeholder:'/backups/nexusvault'})}
+        {retentionField}
+      </>);
+      case 's3': return (<>
+        {inp('endpoint',t('export.s3_endpoint') || 'Endpoint S3-compatible (vide = AWS)', {placeholder:'https://s3.example.com'})}
+        {grid2(inp('bucket',t('export.bucket') || 'Bucket'), inp('region',t('export.region') || 'Région', {placeholder:'us-east-1'}))}
+        {grid2(inp('access_key',t('export.access_key') || 'Access Key ID'), inp('secret_key',t('export.secret_key') || 'Secret Access Key', {type:'password'}))}
+        {inp('prefix',t('export.prefix') || 'Préfixe de clé (dossier)', {placeholder:'backups/nexusvault/'})}
+        {retentionField}
+      </>);
+      case 'smb': return (<>
+        {grid2(inp('host',t('export.host') || 'Hôte / IP', {placeholder:'192.168.1.20'}), inp('share',t('export.smb_share') || 'Share', {placeholder:'backups'}))}
+        {grid2(inp('username',t('export.smb_user') || 'Utilisateur (domaine\\user)'), inp('password',t('export.password') || 'Mot de passe', {type:'password'}))}
+        {grid2(inp('domain',t('export.smb_domain') || 'Domaine (optionnel, Synology = vide)', {placeholder:'WORKGROUP'}), inp('remote_path',t('export.smb_subdir') || 'Sous-dossier dans le share', {placeholder:'nexusvault'}))}
+        {retentionField}
+        <div style={{fontSize:11,color:'var(--muted)',marginBottom:6}}>
+          💡 Synology DSM : activez SMB dans le Panneau de configuration → Services de fichiers → SMB/AFP/NFS. Laissez le domaine vide.
+        </div>
+      </>);
+      case 'rsync': return (<>
+        {grid2(inp('host',t('export.host') || 'Hôte / IP'), inp('port',t('export.ssh_port') || 'Port SSH', {placeholder:'22'}))}
+        {inp('username',t('export.ssh_user') || 'Utilisateur SSH')}
+        {inp('ssh_key',t('export.ssh_key_path') || 'Chemin vers la clé privée SSH', {placeholder:'/root/.ssh/id_rsa'})}
+        {inp('remote_path',t('export.remote_path') || 'Chemin distant', {placeholder:'/backups/nexusvault/'})}
+        <div style={{fontSize:11,color:'var(--muted)',marginBottom:10}}>{t('export.rsync_warning') || "⚠ rsync doit être installé sur le serveur NexusVault. La rétention n'est pas gérée automatiquement via rsync."}</div>
+      </>);
+      case 'nfs': return (<>
+        {grid2(inp('host','Hôte NFS / IP'), inp('remote_path','Chemin exporté', {placeholder:'/exports/backups'}))}
+        {retentionField}
+        <div style={{fontSize:11,color:'var(--muted)',marginBottom:10}}>{t('export.nfs_warning') || '⚠ NFS nécessite des droits root pour le montage. Configurer dans fstab pour une utilisation régulière.'}</div>
+      </>);
+      case 'ftp': return (<>
+        {grid2(inp('host',t('export.host') || 'Hôte / IP'), inp('port',t('export.port') || 'Port', {placeholder:'21'}))}
+        {grid2(inp('username',t('export.username') || 'Utilisateur'), inp('password',t('export.password') || 'Mot de passe', {type:'password'}))}
+        {sel('ftps',t('export.ftp_mode') || 'Mode', [{v:false,l:t('export.ftp_plain') || 'FTP (non chiffré)'},{v:true,l:t('export.ftps') || 'FTPS (TLS implicite)'}])}
+        {inp('remote_path',t('export.ftp_dir') || 'Dossier distant', {placeholder:'/backups'})}
+        {retentionField}
+      </>);
+      default: return null;
+    }
+  }
+
+  const tabStyle = (t) => ({
+    padding:'6px 12px', cursor:'pointer', fontSize:12, fontWeight:600,
+    borderBottom: `2px solid ${activeTab===t?'var(--acc)':'transparent'}`,
+    color: activeTab===t ? 'var(--acc)' : 'var(--muted)',
+    background:'none', border:'none',
+    borderBottomWidth:2, borderBottomStyle:'solid',
+    borderBottomColor: activeTab===t ? 'var(--acc)' : 'transparent',
+    position:'relative',
+  });
+  const dotStyle = (type) => configs[type]?.enabled ? {
+    position:'absolute', top:4, right:2, width:6, height:6,
+    borderRadius:'50%', background:'var(--ok)',
+  } : {};
+
+  return (
+    <Modal title={t('export.modal_title') || 'Export distant des sauvegardes SQLite'} onClose={onClose} width="640px"
+      footer={
+        <div style={{display:'flex',justifyContent:'space-between',width:'100%',alignItems:'center'}}>
+          <button className="btn" onClick={test} disabled={testing || !configs[activeTab]?.enabled}
+            style={{color:'var(--acc)',borderColor:'var(--acc)',fontSize:12}}>
+            {testing ? t('export.testing') || 'Test…' : `${t('export.test_btn') || 'Tester'} ${TYPE_LABELS[activeTab]}`}
+          </button>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-primary" onClick={save} disabled={saving}>
+              {saving ? t('export.saving') || 'Enregistrement…' : t('export.save_all') || 'Enregistrer tout'}
+            </button>
+            <button className="btn" onClick={onClose}>Fermer</button>
+          </div>
+        </div>
+      }>
+      <div style={{fontSize:12,color:'var(--muted)',marginBottom:12,lineHeight:1.6}}>
+        {t('export.modal_desc') || 'Configurez un ou plusieurs exports distants. Le fichier'} <code>.sqlite.enc</code> {t('export.modal_desc2') || 'sera exporté automatiquement après chaque backup automatique réussi.'}
+      </div>
+      {msg && <div className={`alert alert-${msg.startsWith('❌')||msg.startsWith('Err')?'err':'ok'}`} style={{marginBottom:12,fontSize:12}}>{msg}</div>}
+
+      {/* Onglets */}
+      <div style={{display:'flex',borderBottom:'1px solid var(--brd)',marginBottom:16,gap:2,flexWrap:'wrap'}}>
+        {TYPES.map(type => (
+          <button key={type} onClick={() => setActiveTab(type)} style={tabStyle(type)}>
+            {TYPE_LABELS[type]}
+            {configs[type]?.enabled && <span style={{position:'absolute',top:4,right:2,width:6,height:6,borderRadius:'50%',background:'var(--ok)',display:'inline-block'}} />}
+          </button>
+        ))}
+      </div>
+
+      {/* Contenu de l'onglet actif */}
+      <div style={{padding:'0 2px'}}>
+        {/* Toggle activation */}
+        <label style={{display:'flex',alignItems:'center',gap:8,marginBottom:14,cursor:'pointer'}}>
+          <input type="checkbox" checked={!!configs[activeTab]?.enabled}
+            onChange={() => toggleEnabled(activeTab)}
+            style={{width:15,height:15}} />
+          <span style={{fontSize:12,fontWeight:600}}>Activer l'export {TYPE_LABELS[activeTab]}</span>
+        </label>
+        {configs[activeTab]?.enabled && renderForm(activeTab)}
+      </div>
+    </Modal>
+  );
+}
+
 function DbBackupScheduleModal({ onClose }) {
   const [cfg, setCfg]         = useState({ frequency:'daily', hour:'2', minute:'0', retention_count:'7' });
   const passwordMin = usePasswordMin();
-  const [hasPassword, setHasPassword] = useState(false); // un mdp est configuré côté serveur
+  const [hasPassword, setHasPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');    // nouveau mdp saisi (vide = garder l'ancien)
   const [saving, setSaving]   = useState(false);
   const [msg, setMsg]         = useState('');
@@ -2900,9 +3114,10 @@ function SecurityNotifTab() {
     email:    { label: 'SMTP',     color: '#ca8a04', bgColor: 'rgba(202,138,4,0.12)' },
     telegram: { label: 'Telegram', color: '#2BA5E0', bgColor: 'rgba(43,165,224,0.12)' },
     slack:    { label: 'Slack',    color: '#E01E5A', bgColor: 'rgba(224,30,90,0.12)' },
+    webhook:  { label: 'Webhook',  color: '#16a34a', bgColor: 'rgba(22,163,74,0.12)' },
   };
 
-  const channelList = Object.keys(CHAN_CONFIG).filter(k => catalog.channels?.[k]);
+  const channelList = Object.keys(CHAN_CONFIG); // toujours tous les canaux, configurés ou non
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -2937,6 +3152,16 @@ function SecurityNotifTab() {
               </svg>
               Slack {validated.slack && '✓'}
             </button>
+            {/* Webhook */}
+            <button className="btn" onClick={() => setModal('webhook')}
+              style={{ display:'flex', alignItems:'center', gap:8, borderColor:'#16a34a', color:'#16a34a', background: validated.webhook ? 'rgba(22,163,74,0.08)' : undefined }}>
+              {validated.webhook && <span style={{ color:'var(--ok)', fontSize:14 }}>●</span>}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:14,height:14}}>
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+              Webhook {validated.webhook && '✓'}
+            </button>
           </div>
         </div>
       </div>
@@ -2954,7 +3179,7 @@ function SecurityNotifTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--brd)' }}>
-              <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', fontWeight: 600, width: '100%' }}>{t('security.event') || 'Event'}</th>
+              <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', fontWeight: 600, minWidth: 220, maxWidth: 340 }}>{t('security.event') || 'Event'}</th>
               {channelList.map(ch => (
                 <th key={ch} style={{ padding: '8px 8px', textAlign: 'center', width: 56, fontSize: 10, color: CHAN_CONFIG[ch].color, fontWeight: 700, whiteSpace: 'nowrap' }}>
                   {CHAN_CONFIG[ch].label}
@@ -2966,7 +3191,7 @@ function SecurityNotifTab() {
           <tbody>
             {(() => {
               const GROUPS = [
-                { label: 'Sécurité',        icon: '🔐', keys: ['login_failed_threshold','account_locked','db_backup_created','db_backup_deleted','db_backup_downloaded','db_backup_restored','db_backup_sqlite_alert'] },
+                { label: 'Sécurité',        icon: '🔐', keys: ['login_failed_threshold','account_locked','db_backup_created','db_backup_deleted','db_backup_downloaded','db_backup_restored','db_backup_sqlite_alert','db_backup_export'] },
                 { label: 'Équipements',     icon: '🖧',  keys: ['backup_download','backup_deleted','backup_schedule_result'] },
                 { label: 'Documents',       icon: '📄', keys: ['expiration_document','document_deleted','file_deleted','retention_recap'] },
                 { label: "Suivi d'activité", icon: '📝', keys: ['preview_overdue','preview_recap','activity_deleted','activity_file_deleted'] },
@@ -3059,6 +3284,7 @@ function SecurityNotifTab() {
       {modal === 'smtp'     && <SmtpModal     onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('email')}    onReset={() => onChannelReset('email')} onOpenRecipients={() => setModal('recipients')} />}
       {modal === 'telegram' && <TelegramModal onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('telegram')} onReset={() => onChannelReset('telegram')} />}
       {modal === 'slack'    && <SlackModal    onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('slack')}    onReset={() => onChannelReset('slack')} />}
+      {modal === 'webhook'  && <WebhookModal  onClose={() => setModal(null)} onSaved={onChannelSaved} onValidated={() => onChannelValidated('webhook')}  onReset={() => onChannelReset('webhook')} />}
     </div>
   );
 }
@@ -3067,6 +3293,99 @@ function SecurityNotifTab() {
 // ── ONGLET AUTHENTIFICATION OIDC ─────────────────────────────────────────────
 
 // ── CARTE LDAP ────────────────────────────────────────────────────────────────
+function WebhookModal({ onClose, onSaved, onValidated, onReset }) {
+  const [cfg, setCfg]             = useState({ url:'', method:'POST', headers:'' });
+  const [awaitCode, setAwaitCode] = useState(false);
+  const [code, setCode]           = useState('');
+  const [saving, setSaving]       = useState(false);
+  const [testing, setTesting]     = useState(false);
+  const [msg, setMsg]             = useState('');
+  const [err, setErr]             = useState('');
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  useEffect(() => {
+    api.webhookConfig().then(d => setCfg({ url: d.url||'', method: d.method||'POST', headers: d.headers||'' })).catch(()=>{});
+  }, []);
+
+  const save = async () => {
+    setSaving(true); setMsg(''); setErr('');
+    try { await api.webhookSave(cfg); setMsg('Configuration enregistrée.'); onSaved?.(); }
+    catch(e) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const test = async () => {
+    setTesting(true); setMsg(''); setErr('');
+    try { const r = await api.webhookTest(); if (r.awaitCode) setAwaitCode(true); }
+    catch(e) { setErr(e.message); }
+    finally { setTesting(false); }
+  };
+
+  const validate = async () => {
+    try { await api.webhookValidate(code); setMsg('✓ Webhook validé !'); setAwaitCode(false); onValidated?.(); }
+    catch(e) { setErr(e.message); }
+  };
+
+  const reset = async () => {
+    setConfirmReset(false);
+    try { await api.webhookReset(); setCfg({ url:'', method:'POST', headers:'' }); setMsg(''); setErr(''); setAwaitCode(false); onReset?.(); }
+    catch(e) { setErr(e.message); }
+  };
+
+  return (
+    <Modal title="Webhook HTTP" onClose={onClose}
+      footer={
+        <div style={{display:'flex',justifyContent:'space-between',width:'100%',alignItems:'center'}}>
+          <button className="btn" onClick={() => setConfirmReset(true)} style={{color:'var(--err)',borderColor:'var(--err)',fontSize:12}}>⊘ Reset</button>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn" onClick={test} disabled={testing||!cfg.url}>{testing ? 'Test…' : 'Tester'}</button>
+            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+            <button className="btn" onClick={onClose}>Fermer</button>
+          </div>
+        </div>
+      }>
+      {msg && <div className="alert alert-ok" style={{marginBottom:12,fontSize:12}}>{msg}</div>}
+      {err && <div className="alert alert-err" style={{marginBottom:12,fontSize:12}}>{err}</div>}
+      {confirmReset && (
+        <div className="alert alert-warn" style={{marginBottom:12,fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span>Supprimer la configuration Webhook ?</span>
+          <div style={{display:'flex',gap:6}}>
+            <button className="btn btn-sm" onClick={reset} style={{color:'var(--err)',borderColor:'var(--err)'}}>Confirmer</button>
+            <button className="btn btn-sm" onClick={() => setConfirmReset(false)}>Annuler</button>
+          </div>
+        </div>
+      )}
+      <div className="form-group">
+        <label className="form-label">URL du Webhook</label>
+        <input className="form-control" type="url" value={cfg.url} onChange={e => setCfg(c=>({...c,url:e.target.value}))} placeholder="https://hooks.example.com/webhook" />
+        <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>Compatible ntfy, Gotify, Teams, Discord, Mattermost, etc.</div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Méthode HTTP</label>
+        <select className="form-control" value={cfg.method} onChange={e => setCfg(c=>({...c,method:e.target.value}))}>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+        </select>
+      </div>
+      <div className="form-group">
+        <label className="form-label">En-têtes personnalisés (JSON optionnel)</label>
+        <textarea className="form-control" rows={3} value={cfg.headers} onChange={e => setCfg(c=>({...c,headers:e.target.value}))}
+          placeholder={'{"Authorization": "Bearer token", "X-API-Key": "..."}'} style={{fontFamily:'var(--mono)',fontSize:11,resize:'vertical'}} />
+        <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>Le payload envoyé est un JSON : <code>{'{"event","subject","body","timestamp"}'}</code></div>
+      </div>
+      {awaitCode && (
+        <div className="form-group" style={{marginTop:8}}>
+          <label className="form-label">Un payload de test a été envoyé — saisissez le code reçu</label>
+          <div style={{display:'flex',gap:8}}>
+            <input className="form-control" style={{maxWidth:160}} value={code} onChange={e=>setCode(e.target.value)} placeholder="123456" />
+            <button className="btn btn-primary" onClick={validate}>Valider</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function LdapCard() {
   const { t } = useI18n();
   const [ldap, setLdap] = useState({

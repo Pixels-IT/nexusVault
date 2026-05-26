@@ -113,6 +113,12 @@ const EVENT_CATALOG = {
     description: 'Envoyée après chaque backup SQLite automatique : nom du fichier, date, taille, statut OK ou Échec.',
     options:     {},
   },
+  db_backup_export: {
+    key:         'db_backup_export',
+    label:       'Export de la base SQLite',
+    description: 'Alerte après chaque export de la base SQLite vers un serveur distant : type, fichier, taille, date, statut.',
+    options:     {},
+  },
 };
 
 module.exports.EVENT_CATALOG = EVENT_CATALOG;
@@ -126,15 +132,18 @@ function getChannelAvailability() {
     const smtpRow = db.prepare("SELECT value FROM settings WHERE key='smtp_config'").get();
     const tgRow   = db.prepare("SELECT value FROM settings WHERE key='telegram_config'").get();
     const slRow   = db.prepare("SELECT value FROM settings WHERE key='slack_config'").get();
+    const whRow   = db.prepare("SELECT value FROM settings WHERE key='webhook_config'").get();
     const smtp    = smtpRow   ? JSON.parse(smtpRow.value)   : {};
     const tg      = tgRow     ? JSON.parse(tgRow.value)     : {};
     const sl      = slRow     ? JSON.parse(slRow.value)     : {};
+    const wh      = whRow     ? JSON.parse(whRow.value)     : {};
     return {
       email:    !!(smtp.host || process.env.SMTP_HOST),
       telegram: !!(tg.bot_token || process.env.TELEGRAM_BOT_TOKEN),
       slack:    !!(sl.webhook_url || process.env.SLACK_WEBHOOK_URL),
+      webhook:  !!(wh.url),
     };
-  } catch { return { email: !!process.env.SMTP_HOST, telegram: !!(process.env.TELEGRAM_BOT_TOKEN), slack: !!process.env.SLACK_WEBHOOK_URL }; }
+  } catch { return { email: !!process.env.SMTP_HOST, telegram: !!(process.env.TELEGRAM_BOT_TOKEN), slack: !!process.env.SLACK_WEBHOOK_URL, webhook: false }; }
 }
 
 const CHANNEL_CATALOG = {
@@ -251,8 +260,35 @@ async function sendViaChannel(channel, { subject, body, bodyText }, getDb) {
       if (!resp.ok) throw new Error(`Slack HTTP ${resp.status}`);
       return {};
     }
-    default:
-      throw new Error(`Canal "${channel}" non implémenté`);
+    case 'webhook': {
+      const _wdb  = getDb();
+      const _wRow = _wdb.prepare("SELECT value FROM settings WHERE key='webhook_config'").get();
+      const _wCfg = _wRow ? JSON.parse(_wRow.value) : {};
+      const url   = _wCfg.url || '';
+      if (!url) throw new Error('Webhook non configuré');
+      const method  = (_wCfg.method || 'POST').toUpperCase();
+      const headers = { 'Content-Type': 'application/json' };
+      // En-têtes personnalisés (ex: Authorization, X-API-Key…)
+      if (_wCfg.headers) {
+        try {
+          const custom = JSON.parse(_wCfg.headers);
+          Object.assign(headers, custom);
+        } catch {}
+      }
+      const payload = {
+        event: eventKey,
+        subject,
+        body: bodyText || body,
+        timestamp: new Date().toISOString(),
+      };
+      const resp = await fetch(url, {
+        method,
+        headers,
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(`Webhook HTTP ${resp.status} ${resp.statusText}`);
+      return { url };
+    }
   }
 }
 
@@ -416,6 +452,29 @@ function buildMessage(eventKey, p) {
       };
 
     default:
+      // Templates db_backup_*
+      if (eventKey === 'db_backup_sqlite_alert') {
+        const ok   = p.status === 'OK';
+        const size = p.size >= 1048576 ? (p.size/1048576).toFixed(1)+' Mo' : p.size >= 1024 ? Math.round(p.size/1024)+' Ko' : (p.size||0)+' o';
+        return {
+          subject: `${ok?'✅':'❌'} Backup SQLite — ${p.status} — ${p.filename||'—'}`,
+          body: `<p>${ok?'✅ Backup automatique réussi.':'❌ Échec du backup automatique.'}</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b">Fichier</td><td style="padding:6px 10px"><strong>${p.filename||'—'}</strong></td></tr><tr style="background:#f8fafc"><td style="padding:6px 10px;color:#64748b">Taille</td><td style="padding:6px 10px">${size}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Date</td><td style="padding:6px 10px">${p.datetime||'—'}</td></tr><tr style="background:#f8fafc"><td style="padding:6px 10px;color:#64748b">Statut</td><td style="padding:6px 10px;font-weight:700;color:${ok?'#16a34a':'#dc2626'}">${p.status}</td></tr>${p.error?`<tr><td style="padding:6px 10px;color:#64748b">Erreur</td><td style="padding:6px 10px;color:#dc2626">${p.error}</td></tr>`:''}</table>`,
+          bodyText: `Backup SQLite — ${p.status} — ${p.filename||'—'} — ${size} — ${p.datetime||'—'}${p.error?' — '+p.error:''}`,
+        };
+      }
+      if (eventKey === 'db_backup_created') return { subject: `Backup SQLite créé — ${p.filename||''}`, body: `<p>Backup SQLite créé : <strong>${p.filename||'?'}</strong> par ${p.username||'?'} le ${p.datetime||'?'}.</p>`, bodyText: `Backup SQLite créé : ${p.filename}` };
+      if (eventKey === 'db_backup_deleted') return { subject: `Backup SQLite supprimé — ${p.filename||''}`, body: `<p>Backup SQLite supprimé : <strong>${p.filename||'?'}</strong> par ${p.username||'?'} le ${p.datetime||'?'}.</p>`, bodyText: `Backup SQLite supprimé : ${p.filename}` };
+      if (eventKey === 'db_backup_downloaded') return { subject: `Backup SQLite téléchargé — ${p.filename||''}`, body: `<p>Backup SQLite téléchargé : <strong>${p.filename||'?'}</strong> par ${p.username||'?'} le ${p.datetime||'?'}.</p>`, bodyText: `Backup SQLite téléchargé : ${p.filename}` };
+      if (eventKey === 'db_backup_restored') return { subject: `Backup SQLite restauré — ${p.filename||''}`, body: `<p>Backup SQLite restauré : <strong>${p.filename||'?'}</strong> par ${p.username||'?'} le ${p.datetime||'?'}.</p>`, bodyText: `Backup SQLite restauré : ${p.filename}` };
+      if (eventKey === 'db_backup_export') {
+        const ok   = p.status === 'OK';
+        const size = p.size >= 1048576 ? (p.size/1048576).toFixed(1)+' Mo' : p.size >= 1024 ? Math.round(p.size/1024)+' Ko' : (p.size||0)+' o';
+        return {
+          subject: `${ok?'✅':'❌'} Export SQLite ${p.type||''} — ${p.status} — ${p.filename||'—'}`,
+          body: `<p>${ok?`✅ Export distant (${p.type}) réussi.`:`❌ Échec de l'export distant (${p.type}).`}</p><table style="border-collapse:collapse;width:100%;font-size:13px"><tr><td style="padding:6px 10px;color:#64748b">Type</td><td style="padding:6px 10px"><strong>${p.type||'—'}</strong></td></tr><tr style="background:#f8fafc"><td style="padding:6px 10px;color:#64748b">Fichier</td><td style="padding:6px 10px">${p.filename||'—'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Taille</td><td style="padding:6px 10px">${size}</td></tr><tr style="background:#f8fafc"><td style="padding:6px 10px;color:#64748b">Date</td><td style="padding:6px 10px">${p.datetime||'—'}</td></tr><tr><td style="padding:6px 10px;color:#64748b">Statut</td><td style="padding:6px 10px;font-weight:700;color:${ok?'#16a34a':'#dc2626'}">${p.status}</td></tr>${p.error?`<tr><td style="padding:6px 10px;color:#64748b">Erreur</td><td style="padding:6px 10px;color:#dc2626">${p.error}</td></tr>`:''}</table>`,
+          bodyText: `Export SQLite ${p.type||''} — ${p.status} — ${p.filename||'—'} — ${size} — ${p.datetime||'—'}${p.error?' — Erreur: '+p.error:''}`,
+        };
+      }
       return { subject: `Événement NexusVault: ${eventKey}`, body: JSON.stringify(p), bodyText: JSON.stringify(p) };
   }
 }

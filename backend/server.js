@@ -12,6 +12,11 @@ const jwt = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
 const { getDb, encrypt, decrypt, audit } = require('./db');
 const { authMiddleware, requireRole, requirePerm, JWT_SECRET, JWT_ALG, getClientIp, checkWhitelist } = require('./auth');
+// Export backup deps (chargés dynamiquement pour éviter de bloquer si absent)
+let SftpClient, S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, FTPClient;
+try { SftpClient = require('ssh2-sftp-client'); } catch {}
+try { const s3m = require('@aws-sdk/client-s3'); S3Client = s3m.S3Client; PutObjectCommand = s3m.PutObjectCommand; DeleteObjectCommand = s3m.DeleteObjectCommand; ListObjectsV2Command = s3m.ListObjectsV2Command; } catch {}
+try { FTPClient = require('basic-ftp').Client; } catch {}
 
 // ── CLI : reset-password ────────────────────────────────────────────────────
 // Usage : node server.js reset-password <username>
@@ -1079,7 +1084,60 @@ app.post('/api/slack/validate', authMiddleware, requirePerm('security_access'), 
   res.status(400).json({ error: 'Code incorrect ou expiré' });
 });
 
-// ── TELEGRAM CONFIGURATION ─────────────────────────────────────────────────────
+// ── WEBHOOK CONFIGURATION ─────────────────────────────────────────────────────
+app.get('/api/webhook/config', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM settings WHERE key='webhook_config'").get();
+  if (!row) return res.json({ url: '', method: 'POST', headers: '' });
+  try {
+    const cfg = JSON.parse(row.value);
+    res.json({ url: cfg.url ? '••••' + cfg.url.slice(-12) : '', method: cfg.method || 'POST', headers: cfg.headers || '' });
+  } catch { res.json({ url: '', method: 'POST', headers: '' }); }
+});
+
+app.put('/api/webhook/config', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const { url, method, headers } = req.body;
+  const db = getDb(); const ip = getClientIp(req);
+  let finalUrl = url;
+  if (url && url.startsWith('••••')) {
+    const existing = db.prepare("SELECT value FROM settings WHERE key='webhook_config'").get();
+    if (existing) { try { finalUrl = JSON.parse(existing.value).url || ''; } catch {} }
+  }
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('webhook_config', ?)").run(JSON.stringify({ url: finalUrl || '', method: method || 'POST', headers: headers || '' }));
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'WEBHOOK_CONFIG_MODIFIÉ', category: 'admin', severity: 'info', detail: 'Webhook HTTP mis à jour', ip, success: 1 });
+  res.json({ success: true });
+});
+
+app.post('/api/webhook/test', authMiddleware, requirePerm('security_access'), async (req, res) => {
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM settings WHERE key='webhook_config'").get();
+  let cfg = {}; try { if (row) cfg = JSON.parse(row.value); } catch {}
+  const url = cfg.url || '';
+  if (!url) return res.status(400).json({ error: 'Webhook non configuré — enregistrez l\'URL avant de tester.' });
+  const headers = { 'Content-Type': 'application/json' };
+  if (cfg.headers) { try { Object.assign(headers, JSON.parse(cfg.headers)); } catch {} }
+  const code = genValidationCode('webhook');
+  try {
+    const r = await fetch(url, { method: cfg.method || 'POST', headers, body: JSON.stringify({ event: 'test', subject: 'NexusVault — Test Webhook', body: `Code de validation : ${code}`, timestamp: new Date().toISOString() }) });
+    if (r.ok) { res.json({ success: true, awaitCode: true }); }
+    else { res.status(500).json({ error: `HTTP ${r.status} ${r.statusText}` }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/webhook/validate', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const { code } = req.body;
+  if (checkValidationCode('webhook', code)) { validatedChannels.add('webhook'); return res.json({ success: true }); }
+  res.status(400).json({ error: 'Code incorrect ou expiré' });
+});
+
+app.delete('/api/webhook/config', authMiddleware, requirePerm('security_access'), (req, res) => {
+  const db = getDb(); const ip = getClientIp(req);
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('webhook_config', ?)").run(JSON.stringify({ url: '', method: 'POST', headers: '' }));
+  validatedChannels.delete('webhook');
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'WEBHOOK_RESET', category: 'admin', severity: 'info', detail: 'Webhook HTTP réinitialisé', ip, success: 1 });
+  res.json({ success: true });
+});
+
 app.get('/api/telegram/config', authMiddleware, requirePerm('security_access'), (req, res) => {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key='telegram_config'").get();
@@ -2579,9 +2637,241 @@ function initDbBackupConfig(db) {
   for (const [k, v] of Object.entries(defaults)) {
     db.prepare("INSERT OR IGNORE INTO db_backup_config (key, value) VALUES (?,?)").run(k, v);
   }
+
+  // Table de configuration des exports distants
+  db.exec(`CREATE TABLE IF NOT EXISTS db_export_config (
+    type TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    config TEXT NOT NULL DEFAULT '{}'
+  )`);
+  for (const t of ['sftp','s3','smb','rsync','nfs','ftp']) {
+    db.prepare("INSERT OR IGNORE INTO db_export_config (type, enabled, config) VALUES (?,0,'{}')").run(t);
+  }
 }
 
-// ── Chiffrement des fichiers de backup SQLite ────────────────────────────────
+// ── EXPORT DISTANT DES BACKUPS SQLite ────────────────────────────────────────
+const { execSync } = require('child_process');
+
+// Répertoire des backups SQLite (même variable que DB_BACKUP_DIR définie plus haut)
+const BACKUP_DIR_EXPORT = DB_BACKUP_DIR;
+
+async function exportViaType(type, cfg, filePath, filename) {
+  switch (type) {
+    case 'sftp': {
+      if (!SftpClient) throw new Error('Module ssh2-sftp-client non disponible');
+      const sftp = new SftpClient();
+      const connectOpts = { host: cfg.host, port: parseInt(cfg.port)||22, username: cfg.username };
+      if (cfg.auth_type === 'key') connectOpts.privateKey = cfg.private_key;
+      else connectOpts.password = cfg.password;
+      await sftp.connect(connectOpts);
+      const remotePath = (cfg.remote_path || '/').replace(/\/?$/, '/') + filename;
+      await sftp.put(filePath, remotePath);
+      // Nettoyage rétention
+      if (cfg.retention > 0) {
+        const list = await sftp.list(cfg.remote_path || '/');
+        const backups = list.filter(f => f.name.endsWith('.sqlite.enc')).sort((a,b) => a.name.localeCompare(b.name));
+        while (backups.length > cfg.retention) {
+          const old = backups.shift();
+          await sftp.delete((cfg.remote_path||'/').replace(/\/?$/,'/') + old.name).catch(()=>{});
+        }
+      }
+      await sftp.end();
+      break;
+    }
+    case 's3': {
+      if (!S3Client) throw new Error('Module @aws-sdk/client-s3 non disponible');
+      const s3 = new S3Client({ region: cfg.region || 'us-east-1',
+        credentials: { accessKeyId: cfg.access_key, secretAccessKey: cfg.secret_key },
+        ...(cfg.endpoint ? { endpoint: cfg.endpoint, forcePathStyle: true } : {})
+      });
+      const key = (cfg.prefix ? cfg.prefix.replace(/\/?$/,'/') : '') + filename;
+      await s3.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: fs.createReadStream(filePath) }));
+      // Nettoyage rétention
+      if (cfg.retention > 0) {
+        const prefix = cfg.prefix ? cfg.prefix.replace(/\/?$/,'/') : '';
+        const list = await s3.send(new ListObjectsV2Command({ Bucket: cfg.bucket, Prefix: prefix }));
+        const backups = (list.Contents||[]).filter(o => o.Key.endsWith('.sqlite.enc')).sort((a,b) => a.Key.localeCompare(b.Key));
+        while (backups.length > cfg.retention) {
+          const old = backups.shift();
+          await s3.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: old.Key })).catch(()=>{});
+        }
+      }
+      break;
+    }
+    case 'ftp': {
+      if (!FTPClient) throw new Error('Module basic-ftp non disponible');
+      const ftp = new FTPClient();
+      ftp.ftp.verbose = false;
+      await ftp.access({ host: cfg.host, port: parseInt(cfg.port)||21, user: cfg.username, password: cfg.password, secure: cfg.ftps === true || cfg.ftps === 'true' });
+      if (cfg.remote_path) await ftp.ensureDir(cfg.remote_path);
+      await ftp.uploadFrom(filePath, filename);
+      // Nettoyage rétention
+      if (cfg.retention > 0) {
+        const list = await ftp.list();
+        const backups = list.filter(f => f.name.endsWith('.sqlite.enc')).sort((a,b) => a.name.localeCompare(b.name));
+        while (backups.length > cfg.retention) {
+          await ftp.remove(backups.shift().name).catch(()=>{});
+        }
+      }
+      ftp.close();
+      break;
+    }
+    case 'rsync': {
+      // rsync via CLI — doit être installé sur le serveur
+      const dest = `${cfg.username ? cfg.username + '@' : ''}${cfg.host}:${cfg.remote_path || '/tmp/'}`;
+      const sshOpt = cfg.ssh_key ? `-e "ssh -i ${cfg.ssh_key} -o StrictHostKeyChecking=no -p ${cfg.port||22}"` : `-e "ssh -o StrictHostKeyChecking=no -p ${cfg.port||22}"`;
+      execSync(`rsync -az ${sshOpt} "${filePath}" "${dest}"`, { timeout: 60000 });
+      break;
+    }
+    case 'smb': {
+      try { execSync('which smbclient', { timeout: 5000 }); } catch {
+        throw new Error("smbclient n'est pas installé sur le serveur. Installez-le avec : apk add samba-client");
+      }
+      const { spawnSync } = require('child_process');
+      const share = `//${cfg.host}/${cfg.share}`;
+      const remotePath = (cfg.remote_path || '').replace(/\\/g, '/').replace(/^\//, '');
+      const putCmd = remotePath
+        ? `mkdir "${remotePath}" 2>/dev/null; put "${filePath}" "${remotePath}/${filename}"`
+        : `put "${filePath}" "${filename}"`;
+      // Utiliser spawnSync avec tableau d'args pour éviter toute interprétation shell
+      // Le mot de passe peut contenir $, @, !, espaces, etc.
+      const args = [share, '-U', cfg.username, '-c', putCmd];
+      if (cfg.domain) { args.push('-W', cfg.domain); }
+      const env = { ...process.env };
+      if (cfg.password) {
+        // Passer via variable d'env PASSWD — jamais dans la ligne de commande
+        env.PASSWD = cfg.password;
+      } else {
+        args.push('-N'); // pas de mot de passe
+      }
+      const result = spawnSync('smbclient', args, { timeout: 60000, env, encoding: 'utf8' });
+      if (result.status !== 0) {
+        const msg = (result.stderr || result.stdout || '').toString();
+        if (msg.includes('NT_STATUS_LOGON_FAILURE')) throw new Error(`Identifiants SMB incorrects — vérifiez le nom d'utilisateur et le mot de passe`);
+        if (msg.includes('NT_STATUS_ACCESS_DENIED')) throw new Error(`Accès refusé au share "${cfg.share}" — vérifiez les droits de l'utilisateur`);
+        if (msg.includes('NT_STATUS_BAD_NETWORK_NAME')) throw new Error(`Share introuvable : "${cfg.share}" — vérifiez le nom exact du partage`);
+        if (msg.includes('NT_STATUS_CONNECTION_REFUSED') || msg.includes('Connection refused')) throw new Error(`Impossible de joindre ${cfg.host} — vérifiez l'IP et que SMB est activé sur le NAS`);
+        if (msg.includes('timed out') || msg.includes('ETIMEDOUT')) throw new Error(`Timeout : ${cfg.host} ne répond pas`);
+        if (result.error) throw new Error(result.error.message);
+        throw new Error(msg.slice(0, 400) || `smbclient a retourné le code ${result.status}`);
+      }
+      break;
+    }
+    case 'nfs': {
+      // Mount + copy — nécessite des droits root ou fstab
+      const mountPoint = `/tmp/nfs_export_${Date.now()}`;
+      fs.mkdirSync(mountPoint, { recursive: true });
+      try {
+        execSync(`mount -t nfs "${cfg.host}:${cfg.remote_path}" "${mountPoint}"`, { timeout: 30000 });
+        fs.copyFileSync(filePath, path.join(mountPoint, filename));
+        // Nettoyage rétention
+        if (cfg.retention > 0) {
+          const files = fs.readdirSync(mountPoint).filter(f => f.endsWith('.sqlite.enc')).sort();
+          while (files.length > cfg.retention) fs.unlinkSync(path.join(mountPoint, files.shift()));
+        }
+      } finally {
+        execSync(`umount "${mountPoint}"`, { timeout: 10000 }).catch(()=>{});
+        fs.rmdirSync(mountPoint);
+      }
+      break;
+    }
+    default:
+      throw new Error(`Type d'export inconnu : ${type}`);
+  }
+}
+
+async function runDbExports(db, filename) {
+  const filePath = path.join(BACKUP_DIR_EXPORT, filename);
+  if (!fs.existsSync(filePath)) { logger.warn(`[DB-EXPORT] Fichier introuvable : ${filePath}`); return; }
+  const rows = db.prepare("SELECT * FROM db_export_config WHERE enabled=1").all();
+  for (const row of rows) {
+    let cfg = {};
+    try { cfg = JSON.parse(row.config || '{}'); } catch {}
+    const start = Date.now();
+    try {
+      await exportViaType(row.type, cfg, filePath, filename);
+      const elapsed = Date.now() - start;
+      logger.info(`[DB-EXPORT] ${row.type.toUpperCase()} OK — ${filename} en ${elapsed}ms`);
+      audit(db, { action: 'DB_EXPORT_OK', category: 'sécurité', severity: 'info', detail: `${row.type.toUpperCase()} — ${filename} (${Math.round(elapsed/1000)}s)`, success: 1 });
+      const stat = fs.statSync(filePath);
+      dispatch('db_backup_export', { type: row.type.toUpperCase(), filename, size: stat.size, datetime: nowLocal(), status: 'OK' }, () => db).catch(()=>{});
+    } catch (e) {
+      logger.error(`[DB-EXPORT] ${row.type.toUpperCase()} ÉCHEC — ${e.message}`);
+      audit(db, { action: 'DB_EXPORT_ECHEC', category: 'sécurité', severity: 'error', detail: `${row.type.toUpperCase()} — ${e.message}`, success: 0 });
+      dispatch('db_backup_export', { type: row.type.toUpperCase(), filename, size: 0, datetime: nowLocal(), status: 'Échec', error: e.message }, () => db).catch(()=>{});
+    }
+  }
+}
+
+// ── API export config ─────────────────────────────────────────────────────────
+app.get('/api/db-export-config', authMiddleware, requirePerm('site_backup_access'), (req, res) => {
+  const db = getDb();
+  const rows = db.prepare("SELECT type, enabled, config FROM db_export_config").all();
+  const result = {};
+  rows.forEach(r => {
+    let cfg = {}; try { cfg = JSON.parse(r.config||'{}'); } catch {}
+    // Masquer les mots de passe
+    const safe = { ...cfg };
+    if (safe.password) safe.password = safe.password ? '••••••••' : '';
+    if (safe.secret_key) safe.secret_key = safe.secret_key ? '••••••••' : '';
+    if (safe.private_key) safe.private_key = safe.private_key ? '[clé configurée]' : '';
+    result[r.type] = { enabled: !!r.enabled, ...safe };
+  });
+  res.json(result);
+});
+
+app.put('/api/db-export-config/:type', authMiddleware, requireRole('admin'), (req, res) => {
+  const { type } = req.params;
+  const allowed = ['sftp','s3','smb','rsync','nfs','ftp'];
+  if (!allowed.includes(type)) return res.status(400).json({ error: 'Type inconnu' });
+  const db = getDb();
+  const { enabled, ...cfg } = req.body;
+  // Si les champs masqués n'ont pas changé, conserver les valeurs existantes
+  const existing = db.prepare("SELECT config FROM db_export_config WHERE type=?").get(type);
+  let prev = {}; try { prev = JSON.parse(existing?.config || '{}'); } catch {}
+  if (cfg.password === '••••••••') cfg.password = prev.password || '';
+  if (cfg.secret_key === '••••••••') cfg.secret_key = prev.secret_key || '';
+  if (cfg.private_key === '[clé configurée]') cfg.private_key = prev.private_key || '';
+  db.prepare("UPDATE db_export_config SET enabled=?, config=? WHERE type=?").run(enabled ? 1 : 0, JSON.stringify(cfg), type);
+  audit(db, { userId: req.user.id, username: req.user.username, action: 'DB_EXPORT_CONFIG', category: 'sécurité', severity: 'info', detail: `Config export ${type.toUpperCase()} mise à jour`, ip: getClientIp(req), success: 1 });
+  res.json({ ok: true });
+});
+
+app.post('/api/db-export/test/:type', authMiddleware, requireRole('admin'), async (req, res) => {
+  const { type } = req.params;
+  const db = getDb();
+  let testFile, testName;
+  try {
+    if (!fs.existsSync(BACKUP_DIR_EXPORT)) {
+      return res.status(404).json({ error: `Aucun backup disponible (répertoire ${BACKUP_DIR_EXPORT} introuvable). Effectuez d'abord une sauvegarde manuelle.` });
+    }
+    const files = fs.readdirSync(BACKUP_DIR_EXPORT)
+      .filter(f => f.endsWith('.sqlite.enc') || f.endsWith('.sqlite'))
+      .sort();
+    if (!files.length) {
+      return res.status(404).json({ error: `Aucun fichier de backup dans ${BACKUP_DIR_EXPORT}. Effectuez d'abord une sauvegarde manuelle.` });
+    }
+    testName = files[files.length - 1];
+    testFile = path.join(BACKUP_DIR_EXPORT, testName);
+  } catch (e) {
+    return res.status(500).json({ error: `Répertoire de backup inaccessible (${BACKUP_DIR_EXPORT}) : ${e.message}` });
+  }
+  const { enabled, ...cfg } = req.body;
+  const existing = db.prepare("SELECT config FROM db_export_config WHERE type=?").get(type);
+  let prev = {}; try { prev = JSON.parse(existing?.config || '{}'); } catch {}
+  if (cfg.password === '••••••••') cfg.password = prev.password || '';
+  if (cfg.secret_key === '••••••••') cfg.secret_key = prev.secret_key || '';
+  logger.info(`[DB-EXPORT TEST] ${type.toUpperCase()} — test avec ${testName}`);
+  try {
+    await exportViaType(type, cfg, testFile, testName);
+    res.json({ ok: true, message: `Export ${type.toUpperCase()} réussi — ${testName}` });
+  } catch (e) {
+    logger.error(`[DB-EXPORT TEST] ${type.toUpperCase()} ÉCHEC — ${e.message}`);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 // AES-256-GCM + scrypt pour la dérivation du mot de passe. Même approche que
 // le chiffrement des données en base, mais avec un mot de passe utilisateur.
 // Format du fichier chiffré : magic(4) + scrypt_salt(32) + iv(12) + tag(16) + data
@@ -2841,6 +3131,8 @@ function scheduleDbBackup(db) {
           filename: r.filename, size: r.size, datetime: cronNow,
           encrypted: r.encrypted, status: 'OK',
         }, getDb).catch(() => {});
+        // Lancer les exports distants de façon asynchrone
+        runDbExports(getDb(), r.filename).catch(e => logger.error('[DB-EXPORT] Erreur globale :', e.message));
       } catch (e) {
         logger.error('[DB-BACKUP] Échec du backup automatique :', e.message);
         dispatch('db_backup_sqlite_alert', {

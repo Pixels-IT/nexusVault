@@ -10,17 +10,20 @@
     "audit": "npm audit --audit-level=moderate"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "@aws-sdk/client-s3": "^3.1053.0",
+    "basic-ftp": "^6.0.1",
     "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.1.0",
-    "cors": "^2.8.5",
-    "helmet": "^7.1.0",
-    "dotenv": "^16.4.1",
-    "better-sqlite3": "^11.10.0",
-    "ssh2": "^1.15.0",
     "nodemailer": "8.0.7",
     "otplib": "12.0.1",
-    "qrcode": "1.5.4"
+    "qrcode": "1.5.4",
+    "ssh2": "^1.15.0",
+    "ssh2-sftp-client": "^12.1.1"
   }
 }
